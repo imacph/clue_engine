@@ -1,8 +1,7 @@
 import random
 from dataclasses import dataclass
 
-from clue_engine.cards import CARDS, CARDS_BY_ID
-
+from .cards import CARDS, CARDS_BY_ID
 from .models import CardType, Combination
 
 
@@ -13,6 +12,8 @@ class GameState:
     current_player: int
 
 def deal(rng: random.Random, num_players: int) -> GameState:
+    if num_players < 2:
+        raise ValueError("a game requires at least two players")
     solution = Combination(
         rng.choice([c.id for c in CARDS[CardType.SUSPECT]]),
         rng.choice([c.id for c in CARDS[CardType.WEAPON]]),

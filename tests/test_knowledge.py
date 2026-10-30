@@ -131,6 +131,27 @@ def test_response_before_any_suggestion_is_rejected():
         knowledge_for(make_view(0, {1}, pass_event(1)), NUM_PLAYERS)
 
 
+def test_wrong_accusation_excludes_last_unknown_envelope_card():
+    accusation = Combination(0, 6, 12)
+    events = (
+        suggest_event(0, Combination(0, 6, 13)),
+        pass_event(1), pass_event(2), pass_event(3),
+        Event(EventKind.END_TURN, 0),
+        Event(EventKind.ACCUSE, 1, combo=accusation),
+        Event(EventKind.END_TURN, 1),
+    )
+    knowledge = knowledge_for(make_view(0, {1, 13}, *events), NUM_PLAYERS)
+    assert knowledge.mark_of(knowledge.envelope, 0) is Mark.HELD
+    assert knowledge.mark_of(knowledge.envelope, 6) is Mark.HELD
+    assert knowledge.mark_of(knowledge.envelope, 12) is Mark.NOT_HELD
+
+
+def test_accusation_without_elimination_does_not_imply_it_was_wrong():
+    accusation = Event(EventKind.ACCUSE, 1, combo=Combination(0, 6, 12))
+    knowledge = knowledge_for(make_view(0, {1}, accusation), NUM_PLAYERS)
+    assert knowledge.mark_of(knowledge.envelope, 12) is Mark.UNKNOWN
+
+
 def truth(state: GameState, holder: int, card_id: int) -> bool:
     if holder == len(state.player_hands):
         return card_id in {state.solution.suspect_id, state.solution.weapon_id, state.solution.room_id}

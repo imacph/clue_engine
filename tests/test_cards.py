@@ -96,3 +96,20 @@ def test_every_non_solution_card_dealt_exactly_once():
 def test_hand_sizes_are_balanced(num_players, expected_sizes):
     state = deal_with_seed(42, num_players)
     assert sorted((len(h) for h in state.player_hands), reverse=True) == expected_sizes
+
+
+@pytest.mark.parametrize("num_players", [-1, 0, 1])
+def test_deal_rejects_fewer_than_two_players(num_players):
+    rng = random.Random(42)
+    original_state = rng.getstate()
+    with pytest.raises(ValueError, match="at least two"):
+        deal(rng, num_players)
+    assert rng.getstate() == original_state
+
+
+@pytest.mark.parametrize("num_players", range(2, 7))
+def test_deal_partitions_the_deck_for_each_player_count(num_players):
+    state = deal_with_seed(42, num_players)
+    dealt = [card for hand in state.player_hands for card in hand]
+    assert sorted(dealt) == sorted(set(CARDS_BY_ID) - solution_ids(state))
+    assert max(map(len, state.player_hands)) - min(map(len, state.player_hands)) <= 1

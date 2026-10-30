@@ -56,7 +56,6 @@ def pending(log: tuple[Event, ...], num_players: int) -> Pending | None:
     """Return the next seat that must refute or pass, or None if no response is due.
 
     None means no suggestion has been made, or it was refuted or passed by everyone.
-    Accusations are not handled yet.
     """
     last_suggest = last_suggest_index(log)
     if last_suggest is None:

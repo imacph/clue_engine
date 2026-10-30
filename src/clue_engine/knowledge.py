@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from .cards import CARDS, CARDS_BY_ID
@@ -29,6 +29,7 @@ class Knowledge:
     num_players: int
     marks: list[list[Mark]]
     clauses: list[Clause]
+    wrong_accusations: list[frozenset[int]] = field(default_factory=list)
 
     @property
     def envelope(self) -> int:
@@ -49,7 +50,7 @@ def knowledge_for(view: PlayerView, num_players: int) -> Knowledge:
         _set(knowledge, view.player, card_id, mark)
 
     suggested: frozenset[int] | None = None
-    for event in view.events:
+    for index, event in enumerate(view.events):
         match event.kind:
             case EventKind.SUGGEST:
                 suggested = _suggested_cards(event)
@@ -62,6 +63,17 @@ def knowledge_for(view: PlayerView, num_players: int) -> Knowledge:
                 if event.card_id is None:
                     raise ValueError("SHOW event without a card")
                 _set(knowledge, event.actor, event.card_id, Mark.HELD)
+            case EventKind.ACCUSE:
+                if index + 1 < len(view.events):
+                    next_event = view.events[index + 1]
+                    if next_event.kind is EventKind.END_TURN and next_event.actor == event.actor:
+                        if event.combo is None:
+                            raise ValueError("ACCUSE event without a combination")
+                        knowledge.wrong_accusations.append(frozenset({
+                            event.combo.suspect_id,
+                            event.combo.weapon_id,
+                            event.combo.room_id,
+                        }))
 
     _propagate(knowledge)
     return knowledge
@@ -121,6 +133,8 @@ def _propagate(knowledge: Knowledge) -> None:
             changed |= _settle_envelope_category(knowledge, [card.id for card in cards])
         for clause in knowledge.clauses:
             changed |= _settle_clause(knowledge, clause)
+        for cards in knowledge.wrong_accusations:
+            changed |= _settle_wrong_accusation(knowledge, cards)
 
 
 def _settle_card(knowledge: Knowledge, card_id: int) -> bool:
@@ -174,4 +188,16 @@ def _settle_clause(knowledge: Knowledge, clause: Clause) -> bool:
         )
     if len(unknown) == 1:
         return _set(knowledge, clause.holder, unknown[0], Mark.HELD)
+    return False
+
+
+def _settle_wrong_accusation(knowledge: Knowledge, cards: frozenset[int]) -> bool:
+    row = knowledge.marks[knowledge.envelope]
+    if any(row[card_id] is Mark.NOT_HELD for card_id in cards):
+        return False
+    unknown = [card_id for card_id in cards if row[card_id] is Mark.UNKNOWN]
+    if not unknown:
+        raise InconsistentKnowledgeError("a wrong accusation matches the known solution")
+    if len(unknown) == 1:
+        return _set(knowledge, knowledge.envelope, unknown[0], Mark.NOT_HELD)
     return False

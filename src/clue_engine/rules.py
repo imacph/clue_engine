@@ -3,9 +3,20 @@ from .models import Action, Reveal
 from .observations import Event, EventKind, last_suggest_index, pending
 from .state import GameState
 
+_TURN_START_ACTIONS = (*SUGGESTIONS, *ACCUSES, *ENDTURNS)
+_AFTER_SUGGESTION_ACTIONS = (*ACCUSES, *ENDTURNS)
+
+
+def winner(state: GameState, log: tuple[Event, ...]) -> int | None:
+    return next(
+        (e.actor for e in log if e.kind is EventKind.ACCUSE and e.combo == state.solution),
+        None,
+    )
+
 
 def is_over(state: GameState, log: tuple[Event, ...]) -> bool:
-    return any(e.kind is EventKind.ACCUSE and e.combo == state.solution for e in log)
+    """The game ends on a correct accusation or once every player is eliminated."""
+    return winner(state, log) is not None or len(eliminated(state, log)) == len(state.player_hands)
 
 
 def eliminated(state: GameState, log: tuple[Event, ...]) -> frozenset[int]:
@@ -27,8 +38,8 @@ def legal_actions(state: GameState, log: tuple[Event, ...], player: int) -> tupl
     if player in eliminated(state, log):
         return ENDTURNS
     if _suggested_this_turn(log):
-        return (*ACCUSES, *ENDTURNS)
-    return (*SUGGESTIONS, *ACCUSES, *ENDTURNS)
+        return _AFTER_SUGGESTION_ACTIONS
+    return _TURN_START_ACTIONS
 
 
 def _response_actions(state: GameState, log: tuple[Event, ...], player: int) -> tuple[Action, ...]:
