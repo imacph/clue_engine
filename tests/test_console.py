@@ -63,6 +63,7 @@ def test_spectator_sees_public_events_not_private_card(step_mode):
     assert output.count("Player 1 refuted") == 1
     assert "showed Dagger" not in output
     assert "Player 0 wins" in output
+    assert "Player 0 completed turns: 1." in output
 
 
 def test_play_shows_own_hand_knowledge_and_private_reveal():
@@ -214,6 +215,32 @@ def test_step_mode_can_show_history_and_exit_without_advancing():
     assert result == 0
     assert "No events yet." in output
     assert engine.log == ()
+
+
+def test_spectator_can_view_individual_and_all_knowledge():
+    result, output = run_game(
+        make_engine(), scripted_policies(), "knowledge 1\nknowledge\nquit\n", step_mode=True
+    )
+    assert result == 0
+    assert output.count("Player 1 knowledge:") == 2
+    assert "Player 0 knowledge:" in output
+    assert "Player 2 knowledge:" in output
+    assert "Player 3 knowledge:" in output
+    assert "Player 0 completed turns: 0" in output
+
+
+def test_knowledge_commands_reject_invalid_or_other_player_views():
+    result, output = run_game(
+        make_engine(), scripted_policies(), "knowledge -1\nknowledge nope\nquit\n", step_mode=True
+    )
+    assert result == 0
+    assert output.count("Invalid player.") == 2
+    result, output = run_game(
+        make_engine(), scripted_policies(), "knowledge 1\nquit\n", human_player=0
+    )
+    assert result == 0
+    assert "only your own knowledge is available" in output
+    assert "Player 1 knowledge:" not in output
 
 
 def test_console_module_runs_as_a_public_spectator():

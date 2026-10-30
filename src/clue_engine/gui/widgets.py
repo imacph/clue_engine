@@ -17,7 +17,13 @@ from ..models import (
     Reveal,
     Suggest,
 )
-from ..presentation import format_debug_information, format_event, format_hand
+from ..observations import PlayerView
+from ..presentation import (
+    format_clauses,
+    format_debug_information,
+    format_event,
+    format_hand,
+)
 from ..session import GameSession, SessionSnapshot
 
 
@@ -36,6 +42,8 @@ class GameFrame(ttk.Frame):
         self.scheduled: str | None = None
         self._event_count = 0
         self.status_text = tk.StringVar(master=self)
+        self.turn_text = tk.StringVar(master=self)
+        self.hand_title = tk.StringVar(master=self)
         self.hand_text = tk.StringVar(master=self)
         self.debug_text = tk.StringVar(master=self)
         self._build(on_setup)
@@ -51,12 +59,13 @@ class GameFrame(ttk.Frame):
         top.grid(row=0, column=0, sticky="ew")
         top.columnconfigure(0, weight=1)
         ttk.Label(top, textvariable=self.status_text).grid(row=0, column=0, sticky="w")
+        ttk.Label(top, textvariable=self.turn_text).grid(row=0, column=1, padx=4)
         self.pause_button = ttk.Button(top, command=self.toggle_pause)
-        self.pause_button.grid(row=0, column=1, padx=4)
+        self.pause_button.grid(row=0, column=2, padx=4)
         self.next_button = ttk.Button(top, text="Next action", command=self.next_action)
-        self.next_button.grid(row=0, column=2, padx=4)
+        self.next_button.grid(row=0, column=3, padx=4)
         if on_setup is not None:
-            ttk.Button(top, text="New game", command=on_setup).grid(row=0, column=3, padx=4)
+            ttk.Button(top, text="New game", command=on_setup).grid(row=0, column=4, padx=4)
 
         debug = ttk.Label(self, textvariable=self.debug_text, foreground="red", justify="left")
         debug.grid(row=1, column=0, sticky="w", pady=4)
@@ -71,7 +80,7 @@ class GameFrame(ttk.Frame):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
 
-        ttk.Label(left, text="Your hand", font=("TkDefaultFont", 10, "bold")).grid(
+        ttk.Label(left, textvariable=self.hand_title, font=("TkDefaultFont", 10, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(left, textvariable=self.hand_text, wraplength=420, justify="left").grid(
@@ -116,11 +125,36 @@ class GameFrame(ttk.Frame):
 
         notebook_frame = ttk.LabelFrame(self, text="Detective notebook (+ held, - not held, ? unknown)")
         notebook_frame.grid(row=3, column=0, sticky="nsew")
-        notebook_frame.rowconfigure(0, weight=1)
+        notebook_frame.rowconfigure(1, weight=1)
         notebook_frame.columnconfigure(0, weight=1)
-        num_players = self.session.snapshot().num_players
+        snapshot = self.session.snapshot()
+        num_players = snapshot.num_players
+        selector = ttk.Frame(notebook_frame)
+        selector.grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=4)
+        ttk.Label(selector, text="Knowledge of:").pack(side="left")
+        players = (
+            range(num_players) if snapshot.human_player is None else (snapshot.human_player,)
+        )
+        self.knowledge_player_choice = ttk.Combobox(
+            selector, values=[f"Player {player}" for player in players], width=12,
+            state="readonly" if snapshot.human_player is None else "disabled",
+        )
+        self.knowledge_player_choice.current(0)
+        self.knowledge_player_choice.pack(side="left", padx=5)
+        self.knowledge_player_choice.bind("<<ComboboxSelected>>", self._knowledge_selected)
+
+        notebook_panels = ttk.Panedwindow(notebook_frame, orient="horizontal")
+        notebook_panels.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        matrix_frame = ttk.Frame(notebook_panels)
+        clauses_frame = ttk.LabelFrame(notebook_panels, text="Clauses")
+        notebook_panels.add(matrix_frame, weight=3)
+        notebook_panels.add(clauses_frame, weight=2)
+        matrix_frame.rowconfigure(0, weight=1)
+        matrix_frame.columnconfigure(0, weight=1)
+        clauses_frame.rowconfigure(0, weight=1)
+        clauses_frame.columnconfigure(0, weight=1)
         columns = ("card", *(f"p{i}" for i in range(num_players)), "envelope")
-        self.notebook = ttk.Treeview(notebook_frame, columns=columns, show="headings", height=8)
+        self.notebook = ttk.Treeview(matrix_frame, columns=columns, show="headings", height=8)
         self.notebook.heading("card", text="Card")
         self.notebook.column("card", width=150, anchor="w")
         for i in range(num_players):
@@ -129,15 +163,20 @@ class GameFrame(ttk.Frame):
         self.notebook.heading("envelope", text="Envelope")
         self.notebook.column("envelope", width=85, anchor="center")
         self.notebook.grid(row=0, column=0, sticky="nsew")
-        notebook_scroll = ttk.Scrollbar(notebook_frame, orient="vertical", command=self.notebook.yview)
+        notebook_scroll = ttk.Scrollbar(matrix_frame, orient="vertical", command=self.notebook.yview)
         notebook_scroll.grid(row=0, column=1, sticky="ns")
         horizontal_scroll = ttk.Scrollbar(
-            notebook_frame, orient="horizontal", command=self.notebook.xview
+            matrix_frame, orient="horizontal", command=self.notebook.xview
         )
         horizontal_scroll.grid(row=1, column=0, sticky="ew")
         self.notebook.configure(
             yscrollcommand=notebook_scroll.set, xscrollcommand=horizontal_scroll.set
         )
+        self.clauses = tk.Text(clauses_frame, height=8, width=36, wrap="word", state="disabled")
+        self.clauses.grid(row=0, column=0, sticky="nsew")
+        clause_scroll = ttk.Scrollbar(clauses_frame, orient="vertical", command=self.clauses.yview)
+        clause_scroll.grid(row=0, column=1, sticky="ns")
+        self.clauses.configure(yscrollcommand=clause_scroll.set)
 
     @staticmethod
     def _set_enabled(widget: ttk.Widget, enabled: bool) -> None:
@@ -155,16 +194,20 @@ class GameFrame(ttk.Frame):
         else:
             status = f"Player {snapshot.to_move} to act. Actions: {snapshot.steps}"
         self.status_text.set(status)
+        self.turn_text.set(f"Player 0 turns: {snapshot.player0_turns}")
         if snapshot.view is None:
-            self.hand_text.set("Spectator mode: hands and notebook are private.")
+            view = self.session.spectator_view(self.knowledge_player_choice.current())
+            self.hand_title.set(f"Player {view.player}'s hand (spectator)")
         else:
-            self.hand_text.set(format_hand(snapshot.view.own_hand))
+            view = snapshot.view
+            self.hand_title.set("Your hand")
+        self.hand_text.set(format_hand(view.own_hand))
         if snapshot.debug_info is not None:
             self.debug_text.set(format_debug_information(
                 snapshot.debug_info.solution, snapshot.debug_info.hands
             ))
         self._refresh_history(snapshot)
-        self._refresh_notebook(snapshot)
+        self._refresh_notebook(snapshot, view)
         self._refresh_actions(snapshot)
 
     def _refresh_history(self, snapshot: SessionSnapshot) -> None:
@@ -176,10 +219,11 @@ class GameFrame(ttk.Frame):
         self.history.see("end")
         self.history.configure(state="disabled")
 
-    def _refresh_notebook(self, snapshot: SessionSnapshot) -> None:
-        if snapshot.view is None:
-            return
-        knowledge = knowledge_for(snapshot.view, snapshot.num_players)
+    def _knowledge_selected(self, _event: tk.Event) -> None:
+        self._refresh()
+
+    def _refresh_notebook(self, snapshot: SessionSnapshot, view: PlayerView) -> None:
+        knowledge = knowledge_for(view, snapshot.num_players)
         symbols = {Mark.UNKNOWN: "?", Mark.HELD: "+", Mark.NOT_HELD: "-"}
         for cards in CARDS.values():
             for card in cards:
@@ -192,6 +236,10 @@ class GameFrame(ttk.Frame):
                     self.notebook.item(item_id, values=values)
                 else:
                     self.notebook.insert("", "end", iid=item_id, values=values)
+        self.clauses.configure(state="normal")
+        self.clauses.delete("1.0", "end")
+        self.clauses.insert("1.0", format_clauses(knowledge))
+        self.clauses.configure(state="disabled")
 
     def _refresh_actions(self, snapshot: SessionSnapshot) -> None:
         legal = snapshot.legal_actions

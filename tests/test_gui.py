@@ -8,7 +8,7 @@ tk = pytest.importorskip("tkinter")
 from clue_engine.engine import Engine
 from clue_engine.gui.app import GuiApp
 from clue_engine.gui.widgets import GameFrame
-from clue_engine.models import Accuse, Combination, Pass, Reveal, Suggest
+from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.session import GameSession
 from clue_engine.state import GameState
 
@@ -90,8 +90,54 @@ def test_spectator_step_filters_private_information_and_reports_winner(root):
     assert "Player 1 refuted" in history
     assert "showed Dagger" not in history
     assert "Player 0 wins" in frame.status_text.get()
-    assert not frame.notebook.get_children()
+    assert len(frame.notebook.get_children()) == 21
     assert str(frame.next_button["state"]) == "disabled"
+
+
+def test_spectator_selects_each_players_knowledge_and_sees_clauses(root):
+    policies = [ScriptedPolicy(Suggest(SUGGESTION), EndTurn()), ScriptedPolicy(Reveal(7)),
+                ScriptedPolicy(), ScriptedPolicy()]
+    frame = GameFrame(root, GameSession(make_engine(), policies), paused=True)
+    frame.pack()
+    assert len(frame.notebook.get_children()) == 21
+    assert frame.knowledge_player_choice["values"] == ("Player 0", "Player 1", "Player 2", "Player 3")
+    frame.next_button.invoke()
+    frame.next_button.invoke()
+    frame.knowledge_player_choice.current(2)
+    frame.knowledge_player_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    clause_text = frame.clauses.get("1.0", "end")
+    assert "Player 1 holds at least one of" in clause_text
+    assert "unresolved" in clause_text
+    assert "showed Dagger" not in frame.history.get("1.0", "end")
+    assert frame.notebook.item("13")["values"][3] == "+"
+    frame.next_button.invoke()
+    assert frame.knowledge_player_choice.current() == 2
+    assert "Conservatory" in frame.hand_text.get()
+    assert "1" in frame.turn_text.get()
+    frame.knowledge_player_choice.current(0)
+    frame.knowledge_player_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    assert "satisfied" in frame.clauses.get("1.0", "end")
+    assert frame.notebook.item("1")["values"][1] == "+"
+
+
+def test_player_cannot_switch_to_another_players_knowledge(root):
+    frame = GameFrame(
+        root, GameSession(make_engine(), [ScriptedPolicy()] * 4, human_player=0), paused=True
+    )
+    frame.pack()
+    assert str(frame.knowledge_player_choice["state"]) == "disabled"
+    assert frame.knowledge_player_choice["values"] == ("Player 0",)
+
+
+def test_gui_displays_player_zero_completed_turns(root):
+    engine = make_engine()
+    frame = GameFrame(root, GameSession(engine, [ScriptedPolicy()] * 4, human_player=0), paused=True)
+    frame.pack()
+    assert "0" in frame.turn_text.get()
+    frame.end_button.invoke()
+    assert "1" in frame.turn_text.get()
 
 
 def test_debug_mode_displays_hidden_information(root):
@@ -113,6 +159,18 @@ def test_setup_starts_play_and_can_return_to_setup(root):
     app.show_setup()
     root.update()
     assert app.game is None
+
+
+def test_setup_starts_spectator_with_knowledge_selector(root):
+    app = GuiApp(root)
+    app.mode.set("spectate")
+    app.progress.set("step")
+    app.start()
+    assert app.game is not None
+    assert app.game.session.snapshot().human_player is None
+    assert app.game.session.snapshot().debug_info is None
+    assert str(app.game.knowledge_player_choice["state"]) == "readonly"
+    assert len(app.game.knowledge_player_choice["values"]) == 4
 
 
 def test_setup_validates_input_and_confirms_debug(root, monkeypatch):

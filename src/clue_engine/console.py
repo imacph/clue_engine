@@ -92,20 +92,44 @@ class ConsoleGame:
             else:
                 self._write("No events yet.")
             return True
-        if command in {"hand", "knowledge"}:
+        if command == "hand":
             if self.human_player is None:
-                self._write("Hand and knowledge are available only in play mode.")
+                self._write("The hand command is available only in play mode.")
             else:
                 snapshot = self.session.snapshot()
                 view = snapshot.view
                 assert view is not None
-                if command == "hand":
-                    self._write(f"Your hand: {format_hand(view.own_hand)}")
+                self._write(f"Your hand: {format_hand(view.own_hand)}")
+            return True
+        parts = command.split()
+        if parts and parts[0] == "knowledge":
+            snapshot = self.session.snapshot()
+            if self.human_player is not None:
+                if len(parts) != 1:
+                    self._write("In play mode, only your own knowledge is available.")
                 else:
+                    assert snapshot.view is not None
+                    self._write(format_knowledge(snapshot.view, snapshot.num_players))
+            elif len(parts) == 1:
+                for player in range(snapshot.num_players):
+                    self._write(f"Player {player} knowledge:")
+                    self._write(format_knowledge(
+                        self.session.spectator_view(player), snapshot.num_players
+                    ))
+            elif len(parts) == 2:
+                try:
+                    player = int(parts[1])
+                    view = self.session.spectator_view(player)
+                except ValueError:
+                    self._write("Invalid player. Use knowledge followed by a valid player number.")
+                else:
+                    self._write(f"Player {player} knowledge:")
                     self._write(format_knowledge(view, snapshot.num_players))
+            else:
+                self._write("Use knowledge or knowledge followed by a player number.")
             return True
         if command == "help":
-            self._write("Commands: hand, knowledge, history, help, quit.")
+            self._write("Commands: hand, knowledge [player in spectator mode], history, help, quit.")
             return True
         return False
 
@@ -187,11 +211,12 @@ class ConsoleGame:
                 self._write(f"You are Player {self.human_player}.")
                 self._write(f"Your hand: {format_hand(snapshot.view.own_hand)}")
             else:
-                self._write("Spectator mode.")
+                self._write("Spectator mode. Player knowledge includes private hands and shown cards.")
 
             while True:
                 self._show_new_events()
                 snapshot = self.session.snapshot()
+                self._write(f"Player 0 completed turns: {snapshot.player0_turns}.")
                 if snapshot.is_over:
                     if snapshot.winner is None:
                         self._write("Game over: all players were eliminated.")

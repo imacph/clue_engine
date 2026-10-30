@@ -59,9 +59,12 @@ returns exit status 1 if the game has not ended; quitting returns status 0.
 Run `python -m clue_engine.console --help` for all options.
 
 Ordinary play displays only the human player's hand and visible events.
-Spectators see only public events; hand and knowledge commands apply only in
-play mode. `--debug-omniscient` explicitly reveals the solution, all hands,
-and private events, including during play. Do not enable it for a fair game.
+During spectator stepping, `knowledge` shows every player's knowledge, and
+`knowledge 2` shows only Player 2's. These views include each player's private
+hand and cards shown to them, so they are not suitable for a player who wants
+to preserve hidden information. The ordinary spectator history remains public.
+`--debug-omniscient` additionally reveals the actual solution and private events,
+including during play. Do not enable it for a fair game.
 
 ## Desktop interface
 
@@ -76,12 +79,20 @@ bot policy, action limit, and automatic or step-by-step progression. Select
 **Start game** to open the notebook. Use the card selectors and action buttons
 to play; when responding, only legal cards are offered for reveal. An accusation
 requires confirmation. The read-only notebook shows deductions from the human
-player's view; spectators see public history but no player's hand or notebook.
+player's view. Spectators can select any player's private hand and notebook; the
+history remains public unless omniscient debug is enabled. Both interfaces show
+the recorded refutation and incorrect-accusation clauses, distinguishing
+unresolved constraints from those already satisfied.
 
 **Pause** stops automated actions; **Next action** advances one bot action while
 paused, and **Resume** continues. Human actions are always submitted manually.
 **New game** returns to setup. The optional omniscient debug setting requires
 confirmation and exposes all hands, the solution, and private events.
+
+The Player 0 turn counter starts at zero and increases when Player 0 completes
+their own turn, including by making an accusation. Refuting another player's
+suggestion does not increase it. Once Player 0 is eliminated, the counter
+remains unchanged even if they continue to refute.
 
 `clue_engine.actions.ACTIONS` provides a fixed action ordering. The project does
 not yet define an RL environment, observation encoding, rewards, or action mask.

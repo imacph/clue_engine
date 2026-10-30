@@ -1,7 +1,7 @@
 import pytest
 
 from clue_engine.engine import Engine, IllegalActionError
-from clue_engine.models import Accuse, Combination, EndTurn, Reveal, Suggest
+from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.observations import EventKind
 from clue_engine.session import GameSession
 from clue_engine.state import GameState
@@ -95,3 +95,49 @@ def test_action_limit_and_winning_on_last_action():
     assert session.snapshot().limit_reached
     with pytest.raises(ValueError, match="limit"):
         session.advance_bot()
+
+
+def test_spectator_can_inspect_every_players_private_view_without_debug():
+    session = GameSession(make_engine(), policies())
+    session.advance_bot()
+    session.advance_bot()
+    assert session.spectator_view(0).events[-1].kind is EventKind.SHOW
+    assert session.spectator_view(1).events[-1].kind is EventKind.SHOW
+    assert all(event.kind is not EventKind.SHOW for event in session.spectator_view(2).events)
+    assert session.spectator_view(1).own_hand == frozenset({7, 8, 9, 10, 11})
+    assert all(event.kind is not EventKind.SHOW for event in session.snapshot().events)
+    assert session.snapshot().debug_info is None
+    with pytest.raises(ValueError, match="player"):
+        session.spectator_view(4)
+    player_session = GameSession(make_engine(), policies(), human_player=0)
+    with pytest.raises(ValueError, match="spectator"):
+        player_session.spectator_view(1)
+
+
+def test_player_zero_turn_count_tracks_completed_turns_and_correct_accusation():
+    engine = make_engine()
+    session = GameSession(engine, [ScriptedPolicy()] * 4)
+    assert session.snapshot().player0_turns == 0
+    engine.step(Suggest(SUGGESTION))
+    engine.step(Reveal(7))
+    assert session.snapshot().player0_turns == 0
+    engine.step(EndTurn())
+    assert session.snapshot().player0_turns == 1
+    for _ in range(3):
+        engine.step(EndTurn())
+    assert session.snapshot().player0_turns == 1
+    engine.step(Accuse(SOLUTION))
+    assert session.snapshot().player0_turns == 2
+    assert GameSession(engine, [ScriptedPolicy()] * 4).snapshot().player0_turns == 2
+
+
+def test_wrong_accusation_counts_once_and_later_refutation_does_not_count():
+    engine = make_engine()
+    session = GameSession(engine, [ScriptedPolicy()] * 4)
+    engine.step(Accuse(Combination(1, 6, 12)))
+    assert session.snapshot().player0_turns == 1
+    engine.step(Suggest(Combination(1, 6, 12)))
+    engine.step(Pass())
+    engine.step(Pass())
+    engine.step(Reveal(1))
+    assert session.snapshot().player0_turns == 1

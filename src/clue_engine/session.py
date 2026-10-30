@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .engine import Engine
 from .models import Action, Combination
-from .observations import Event, PlayerView, public_events
+from .observations import Event, EventKind, PlayerView, public_events
 from .policies import DeductivePolicy, Policy, RandomPolicy
 from .state import deal
 
@@ -25,6 +25,7 @@ class SessionSnapshot:
     is_over: bool
     winner: int | None
     steps: int
+    player0_turns: int
     max_steps: int
     limit_reached: bool
     view: PlayerView | None
@@ -79,6 +80,10 @@ class GameSession:
             if self._debug else None
         )
         is_over = engine.is_over
+        winner = engine.winner
+        player0_turns = sum(
+            event.kind is EventKind.END_TURN and event.actor == 0 for event in engine.log
+        ) + int(winner == 0)
         limit_reached = not is_over and self._steps >= self._max_steps
         legal = (
             engine.legal_actions()
@@ -90,8 +95,9 @@ class GameSession:
             human_player=self._human_player,
             to_move=player,
             is_over=is_over,
-            winner=engine.winner,
+            winner=winner,
             steps=self._steps,
+            player0_turns=player0_turns,
             max_steps=self._max_steps,
             limit_reached=limit_reached,
             view=view,
@@ -99,6 +105,12 @@ class GameSession:
             legal_actions=legal,
             debug_info=debug_info,
         )
+
+    def spectator_view(self, player: int) -> PlayerView:
+        """Return a player's private view only when the session is spectating."""
+        if self._human_player is not None:
+            raise ValueError("player views are only available in spectator mode")
+        return self._engine.view(player)
 
     def _active_player(self) -> int:
         player = self._engine.to_move

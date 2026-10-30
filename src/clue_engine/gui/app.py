@@ -49,7 +49,10 @@ class GuiApp:
         ttk.Checkbutton(
             self.setup, text="Omniscient debug (reveals all hands and the solution)", variable=self.debug
         ).grid(row=8, column=0, columnspan=2, sticky="w", pady=8)
-        ttk.Button(self.setup, text="Start game", command=self.start).grid(row=9, column=0, sticky="w")
+        ttk.Label(
+            self.setup, text="Spectator mode exposes each player's private hand and knowledge."
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Button(self.setup, text="Start game", command=self.start).grid(row=10, column=0, sticky="w")
         self.setup.columnconfigure(1, weight=1)
 
     def start(self) -> None:

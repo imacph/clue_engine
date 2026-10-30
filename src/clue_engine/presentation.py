@@ -1,7 +1,7 @@
 """Formatting helpers for public and player-specific game observations."""
 
 from .cards import CARDS, CARDS_BY_ID
-from .knowledge import Mark, knowledge_for
+from .knowledge import Knowledge, Mark, knowledge_for
 from .models import Combination
 from .observations import Event, EventKind, PlayerView
 from .observations import public_events as _public_events
@@ -64,6 +64,43 @@ def format_knowledge(view: PlayerView, num_players: int) -> str:
         for card in cards:
             marks = [symbols[knowledge.mark_of(holder, card.id)] for holder in range(num_players + 1)]
             lines.append(f"{card.name:<20} " + " ".join(f"{mark:>8}" for mark in marks))
+    lines.extend(("", format_clauses(knowledge)))
+    return "\n".join(lines)
+
+
+def format_clauses(knowledge: Knowledge) -> str:
+    """Describe the stored refutation and incorrect-accusation constraints."""
+    lines = ["Clauses:"]
+
+    def names(cards: list[int]) -> str:
+        return ", ".join(CARDS_BY_ID[card_id].name for card_id in cards)
+
+    for clause in knowledge.clauses:
+        cards = sorted(clause.cards)
+        held = [card_id for card_id in cards if knowledge.mark_of(clause.holder, card_id) is Mark.HELD]
+        remaining = [
+            card_id for card_id in cards if knowledge.mark_of(clause.holder, card_id) is Mark.UNKNOWN
+        ]
+        status = f"satisfied: {names(held)}" if held else f"unresolved; remaining: {names(remaining)}"
+        lines.append(f"Player {clause.holder} holds at least one of: {names(cards)} ({status}).")
+
+    for clause in knowledge.wrong_accusations:
+        cards = sorted(clause)
+        excluded = [
+            card_id for card_id in cards
+            if knowledge.mark_of(knowledge.envelope, card_id) is Mark.NOT_HELD
+        ]
+        remaining = [
+            card_id for card_id in cards
+            if knowledge.mark_of(knowledge.envelope, card_id) is Mark.UNKNOWN
+        ]
+        status = (
+            f"satisfied: {names(excluded)}" if excluded
+            else f"unresolved; remaining: {names(remaining)}"
+        )
+        lines.append(f"Incorrect accusation: {names(cards)}; at least one is not in the envelope ({status}).")
+    if len(lines) == 1:
+        lines.append("No clauses recorded.")
     return "\n".join(lines)
 
 
