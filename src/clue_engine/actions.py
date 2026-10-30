@@ -1,5 +1,5 @@
-from .models import Combination, Suggest, Accuse, Pass, Reveal, Action
 from .cards import CARDS, CardType
+from .models import Accuse, Action, Combination, EndTurn, Pass, Reveal, Suggest
 
 # Generate action spaces from validated card data
 COMBINATIONS: tuple[Combination, ...] = tuple(
@@ -27,4 +27,6 @@ REVEALS: tuple[Reveal, ...] = tuple(
 
 PASSES: tuple[Pass, ...] = (Pass(),)
 
-ACTIONS: tuple[Action, ...] = (*SUGGESTIONS, *ACCUSES, *REVEALS, *PASSES)
+ENDTURNS: tuple[EndTurn, ...] = (EndTurn(),)
+
+ACTIONS: tuple[Action, ...] = (*SUGGESTIONS, *ACCUSES, *REVEALS, *PASSES, *ENDTURNS)

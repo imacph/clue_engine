@@ -9,6 +9,7 @@ from clue_engine.observations import (
     visible_to,
 )
 
+
 def test_event_privacy():
     event = Event(kind=EventKind.SHOW, actor=1, card_id=0, private_to=2)
     assert visible_to(event, 1) is True

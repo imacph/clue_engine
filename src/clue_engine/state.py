@@ -1,14 +1,15 @@
+import random
 from dataclasses import dataclass
 
 from clue_engine.cards import CARDS, CARDS_BY_ID
-import random
+
 from .models import CardType, Combination
+
 
 @dataclass
 class GameState:
-    solution: Combination  # ← Pre-validated type
+    solution: Combination
     player_hands: list[frozenset[int]]
-    remaining_cards: list[int]
     current_player: int
 
 def deal(rng: random.Random, num_players: int) -> GameState:
@@ -26,6 +27,5 @@ def deal(rng: random.Random, num_players: int) -> GameState:
     return GameState(
         solution=solution,
         player_hands=[frozenset(hand) for hand in hands],
-        remaining_cards=[],
         current_player=0,
     )

@@ -23,7 +23,6 @@ class Combination:
 """Actions in the game"""
 class Action:
     """Base class for all actions."""
-    pass
 
 @dataclass(frozen=True,slots=True)
 class Suggest(Action):
@@ -39,5 +38,9 @@ class Reveal(Action):
 
 @dataclass(frozen=True,slots=True)
 class Pass(Action):
+    pass
+
+@dataclass(frozen=True,slots=True)
+class EndTurn(Action):
     pass
 

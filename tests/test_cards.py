@@ -1,10 +1,12 @@
-import pytest
 import random
+
+import pytest
 
 from clue_engine.actions import COMBINATIONS
 from clue_engine.cards import CARDS, CARDS_BY_ID
 from clue_engine.models import CardType
 from clue_engine.state import deal
+
 
 def all_cards():
     return [card for cards in CARDS.values() for card in cards]

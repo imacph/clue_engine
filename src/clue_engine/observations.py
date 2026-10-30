@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+
 from .models import Combination
+
 
 class EventKind(Enum):
     SUGGEST = auto()
@@ -40,6 +42,12 @@ def view_for(log: tuple[Event, ...], player: int, own_hand: frozenset[int]) -> P
 def visible_to(event: Event, player: int) -> bool:
     return event.private_to is None or player in (event.private_to, event.actor)
 
+def last_suggest_index(log: tuple[Event, ...]) -> int | None:
+    return max(
+        (i for i, event in enumerate(log) if event.kind is EventKind.SUGGEST),
+        default=None
+    )
+
 @dataclass(frozen=True)
 class Pending:
     player: int
@@ -50,10 +58,7 @@ def pending(log: tuple[Event, ...], num_players: int) -> Pending | None:
     None means no suggestion has been made, or it was refuted or passed by everyone.
     Accusations are not handled yet.
     """
-    last_suggest = max(
-        (i for i, event in enumerate(log) if event.kind is EventKind.SUGGEST),
-        default=None
-    )
+    last_suggest = last_suggest_index(log)
     if last_suggest is None:
         return None
 
