@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ..session import GameSession, create_game
+from .batch_window import BatchWindow
 from .widgets import GameFrame
 
 
@@ -53,7 +54,13 @@ class GuiApp:
             self.setup, text="Spectator mode exposes each player's private hand and knowledge."
         ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Button(self.setup, text="Start game", command=self.start).grid(row=10, column=0, sticky="w")
+        ttk.Button(self.setup, text="Batch statistics", command=self.open_batch).grid(
+            row=10, column=1, sticky="w"
+        )
         self.setup.columnconfigure(1, weight=1)
+
+    def open_batch(self) -> None:
+        BatchWindow(self.root)
 
     def start(self) -> None:
         try:

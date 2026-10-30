@@ -1,5 +1,7 @@
 import subprocess
 import sys
+import time
+from threading import Event
 
 import pytest
 
@@ -7,6 +9,7 @@ tk = pytest.importorskip("tkinter")
 
 from clue_engine.engine import Engine
 from clue_engine.gui.app import GuiApp
+from clue_engine.gui.batch_window import BatchWindow
 from clue_engine.gui.widgets import GameFrame
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.session import GameSession
@@ -171,6 +174,106 @@ def test_setup_starts_spectator_with_knowledge_selector(root):
     assert app.game.session.snapshot().debug_info is None
     assert str(app.game.knowledge_player_choice["state"]) == "readonly"
     assert len(app.game.knowledge_player_choice["values"]) == 4
+
+
+def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
+    from clue_engine.gui import batch_window
+
+    monkeypatch.setattr(batch_window.messagebox, "askyesno", lambda *args, **kwargs: True)
+    app = GuiApp(root)
+    app.open_batch()
+    window = next(child for child in root.winfo_children() if isinstance(child, BatchWindow))
+    window.games.set("2")
+    window.players.set("2")
+    window.policies.set("deductive,random")
+    window.limit.set("0")
+    window.trace.set(str(tmp_path / "trace.jsonl"))
+    window.start()
+    deadline = time.monotonic() + 10
+    while window._future is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert window._future is None
+    assert "timeouts" in window.status.get()
+    assert "timeout=2" in window.output.get("1.0", "end")
+    window.open_trace()
+    while (window._trace_future is not None or window._render_id is not None) and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert window._trace_future is None
+    assert '"type": "game_start"' in window.output.get("1.0", "end")
+    assert '"solution"' in window.output.get("1.0", "end")
+    window.game_number.set("100")
+    window.open_trace()
+    while window._trace_future is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert "not found" in window.status.get()
+    existing = BatchWindow(root)
+    existing.trace.set(str(tmp_path / "trace.jsonl"))
+    existing.open_trace()
+    while (existing._trace_future is not None or existing._render_id is not None) and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert "Showing game 0" in existing.status.get()
+    assert '"type": "game_start"' in existing.output.get("1.0", "end")
+
+
+def test_batch_window_reports_existing_trace_error(root, tmp_path, monkeypatch):
+    from clue_engine.gui import batch_window
+
+    monkeypatch.setattr(batch_window.messagebox, "askyesno", lambda *args, **kwargs: True)
+    path = tmp_path / "existing.jsonl"
+    path.write_text("keep", encoding="utf-8")
+    window = BatchWindow(root)
+    window.trace.set(str(path))
+    window.start()
+    deadline = time.monotonic() + 10
+    while window._future is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert window._future is None
+    assert "Batch failed" in window.status.get()
+    assert "FileExistsError" in window.output.get("1.0", "end")
+    assert path.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("close_window", [False, True])
+def test_batch_window_cancels_worker_and_callbacks(root, tmp_path, monkeypatch, close_window):
+    from clue_engine.gui import batch_window
+
+    started, finished = Event(), Event()
+    real_run_batch = batch_window.run_batch
+
+    def wait_for_cancel(config, path, *, progress, cancelled):
+        started.set()
+        while not cancelled():
+            time.sleep(0.01)
+        try:
+            return real_run_batch(config, path, progress=progress, cancelled=cancelled)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(batch_window, "run_batch", wait_for_cancel)
+    monkeypatch.setattr(batch_window.messagebox, "askyesno", lambda *args, **kwargs: True)
+    window = BatchWindow(root)
+    window.trace.set(str(tmp_path / "cancel.jsonl"))
+    window.start()
+    assert started.wait(5)
+    if close_window:
+        window.destroy()
+    else:
+        window.cancel_button.invoke()
+    assert finished.wait(5)
+    if not close_window:
+        deadline = time.monotonic() + 5
+        while window._future is not None and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        assert window._future is None
+        assert window.status.get() == "Batch cancelled."
+        assert "Batch cancelled" in window.output.get("1.0", "end")
+    root.update()
 
 
 def test_setup_validates_input_and_confirms_debug(root, monkeypatch):

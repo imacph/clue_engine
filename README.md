@@ -94,6 +94,68 @@ their own turn, including by making an accusation. Refuting another player's
 suggestion does not increase it. Once Player 0 is eliminated, the counter
 remains unchanged even if they continue to refute.
 
+## Batch statistics and private traces
+
+Run reproducible simulations from the command line:
+
+```text
+python -m clue_engine.batch_cli --games 100 --players 4 --policies deductive,random,random,random --seed 42 --trace batch-42.jsonl
+```
+
+Provide one policy name to use it for every player, or a comma-separated policy
+for every seat. Available policies are `random` and `deductive`. The default
+limit is 10,000 actions per game; change it with `--max-steps`. A game that
+reaches the limit is reported as a timeout, not a completed game. The trace
+file must be new: existing files are never overwritten. Errors and timeouts
+give the CLI a nonzero exit status. Ctrl+C requests cancellation between
+actions, saves the partial game and batch summary, and returns status 130.
+
+The desktop setup screen also has **Batch statistics**. Configure the batch
+and a new trace file there, start or cancel it, and inspect its progress and
+summary while it runs. The trace controls can also open an existing JSONL file
+and display one zero-based game number at a time. Trace loading and batch work
+run off the Tk thread. Closing the window requests cancellation.
+
+**Traces contain all private information**, including every hand, the solution,
+and private shown cards. Keep them in a secure location and do not share them
+with players who should not see that information. A trace includes every
+started game and can grow large; plan disk space for long batches.
+
+By default, policies rotate across seats. Each cycle of `players` games uses
+the same deal seed, `seed + game_index // players`, while policies move one
+seat per game. Each seat's policy has an independent deterministic random
+generator, seeded from the deal seed, game index, and seat; action randomness
+is therefore not paired between games. An incomplete final cycle can give
+unbalanced seat exposures, so use a game count divisible by the number of
+players for balanced comparisons. `--no-rotate` keeps the supplied seat order
+and uses `seed + game_index` as the deal seed. The trace records Python's
+version and the seeds; reproducibility across Python versions is not guaranteed.
+
+Summaries count wins, all-eliminated games, timeouts, errors, and cancellations
+separately. Only wins and all-eliminated games count as completed. Policy
+win rates divide wins by completed seat exposures, including multiple seats
+using the same policy; policy-by-seat rates use the corresponding seat
+exposures. Mean actions, mean completed turns per seat, suggestions, passes,
+and refutations use completed games only. The action median averages the two
+middle values for an even sample; p90 uses the nearest-rank definition.
+Deduction totals use all started seat exposures, including partial games.
+Their mean first-solution step is averaged only over players who learned the
+solution: step 0 means the initial hand was sufficient, and subsequent steps
+count actions, not events. Snapshot candidate counts and solution knowledge
+are calculated independently from each player's filtered view.
+
+The newline-delimited JSON trace begins with `batch_start`, followed by each
+`game_start` (deal and policy seeds), `initial_knowledge`, alternating `action`
+and `knowledge` records, and `game_result`. An action contains all events it
+produced; for example, one reveal may produce both refutation and private-show
+events. Expected failures may add `action_error` or `knowledge_error` records.
+The final `batch_result` contains the same aggregate data as the displayed
+summary, including policy-by-seat breakdowns. Unexpected errors are surfaced
+and may leave a partial trace without a final result; successfully applied
+actions are written before deduction snapshots. One game's records can be
+loaded in Python with `read_game_trace(Path("batch-42.jsonl"), 0)` from
+`clue_engine.batch`.
+
 `clue_engine.actions.ACTIONS` provides a fixed action ordering. The project does
 not yet define an RL environment, observation encoding, rewards, or action mask.
 
