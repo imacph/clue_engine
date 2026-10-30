@@ -32,6 +32,37 @@ Pass views rather than the engine to player policies. `play` requires one policy
 per player and raises `RuntimeError` if the game has not ended after `max_steps`;
 policies are not guaranteed to terminate every game.
 
+## Console play and observation
+
+After installing the project, play as seat 0 against three deductive policies:
+
+```text
+python -m clue_engine.console --mode play --players 4 --seat 0 --seed 42
+```
+
+At your action prompt, enter `suggest`, `accuse`, `reveal`, `pass`, or `end`
+when offered. For a suggestion or accusation, select a suspect, weapon, and
+room by the displayed card ID or full name. On a reveal prompt, only matching
+cards are available. At an action or step prompt, `hand`, `knowledge`, `history`,
+`help`, and `quit` are also available. Seats and card IDs are zero-based.
+
+To spectate automated players, use:
+
+```text
+python -m clue_engine.console --mode spectate --players 4 --seed 42 --progress step
+```
+
+Press Enter to advance one automated action at a time; `--progress auto` runs
+automated actions without waiting. Use `--policy random` to choose random
+instead of deductive policies, and `--max-steps` to limit actions. The limit
+returns exit status 1 if the game has not ended; quitting returns status 0.
+Run `python -m clue_engine.console --help` for all options.
+
+Ordinary play displays only the human player's hand and visible events.
+Spectators see only public events; hand and knowledge commands apply only in
+play mode. `--debug-omniscient` explicitly reveals the solution, all hands,
+and private events, including during play. Do not enable it for a fair game.
+
 `clue_engine.actions.ACTIONS` provides a fixed action ordering. The project does
 not yet define an RL environment, observation encoding, rewards, or action mask.
 
