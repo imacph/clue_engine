@@ -1,7 +1,6 @@
 """Interactive, privacy-aware console controller for the game engine."""
 
 import argparse
-import random
 import sys
 from collections.abc import Sequence
 from typing import TextIO
@@ -20,15 +19,14 @@ from .models import (
     Suggest,
 )
 from .observations import Event
-from .policies import DeductivePolicy, Policy, RandomPolicy
+from .policies import Policy
 from .presentation import (
-    format_debug_state,
+    format_debug_information,
     format_event,
     format_hand,
     format_knowledge,
-    public_events,
 )
-from .state import deal
+from .session import GameSession, create_game
 
 
 class _ExitRequested(Exception):
@@ -50,20 +48,13 @@ class ConsoleGame:
         debug: bool = False,
         max_steps: int = 10_000,
     ):
-        if len(policies) != engine.num_players:
-            raise ValueError("one policy is required for each player")
-        if human_player is not None and not 0 <= human_player < engine.num_players:
-            raise ValueError("human_player must identify an existing player")
-        if max_steps < 0:
-            raise ValueError("max_steps must be non-negative")
-        self.engine = engine
-        self.policies = policies
+        self.session = GameSession(
+            engine, policies, human_player=human_player, debug=debug, max_steps=max_steps
+        )
         self.input = input_stream
         self.output = output_stream
         self.human_player = human_player
         self.step_mode = step_mode
-        self.debug = debug
-        self.max_steps = max_steps
         self._event_count = 0
 
     def _write(self, text: str) -> None:
@@ -81,11 +72,7 @@ class ConsoleGame:
         return value
 
     def _visible_events(self) -> tuple[Event, ...]:
-        if self.debug:
-            return self.engine.log
-        if self.human_player is not None:
-            return self.engine.view(self.human_player).events
-        return public_events(self.engine.log)
+        return self.session.snapshot().events
 
     def _show_events(self, events: tuple[Event, ...], start: int = 0) -> None:
         for index in range(start, len(events)):
@@ -109,11 +96,13 @@ class ConsoleGame:
             if self.human_player is None:
                 self._write("Hand and knowledge are available only in play mode.")
             else:
-                view = self.engine.view(self.human_player)
+                snapshot = self.session.snapshot()
+                view = snapshot.view
+                assert view is not None
                 if command == "hand":
                     self._write(f"Your hand: {format_hand(view.own_hand)}")
                 else:
-                    self._write(format_knowledge(view, self.engine.num_players))
+                    self._write(format_knowledge(view, snapshot.num_players))
             return True
         if command == "help":
             self._write("Commands: hand, knowledge, history, help, quit.")
@@ -188,38 +177,39 @@ class ConsoleGame:
     def run(self) -> int:
         """Return 0 on completion or exit, and 1 if the action limit is reached."""
         try:
-            if self.debug:
-                self._write(format_debug_state(self.engine.state))
+            snapshot = self.session.snapshot()
+            if snapshot.debug_info is not None:
+                self._write(format_debug_information(
+                    snapshot.debug_info.solution, snapshot.debug_info.hands
+                ))
             if self.human_player is not None:
+                assert snapshot.view is not None
                 self._write(f"You are Player {self.human_player}.")
-                self._write(f"Your hand: {format_hand(self.engine.view(self.human_player).own_hand)}")
+                self._write(f"Your hand: {format_hand(snapshot.view.own_hand)}")
             else:
                 self._write("Spectator mode.")
 
-            steps = 0
             while True:
                 self._show_new_events()
-                player = self.engine.to_move
-                if player is None:
-                    if self.engine.winner is None:
+                snapshot = self.session.snapshot()
+                if snapshot.is_over:
+                    if snapshot.winner is None:
                         self._write("Game over: all players were eliminated.")
                     else:
-                        self._write(f"Game over: Player {self.engine.winner} wins.")
+                        self._write(f"Game over: Player {snapshot.winner} wins.")
                     return 0
-                if steps >= self.max_steps:
-                    self._write(f"Game stopped at the {self.max_steps}-action limit.")
+                if snapshot.limit_reached:
+                    self._write(f"Game stopped at the {snapshot.max_steps}-action limit.")
                     return 1
+                player = snapshot.to_move
                 self._write(f"Player {player} to act.")
                 if player == self.human_player:
-                    action = self._human_action(self.engine.legal_actions())
+                    action = self._human_action(snapshot.legal_actions)
+                    self.session.submit(action)
                 else:
                     if self.step_mode:
                         self._wait_for_step()
-                    action = self.policies[player].choose(
-                        self.engine.view(player), self.engine.num_players, self.engine.legal_actions()
-                    )
-                self.engine.step(action)
-                steps += 1
+                    self.session.advance_bot()
         except _ExitRequested as exc:
             self._write(str(exc))
             return 0
@@ -252,9 +242,7 @@ def main(
     if args.max_steps < 0:
         parser.error("--max-steps must be non-negative")
 
-    engine = Engine(deal(random.Random(args.seed), args.players))
-    policy_type = DeductivePolicy if args.policy == "deductive" else RandomPolicy
-    policies = [policy_type(random.Random(f"{args.seed}:{i}")) for i in range(args.players)]
+    engine, policies = create_game(args.players, args.seed, args.policy)
     return ConsoleGame(
         engine,
         policies,

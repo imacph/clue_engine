@@ -4,12 +4,13 @@ from .cards import CARDS, CARDS_BY_ID
 from .knowledge import Mark, knowledge_for
 from .models import Combination
 from .observations import Event, EventKind, PlayerView
+from .observations import public_events as _public_events
 from .state import GameState
 
 
 def public_events(log: tuple[Event, ...]) -> tuple[Event, ...]:
     """Return only events visible without a player identity."""
-    return tuple(event for event in log if event.private_to is None)
+    return _public_events(log)
 
 
 def format_combination(combo: Combination) -> str:
@@ -68,12 +69,18 @@ def format_knowledge(view: PlayerView, num_players: int) -> str:
 
 def format_debug_state(state: GameState) -> str:
     """Format hidden information; callers must opt in to debugging."""
+    return format_debug_information(state.solution, tuple(state.player_hands))
+
+
+def format_debug_information(
+    solution: Combination, hands: tuple[frozenset[int], ...]
+) -> str:
     lines = [
         "WARNING: omniscient debug mode reveals all hands and the solution.",
-        f"Solution: {format_combination(state.solution)}",
+        f"Solution: {format_combination(solution)}",
     ]
     lines.extend(
         f"Player {player} hand: {format_hand(hand)}"
-        for player, hand in enumerate(state.player_hands)
+        for player, hand in enumerate(hands)
     )
     return "\n".join(lines)

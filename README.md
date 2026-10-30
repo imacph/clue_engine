@@ -63,6 +63,26 @@ Spectators see only public events; hand and knowledge commands apply only in
 play mode. `--debug-omniscient` explicitly reveals the solution, all hands,
 and private events, including during play. Do not enable it for a fair game.
 
+## Desktop interface
+
+The desktop interface requires Python's Tkinter support. Start it with:
+
+```text
+python -m clue_engine.gui
+```
+
+The setup screen offers play or spectator mode, player count, human seat, seed,
+bot policy, action limit, and automatic or step-by-step progression. Select
+**Start game** to open the notebook. Use the card selectors and action buttons
+to play; when responding, only legal cards are offered for reveal. An accusation
+requires confirmation. The read-only notebook shows deductions from the human
+player's view; spectators see public history but no player's hand or notebook.
+
+**Pause** stops automated actions; **Next action** advances one bot action while
+paused, and **Resume** continues. Human actions are always submitted manually.
+**New game** returns to setup. The optional omniscient debug setting requires
+confirmation and exposes all hands, the solution, and private events.
+
 `clue_engine.actions.ACTIONS` provides a fixed action ordering. The project does
 not yet define an RL environment, observation encoding, rewards, or action mask.
 

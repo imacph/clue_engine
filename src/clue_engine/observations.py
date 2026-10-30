@@ -42,6 +42,12 @@ def view_for(log: tuple[Event, ...], player: int, own_hand: frozenset[int]) -> P
 def visible_to(event: Event, player: int) -> bool:
     return event.private_to is None or player in (event.private_to, event.actor)
 
+
+def public_events(log: tuple[Event, ...]) -> tuple[Event, ...]:
+    """Return only events visible without a player identity."""
+    return tuple(event for event in log if event.private_to is None)
+
+
 def last_suggest_index(log: tuple[Event, ...]) -> int | None:
     return max(
         (i for i, event in enumerate(log) if event.kind is EventKind.SUGGEST),
