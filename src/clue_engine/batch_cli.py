@@ -13,13 +13,17 @@ from .batch import (
     policies_for_players,
     run_batch,
 )
+from .policies import POLICY_NAMES
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run seeded Clue simulations and save private traces.")
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--players", type=int, default=4)
-    parser.add_argument("--policies", default="deductive", help="one policy or comma-separated policies")
+    parser.add_argument(
+        "--policies", default="deductive",
+        help=f"one policy or comma-separated policies: {', '.join(POLICY_NAMES)}",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=10_000)
     parser.add_argument("--no-rotate", action="store_true", help="do not rotate policies across seats")

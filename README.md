@@ -1,6 +1,6 @@
 # Clue Engine
 
-A card-deduction simulator with player-specific observations and simple policies.
+A card-deduction simulator with player-specific observations and configurable bot policies.
 It models suggestions, mandatory refutations, accusations, elimination, and turns;
 it does not model a board, movement, room restrictions, or character relocation.
 Players may suggest any combination once per turn and may end a turn without
@@ -53,8 +53,10 @@ python -m clue_engine.console --mode spectate --players 4 --seed 42 --progress s
 ```
 
 Press Enter to advance one automated action at a time; `--progress auto` runs
-automated actions without waiting. Use `--policy random` to choose random
-instead of deductive policies, and `--max-steps` to limit actions. The limit
+automated actions without waiting. Use `--policy strategic` to choose one
+profile for all bots, or `--policies random,deductive,probing,strategic` to
+choose a profile per seat. In play mode the human seat still needs an entry,
+but its bot profile is unused. Use `--max-steps` to limit actions. The limit
 returns exit status 1 if the game has not ended; quitting returns status 0.
 Run `python -m clue_engine.console --help` for all options.
 
@@ -75,7 +77,10 @@ python -m clue_engine.gui
 ```
 
 The setup screen offers play or spectator mode, player count, human seat, seed,
-bot policy, action limit, and automatic or step-by-step progression. Select
+bot policy, action limit, and automatic or step-by-step progression. The bot
+policy selector applies to every bot. Optionally enter comma-separated
+per-seat profiles, such as `random,deductive,probing,strategic`, to override it.
+Include the human seat in play mode; its profile is ignored. Select
 **Start game** to open the notebook. Use the card selectors and action buttons
 to play; when responding, only legal cards are offered for reveal. An accusation
 requires confirmation. The read-only notebook shows deductions from the human
@@ -94,17 +99,39 @@ their own turn, including by making an accusation. Refuting another player's
 suggestion does not increase it. Once Player 0 is eliminated, the counter
 remains unchanged even if they continue to refute.
 
+## Bot profiles
+
+All profiles use only their own player view, and accuse only when the existing
+knowledge engine has deduced the complete solution and an accusation is legal.
+They use seeded randomness for choices and ties.
+
+- `random`: chooses among legal non-accusation actions at random.
+- `deductive`: randomly suggests cards still possible in the envelope.
+- `probing`: when possible, tests one unknown solution candidate alongside two
+  controls known to be in its own hand or the envelope. It otherwise falls
+  back to `deductive` suggestions. When revealing, it prefers a card previously
+  shown to that same opponent; otherwise it chooses randomly.
+- `strategic`: uses the same probes and repeat-reveal behavior, and ranks
+  suggestions using potentially reachable responders, known blockers, unresolved
+  clauses, and remaining envelope candidates.
+
+The newer profiles use heuristics to select actions; they share the existing
+deduction engine rather than an exhaustive possible-deal solver. They are not
+guaranteed to win more often in every matchup. Use batch comparisons to measure
+their behavior with different opponents, seeds, and seat positions.
+
 ## Batch statistics and private traces
 
 Run reproducible simulations from the command line:
 
 ```text
-python -m clue_engine.batch_cli --games 100 --players 4 --policies deductive,random,random,random --seed 42 --trace batch-42.jsonl
+python -m clue_engine.batch_cli --games 100 --players 4 --policies random,deductive,probing,strategic --seed 42 --trace batch-42.jsonl
 ```
 
 Provide one policy name to use it for every player, or a comma-separated policy
-for every seat. Available policies are `random` and `deductive`. The default
-limit is 10,000 actions per game; change it with `--max-steps`. A game that
+for every seat. Available profiles are `random`, `deductive`, `probing`, and
+`strategic`. The default limit is 10,000 actions per game; change it with
+`--max-steps`. A game that
 reaches the limit is reported as a timeout, not a completed game. The trace
 file must be new: existing files are never overwritten. Errors and timeouts
 give the CLI a nonzero exit status. Ctrl+C requests cancellation between

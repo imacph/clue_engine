@@ -57,7 +57,8 @@ class BatchWindow(tk.Toplevel):
         setup.grid(row=0, column=0, sticky="ew")
         setup.columnconfigure(1, weight=1)
         fields = (
-            ("Games", self.games), ("Players", self.players), ("Policies (comma-separated)", self.policies),
+            ("Games", self.games), ("Players", self.players),
+            ("Policies (random/deductive/probing/strategic)", self.policies),
             ("Seed", self.seed), ("Action limit per game", self.limit), ("Private JSONL trace", self.trace),
         )
         for row, (label, variable) in enumerate(fields):

@@ -15,7 +15,8 @@ from .engine import Engine, IllegalActionError
 from .knowledge import InconsistentKnowledgeError, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, EndTurn, Pass, Reveal, Suggest
 from .observations import Event, EventKind
-from .policies import DeductivePolicy, Policy, RandomPolicy
+from .policies import Policy, make_policy, validate_policy_names
+from .policies import policies_for_players as _policies_for_players
 from .state import deal
 
 
@@ -32,8 +33,7 @@ class BatchConfig:
             raise ValueError("games must be at least 1")
         if len(self.policies) < 2:
             raise ValueError("at least two player policies are required")
-        if any(name not in {"random", "deductive"} for name in self.policies):
-            raise ValueError("policies must be random or deductive")
+        validate_policy_names(self.policies)
         if self.max_steps < 0:
             raise ValueError("max_steps must be non-negative")
 
@@ -93,18 +93,12 @@ class BatchSummary(TypedDict):
 
 def _make_game(seed: int, names: tuple[str, ...], game: int) -> tuple[Engine, tuple[Policy, ...]]:
     engine = Engine(deal(random.Random(seed), len(names)))
-    types = {"random": RandomPolicy, "deductive": DeductivePolicy}
-    policies = tuple(types[name](random.Random(f"{seed}:{game}:{seat}")) for seat, name in enumerate(names))
+    policies = tuple(make_policy(name, random.Random(f"{seed}:{game}:{seat}")) for seat, name in enumerate(names))
     return engine, policies
 
 
 def policies_for_players(value: str, players: int) -> tuple[str, ...]:
-    names = tuple(name.strip().lower() for name in value.split(","))
-    if len(names) == 1:
-        names = names * players
-    if len(names) != players:
-        raise ValueError("supply one policy or one policy per player")
-    return names
+    return _policies_for_players(value, players)
 
 
 def _deductions(engine: Engine) -> list[Deduction]:

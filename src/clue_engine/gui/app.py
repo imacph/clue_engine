@@ -3,6 +3,7 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from ..policies import POLICY_NAMES, policies_for_players
 from ..session import GameSession, create_game
 from .batch_window import BatchWindow
 from .widgets import GameFrame
@@ -19,6 +20,7 @@ class GuiApp:
         self.seat = tk.StringVar(master=root, value="0")
         self.seed = tk.StringVar(master=root, value="0")
         self.policy = tk.StringVar(master=root, value="deductive")
+        self.policy_by_seat = tk.StringVar(master=root)
         self.progress = tk.StringVar(master=root, value="auto")
         self.limit = tk.StringVar(master=root, value="10000")
         self.debug = tk.BooleanVar(master=root, value=False)
@@ -36,7 +38,8 @@ class GuiApp:
             ("Players (at least 2)", self.players, None),
             ("Your seat (zero-based)", self.seat, None),
             ("Random seed", self.seed, None),
-            ("Bot policy", self.policy, ("deductive", "random")),
+            ("Bot policy", self.policy, POLICY_NAMES),
+            ("Per-seat policies (all seats, optional)", self.policy_by_seat, None),
             ("Bot progression", self.progress, ("auto", "step")),
             ("Action limit", self.limit, None),
         )
@@ -49,13 +52,13 @@ class GuiApp:
             widget.grid(row=row, column=1, sticky="ew", pady=4)
         ttk.Checkbutton(
             self.setup, text="Omniscient debug (reveals all hands and the solution)", variable=self.debug
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=8)
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=8)
         ttk.Label(
             self.setup, text="Spectator mode exposes each player's private hand and knowledge."
-        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(0, 8))
-        ttk.Button(self.setup, text="Start game", command=self.start).grid(row=10, column=0, sticky="w")
+        ).grid(row=10, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Button(self.setup, text="Start game", command=self.start).grid(row=11, column=0, sticky="w")
         ttk.Button(self.setup, text="Batch statistics", command=self.open_batch).grid(
-            row=10, column=1, sticky="w"
+            row=11, column=1, sticky="w"
         )
         self.setup.columnconfigure(1, weight=1)
 
@@ -74,6 +77,8 @@ class GuiApp:
                 raise ValueError("Your seat must identify an existing player.")
             if max_steps < 0:
                 raise ValueError("The action limit must be non-negative.")
+            policy_selection = self.policy_by_seat.get().strip() or self.policy.get()
+            policies_for_players(policy_selection, num_players)
         except ValueError as exc:
             messagebox.showerror("Invalid setup", str(exc), parent=self.root)
             return
@@ -83,7 +88,7 @@ class GuiApp:
             parent=self.root,
         ):
             return
-        engine, policies = create_game(num_players, seed, self.policy.get())
+        engine, policies = create_game(num_players, seed, policy_selection)
         session = GameSession(
             engine, policies, human_player=human_player, debug=self.debug.get(), max_steps=max_steps
         )

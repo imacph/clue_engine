@@ -12,6 +12,7 @@ from clue_engine.gui.app import GuiApp
 from clue_engine.gui.batch_window import BatchWindow
 from clue_engine.gui.widgets import GameFrame
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
+from clue_engine.policies import ProbingPolicy, StrategicPolicy
 from clue_engine.session import GameSession
 from clue_engine.state import GameState
 
@@ -176,6 +177,36 @@ def test_setup_starts_spectator_with_knowledge_selector(root):
     assert len(app.game.knowledge_player_choice["values"]) == 4
 
 
+def test_setup_selects_profile_per_seat_and_validates_profiles(root, monkeypatch):
+    from clue_engine.gui import app as app_module
+
+    errors = []
+    monkeypatch.setattr(app_module.messagebox, "showerror", lambda *args, **kwargs: errors.append(args))
+    app = GuiApp(root)
+    policy_widget = next(
+        widget for widget in app.setup.winfo_children()
+        if widget.winfo_class() == "TCombobox" and str(widget.cget("textvariable")) == str(app.policy)
+    )
+    assert {"random", "deductive", "probing", "strategic"} <= set(policy_widget["values"])
+    app.players.set("2")
+    app.mode.set("spectate")
+    app.progress.set("step")
+    app.policy_by_seat.set("probing,strategic")
+    app.start()
+    assert app.game is not None
+    assert [type(policy) for policy in app.game.session._policies] == [ProbingPolicy, StrategicPolicy]
+    app.show_setup()
+    app.policy_by_seat.set("probing,unknown")
+    app.start()
+    assert app.game is None
+    assert "unknown policy" in errors[-1][1]
+    app.policy_by_seat.set("")
+    app.policy.set("strategic")
+    app.start()
+    assert app.game is not None
+    assert all(type(policy) is StrategicPolicy for policy in app.game.session._policies)
+
+
 def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     from clue_engine.gui import batch_window
 
@@ -185,7 +216,7 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     window = next(child for child in root.winfo_children() if isinstance(child, BatchWindow))
     window.games.set("2")
     window.players.set("2")
-    window.policies.set("deductive,random")
+    window.policies.set("probing,strategic")
     window.limit.set("0")
     window.trace.set(str(tmp_path / "trace.jsonl"))
     window.start()

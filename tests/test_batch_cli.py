@@ -28,6 +28,18 @@ def test_batch_cli_rejects_bad_policy_count_before_writing(tmp_path):
     assert not trace.exists()
 
 
+def test_batch_cli_accepts_advanced_profiles(tmp_path):
+    trace = tmp_path / "advanced.jsonl"
+    result = subprocess.run(
+        [sys.executable, "-m", "clue_engine.batch_cli", "--games", "2", "--players", "2",
+         "--policies", "probing,strategic", "--trace", str(trace)],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0
+    assert "probing:" in result.stdout
+    assert "strategic:" in result.stdout
+
+
 def test_batch_cli_success_and_incomplete_rotation_warning(tmp_path):
     trace = tmp_path / "successful.jsonl"
     result = subprocess.run(

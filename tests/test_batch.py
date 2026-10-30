@@ -27,6 +27,20 @@ def test_seeded_batches_are_reproducible_and_rotate_same_deal(tmp_path):
     assert summary["completed_games"] == 0
 
 
+def test_batch_accepts_rotated_advanced_profiles(tmp_path):
+    path = tmp_path / "profiles.jsonl"
+    summary = run_batch(BatchConfig(4, ("probing", "strategic"), seed=15, max_steps=500), path)
+    starts = [item for item in records(path) if item["type"] == "game_start"]
+    assert [start["policies"] for start in starts] == [
+        ["probing", "strategic"], ["strategic", "probing"],
+        ["probing", "strategic"], ["strategic", "probing"],
+    ]
+    assert summary["outcomes"]["error"] == 0
+    assert summary["outcomes"]["timeout"] == 0
+    assert summary["policy_stats"]["probing"]["seat_games"] == 4
+    assert summary["policy_stats"]["strategic"]["seat_games"] == 4
+
+
 def test_action_counts_and_trace_preserve_multi_event_refutation(tmp_path, monkeypatch):
     from clue_engine import batch
 

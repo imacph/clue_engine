@@ -200,6 +200,24 @@ def test_spectator_transcript_is_seed_reproducible():
     assert transcript() == transcript()
 
 
+def test_console_accepts_new_profiles_and_per_seat_selection():
+    output = io.StringIO()
+    assert main(
+        ["--mode", "spectate", "--players", "2", "--policies", "probing,strategic", "--max-steps", "1"],
+        output_stream=output,
+    ) == 1
+    assert "action limit" in output.getvalue()
+    assert main(
+        ["--mode", "spectate", "--players", "2", "--policy", "strategic", "--max-steps", "0"],
+        output_stream=io.StringIO(),
+    ) == 1
+    with pytest.raises(SystemExit) as exc:
+        main(["--players", "2", "--policies", "probing,unknown"])
+    assert exc.value.code == 2
+    with pytest.raises(SystemExit):
+        main(["--players", "2", "--policies", ""])
+
+
 def test_cli_validates_seat_and_supports_scripted_exit():
     with pytest.raises(SystemExit) as exc:
         main(["--players", "2", "--seat", "2"], io.StringIO(), io.StringIO())

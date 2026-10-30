@@ -19,7 +19,7 @@ from .models import (
     Suggest,
 )
 from .observations import Event
-from .policies import Policy
+from .policies import POLICY_NAMES, Policy
 from .presentation import (
     format_debug_information,
     format_event,
@@ -253,7 +253,9 @@ def main(
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seat", type=int, default=0, help="human seat in play mode (zero-based)")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--policy", choices=("deductive", "random"), default="deductive")
+    policy_group = parser.add_mutually_exclusive_group()
+    policy_group.add_argument("--policy", choices=POLICY_NAMES, default="deductive")
+    policy_group.add_argument("--policies", help="comma-separated profiles for all seats, including the human seat")
     parser.add_argument("--progress", choices=("auto", "step"), default="auto")
     parser.add_argument("--max-steps", type=int, default=10_000)
     parser.add_argument(
@@ -267,7 +269,11 @@ def main(
     if args.max_steps < 0:
         parser.error("--max-steps must be non-negative")
 
-    engine, policies = create_game(args.players, args.seed, args.policy)
+    try:
+        selection = args.policies if args.policies is not None else args.policy
+        engine, policies = create_game(args.players, args.seed, selection)
+    except ValueError as exc:
+        parser.error(str(exc))
     return ConsoleGame(
         engine,
         policies,

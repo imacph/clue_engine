@@ -3,7 +3,13 @@ import pytest
 from clue_engine.engine import Engine, IllegalActionError
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.observations import EventKind
-from clue_engine.session import GameSession
+from clue_engine.policies import (
+    DeductivePolicy,
+    ProbingPolicy,
+    RandomPolicy,
+    StrategicPolicy,
+)
+from clue_engine.session import GameSession, create_game
 from clue_engine.state import GameState
 
 SOLUTION = Combination(0, 6, 12)
@@ -36,6 +42,17 @@ def make_engine():
 def policies():
     return [ScriptedPolicy(Suggest(SUGGESTION)), ScriptedPolicy(Reveal(7)),
             ScriptedPolicy(), ScriptedPolicy()]
+
+
+def test_create_game_supports_one_profile_or_a_profile_per_seat():
+    _, bots = create_game(4, 3, "random, deductive, probing, strategic")
+    assert [type(bot) for bot in bots] == [RandomPolicy, DeductivePolicy, ProbingPolicy, StrategicPolicy]
+    _, bots = create_game(2, 3, "strategic")
+    assert [type(bot) for bot in bots] == [StrategicPolicy, StrategicPolicy]
+    with pytest.raises(ValueError, match="one policy per player"):
+        create_game(4, 3, "random,probing")
+    with pytest.raises(ValueError, match="unknown policy"):
+        create_game(2, 3, "random,unrecognized")
 
 
 @pytest.mark.parametrize("viewer", [None, 2])

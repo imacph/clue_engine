@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .engine import Engine
 from .models import Action, Combination
 from .observations import Event, EventKind, PlayerView, public_events
-from .policies import DeductivePolicy, Policy, RandomPolicy
+from .policies import Policy, make_policy, policies_for_players
 from .state import deal
 
 
@@ -35,11 +35,9 @@ class SessionSnapshot:
 
 
 def create_game(num_players: int, seed: int, policy_name: str) -> tuple[Engine, tuple[Policy, ...]]:
-    if policy_name not in {"deductive", "random"}:
-        raise ValueError(f"unknown policy: {policy_name}")
+    names = policies_for_players(policy_name, num_players)
     engine = Engine(deal(random.Random(seed), num_players))
-    policy_type = DeductivePolicy if policy_name == "deductive" else RandomPolicy
-    policies = tuple(policy_type(random.Random(f"{seed}:{i}")) for i in range(num_players))
+    policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
     return engine, policies
 
 
