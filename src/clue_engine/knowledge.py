@@ -3,7 +3,7 @@ from enum import Enum, auto
 
 from .cards import CARDS, CARDS_BY_ID
 from .models import CardType, Combination
-from .observations import Event, EventKind, PlayerView
+from .observations import Event, EventKind, PlayerView, is_incorrect_accusation
 
 
 class Mark(Enum):
@@ -64,16 +64,14 @@ def knowledge_for(view: PlayerView, num_players: int) -> Knowledge:
                     raise ValueError("SHOW event without a card")
                 _set(knowledge, event.actor, event.card_id, Mark.HELD)
             case EventKind.ACCUSE:
-                if index + 1 < len(view.events):
-                    next_event = view.events[index + 1]
-                    if next_event.kind is EventKind.END_TURN and next_event.actor == event.actor:
-                        if event.combo is None:
-                            raise ValueError("ACCUSE event without a combination")
-                        knowledge.wrong_accusations.append(frozenset({
-                            event.combo.suspect_id,
-                            event.combo.weapon_id,
-                            event.combo.room_id,
-                        }))
+                if is_incorrect_accusation(view.events, index):
+                    if event.combo is None:
+                        raise ValueError("ACCUSE event without a combination")
+                    knowledge.wrong_accusations.append(frozenset({
+                        event.combo.suspect_id,
+                        event.combo.weapon_id,
+                        event.combo.room_id,
+                    }))
 
     _propagate(knowledge)
     return knowledge

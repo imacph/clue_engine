@@ -17,7 +17,7 @@ from ..models import (
     Reveal,
     Suggest,
 )
-from ..observations import PlayerView
+from ..observations import EventKind, PlayerView
 from ..presentation import (
     format_clauses,
     format_debug_information,
@@ -25,6 +25,9 @@ from ..presentation import (
     format_hand,
 )
 from ..session import GameSession, SessionSnapshot
+
+HISTORY_KINDS = tuple(EventKind)
+CLAUSE_KINDS = (EventKind.REFUTE, EventKind.ACCUSE)
 
 
 class GameFrame(ttk.Frame):
@@ -41,6 +44,7 @@ class GameFrame(ttk.Frame):
         self.paused = paused
         self.scheduled: str | None = None
         self._event_count = 0
+        self._history_match_count = 0
         self.status_text = tk.StringVar(master=self)
         self.turn_text = tk.StringVar(master=self)
         self.hand_title = tk.StringVar(master=self)
@@ -51,6 +55,8 @@ class GameFrame(ttk.Frame):
         self._schedule()
 
     def _build(self, on_setup: Callable[[], None] | None) -> None:
+        snapshot = self.session.snapshot()
+        num_players = snapshot.num_players
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
         self.rowconfigure(3, weight=1)
@@ -78,7 +84,7 @@ class GameFrame(ttk.Frame):
         panels.add(right, weight=1)
         left.columnconfigure(1, weight=1)
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(2, weight=1)
 
         ttk.Label(left, textvariable=self.hand_title, font=("TkDefaultFont", 10, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w"
@@ -117,18 +123,23 @@ class GameFrame(ttk.Frame):
         ttk.Label(right, text="Game history", font=("TkDefaultFont", 10, "bold")).grid(
             row=0, column=0, sticky="w"
         )
+        history_filters = ttk.Frame(right)
+        history_filters.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.history_actor_choice, self.history_type_choice = self._filter_choices(
+            history_filters, num_players,
+            tuple(kind.name.replace("_", " ").capitalize() for kind in HISTORY_KINDS),
+            self._history_filter_selected,
+        )
         self.history = tk.Text(right, height=10, width=48, wrap="word", state="disabled")
-        self.history.grid(row=1, column=0, sticky="nsew")
+        self.history.grid(row=2, column=0, sticky="nsew")
         history_scroll = ttk.Scrollbar(right, orient="vertical", command=self.history.yview)
-        history_scroll.grid(row=1, column=1, sticky="ns")
+        history_scroll.grid(row=2, column=1, sticky="ns")
         self.history.configure(yscrollcommand=history_scroll.set)
 
         notebook_frame = ttk.LabelFrame(self, text="Detective notebook (+ held, - not held, ? unknown)")
         notebook_frame.grid(row=3, column=0, sticky="nsew")
         notebook_frame.rowconfigure(1, weight=1)
         notebook_frame.columnconfigure(0, weight=1)
-        snapshot = self.session.snapshot()
-        num_players = snapshot.num_players
         selector = ttk.Frame(notebook_frame)
         selector.grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=4)
         ttk.Label(selector, text="Knowledge of:").pack(side="left")
@@ -151,8 +162,14 @@ class GameFrame(ttk.Frame):
         notebook_panels.add(clauses_frame, weight=2)
         matrix_frame.rowconfigure(0, weight=1)
         matrix_frame.columnconfigure(0, weight=1)
-        clauses_frame.rowconfigure(0, weight=1)
+        clauses_frame.rowconfigure(1, weight=1)
         clauses_frame.columnconfigure(0, weight=1)
+        clause_filters = ttk.Frame(clauses_frame)
+        clause_filters.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self.clause_actor_choice, self.clause_type_choice = self._filter_choices(
+            clause_filters, num_players, ("Refutation", "Incorrect accusation"),
+            self._clause_filter_selected,
+        )
         columns = ("card", *(f"p{i}" for i in range(num_players)), "envelope")
         self.notebook = ttk.Treeview(matrix_frame, columns=columns, show="headings", height=8)
         self.notebook.heading("card", text="Card")
@@ -173,10 +190,33 @@ class GameFrame(ttk.Frame):
             yscrollcommand=notebook_scroll.set, xscrollcommand=horizontal_scroll.set
         )
         self.clauses = tk.Text(clauses_frame, height=8, width=36, wrap="word", state="disabled")
-        self.clauses.grid(row=0, column=0, sticky="nsew")
+        self.clauses.grid(row=1, column=0, sticky="nsew")
         clause_scroll = ttk.Scrollbar(clauses_frame, orient="vertical", command=self.clauses.yview)
-        clause_scroll.grid(row=0, column=1, sticky="ns")
+        clause_scroll.grid(row=1, column=1, sticky="ns")
         self.clauses.configure(yscrollcommand=clause_scroll.set)
+
+    @staticmethod
+    def _filter_choices(
+        parent: ttk.Frame,
+        num_players: int,
+        types: tuple[str, ...],
+        callback: Callable[[tk.Event], None],
+    ) -> tuple[ttk.Combobox, ttk.Combobox]:
+        parent.columnconfigure(1, weight=1)
+        ttk.Label(parent, text="Actor:").grid(row=0, column=0, sticky="w")
+        actor = ttk.Combobox(
+            parent, state="readonly", width=11,
+            values=("All players", *(f"Player {player}" for player in range(num_players))),
+        )
+        actor.current(0)
+        actor.grid(row=0, column=1, sticky="ew", padx=3)
+        ttk.Label(parent, text="Type:").grid(row=1, column=0, sticky="w")
+        kind = ttk.Combobox(parent, state="readonly", width=20, values=("All types", *types))
+        kind.current(0)
+        kind.grid(row=1, column=1, sticky="ew", padx=3)
+        actor.bind("<<ComboboxSelected>>", callback)
+        kind.bind("<<ComboboxSelected>>", callback)
+        return actor, kind
 
     @staticmethod
     def _set_enabled(widget: ttk.Widget, enabled: bool) -> None:
@@ -211,13 +251,35 @@ class GameFrame(ttk.Frame):
         self._refresh_actions(snapshot)
 
     def _refresh_history(self, snapshot: SessionSnapshot) -> None:
+        actor_index = self.history_actor_choice.current() - 1
+        kind_index = self.history_type_choice.current() - 1
+        actor = actor_index if actor_index >= 0 else None
+        kind = HISTORY_KINDS[kind_index] if kind_index >= 0 else None
         self.history.configure(state="normal")
+        if self._history_match_count == 0:
+            self.history.delete("1.0", "end")
         for index in range(self._event_count, len(snapshot.events)):
+            event = snapshot.events[index]
+            if (actor is not None and event.actor != actor) or (
+                kind is not None and event.kind is not kind
+            ):
+                continue
             previous = snapshot.events[index - 1] if index else None
-            self.history.insert("end", format_event(snapshot.events[index], previous) + "\n")
+            self.history.insert("end", format_event(event, previous) + "\n")
+            self._history_match_count += 1
+        if self._history_match_count == 0 and (actor is not None or kind is not None):
+            self.history.insert("end", "No events match the current filters.\n")
         self._event_count = len(snapshot.events)
         self.history.see("end")
         self.history.configure(state="disabled")
+
+    def _history_filter_selected(self, _event: tk.Event) -> None:
+        self._event_count = 0
+        self._history_match_count = 0
+        self._refresh_history(self.session.snapshot())
+
+    def _clause_filter_selected(self, _event: tk.Event) -> None:
+        self._refresh()
 
     def _knowledge_selected(self, _event: tk.Event) -> None:
         self._refresh()
@@ -238,7 +300,14 @@ class GameFrame(ttk.Frame):
                     self.notebook.insert("", "end", iid=item_id, values=values)
         self.clauses.configure(state="normal")
         self.clauses.delete("1.0", "end")
-        self.clauses.insert("1.0", format_clauses(knowledge))
+        actor_index = self.clause_actor_choice.current() - 1
+        kind_index = self.clause_type_choice.current() - 1
+        self.clauses.insert("1.0", format_clauses(
+            knowledge,
+            view=view,
+            actor=actor_index if actor_index >= 0 else None,
+            kind=CLAUSE_KINDS[kind_index] if kind_index >= 0 else None,
+        ))
         self.clauses.configure(state="disabled")
 
     def _refresh_actions(self, snapshot: SessionSnapshot) -> None:

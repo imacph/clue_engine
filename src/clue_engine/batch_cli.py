@@ -13,6 +13,12 @@ from .batch import (
     policies_for_players,
     run_batch,
 )
+from .distributions import Distributions
+from .distributions_cli import (
+    add_distribution_options,
+    render_options,
+    validate_options,
+)
 from .policies import POLICY_NAMES
 
 
@@ -28,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-steps", type=int, default=10_000)
     parser.add_argument("--no-rotate", action="store_true", help="do not rotate policies across seats")
     parser.add_argument("--trace", type=Path, required=True, help="new JSONL trace file (never overwritten)")
+    add_distribution_options(parser)
     args = parser.parse_args(argv)
     if args.players < 2:
         parser.error("--players must be at least 2")
@@ -35,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         names = policies_for_players(args.policies, args.players)
         config = BatchConfig(args.games, names, args.seed, args.max_steps, not args.no_rotate)
         config.validate()
+        validate_options(args)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -56,14 +64,18 @@ def main(argv: list[str] | None = None) -> int:
         print("Cancelling after the current action...", file=sys.stderr, flush=True)
 
     signal.signal(signal.SIGINT, interrupt)
+    distributions = Distributions()
     try:
-        summary = run_batch(config, args.trace, progress=progress, cancelled=stop.is_set)
+        summary = run_batch(
+            config, args.trace, progress=progress, cancelled=stop.is_set, on_game=distributions.add_game,
+        )
     except OSError as exc:
         print(f"Unable to write trace: {exc}", file=sys.stderr)
         return 2
     finally:
         signal.signal(signal.SIGINT, previous_handler)
     print(format_summary(summary))
+    print(render_options(distributions, args))
     print(f"Private trace: {args.trace}")
     if summary["cancelled"]:
         return 130

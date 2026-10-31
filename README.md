@@ -89,6 +89,15 @@ history remains public unless omniscient debug is enabled. Both interfaces show
 the recorded refutation and incorrect-accusation clauses, distinguishing
 unresolved constraints from those already satisfied.
 
+In the desktop game window, the history and clause panels each have independent
+**Actor** and **Type** filters. History actors are the players who performed
+the events (for a shown card, the player who showed it). Clause actors are the
+refuting player or the player who made the incorrect accusation. The selected
+filters affect only the display, not the knowledge matrix or deductions.
+Spectator history remains public even when viewing a player's private notebook;
+private shown cards appear in history only when visible to the human player or
+when omniscient debug mode is enabled.
+
 **Pause** stops automated actions; **Next action** advances one bot action while
 paused, and **Resume** continues. Human actions are always submitted manually.
 **New game** returns to setup. The optional omniscient debug setting requires
@@ -142,6 +151,35 @@ and a new trace file there, start or cancel it, and inspect its progress and
 summary while it runs. The trace controls can also open an existing JSONL file
 and display one zero-based game number at a time. Trace loading and batch work
 run off the Tk thread. Closing the window requests cancellation.
+
+After a batch finishes or is cancelled, the **Distributions** tab displays a
+histogram. Select actions, Player 0's completed turns, outcomes, or the action
+at which a player first learned the solution. Choose counts or percentages,
+set a positive bin width, and use **Refresh chart** (or press Enter in a
+setting). Deduction charts can be filtered by policy, seat, or both. To analyze
+an existing trace, choose it with **Existing...**, then select **Load trace
+distributions** in that tab.
+
+The batch CLI prints an action histogram by default. Change its settings or
+analyze an existing trace without running another batch:
+
+```text
+python -m clue_engine.batch_cli --games 100 --players 4 --trace batch-turns.jsonl --metric turns --bin-width 2 --display percent
+python -m clue_engine.distributions_cli --trace batch-42.jsonl --metric deduction --filter-policy strategic --filter-seat 2 --bin-width 10 --display percent
+```
+
+Metrics are `actions`, `turns`, `outcomes`, and `deduction`; display modes are
+`count` and `percent`. Policy and seat filters apply only to deduction. Numeric
+bins are inclusive at both displayed endpoints and empty bins are omitted.
+Chart percentages are empirical frequencies, not guaranteed probabilities.
+Action and turn charts use completed games only and report excluded timeouts,
+errors, and cancellations. Outcome charts use recorded game results. Deduction
+charts use only matching seat exposures recorded as having learned the solution
+for their percentages; they also report matching exposures not recorded as
+learned, including partial games. If a policy occupies multiple seats, each
+seat is a separate exposure. A partial trace is flagged when a started game
+lacks a result or the batch result is missing; malformed traces are reported
+instead of silently skipped.
 
 **Traces contain all private information**, including every hand, the solution,
 and private shown cards. Keep them in a secure location and do not share them

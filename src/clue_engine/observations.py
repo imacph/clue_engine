@@ -48,6 +48,14 @@ def public_events(log: tuple[Event, ...]) -> tuple[Event, ...]:
     return tuple(event for event in log if event.private_to is None)
 
 
+def is_incorrect_accusation(events: tuple[Event, ...], index: int) -> bool:
+    event = events[index]
+    if event.kind is not EventKind.ACCUSE or index + 1 >= len(events):
+        return False
+    next_event = events[index + 1]
+    return next_event.kind is EventKind.END_TURN and next_event.actor == event.actor
+
+
 def last_suggest_index(log: tuple[Event, ...]) -> int | None:
     return max(
         (i for i, event in enumerate(log) if event.kind is EventKind.SUGGEST),

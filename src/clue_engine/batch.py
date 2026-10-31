@@ -356,6 +356,7 @@ def run_batch(
     *,
     progress: Callable[[BatchSummary], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
+    on_game: Callable[[GameResult], None] | None = None,
 ) -> BatchSummary:
     """Write all private traces to a new file and return aggregate statistics."""
     config.validate()
@@ -374,9 +375,12 @@ def run_batch(
             seed = config.seed + (game // len(names) if config.rotate else game)
             result = _run_game(game, seed, names, config.max_steps, stream, should_cancel)
             aggregate.add(result)
+            game_cancelled = result.outcome == "cancelled"
+            if on_game is not None:
+                on_game(result)
             if progress is not None:
                 progress(aggregate.summary(should_cancel()))
-            if result.outcome == "cancelled":
+            if game_cancelled:
                 break
         summary = aggregate.summary(should_cancel())
         _write(stream, {"type": "batch_result", "summary": summary})

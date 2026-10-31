@@ -3,7 +3,7 @@
 from .cards import CARDS, CARDS_BY_ID
 from .knowledge import Knowledge, Mark, knowledge_for
 from .models import Combination
-from .observations import Event, EventKind, PlayerView
+from .observations import Event, EventKind, PlayerView, is_incorrect_accusation
 from .observations import public_events as _public_events
 from .state import GameState
 
@@ -68,14 +68,45 @@ def format_knowledge(view: PlayerView, num_players: int) -> str:
     return "\n".join(lines)
 
 
-def format_clauses(knowledge: Knowledge) -> str:
-    """Describe the stored refutation and incorrect-accusation constraints."""
+def format_clauses(
+    knowledge: Knowledge,
+    *,
+    view: PlayerView | None = None,
+    actor: int | None = None,
+    kind: EventKind | None = None,
+) -> str:
+    """Describe constraints, optionally filtering by their actor and source event type.
+
+    The player view supplies accusers, which are not stored in Knowledge.
+    """
+    if kind not in (None, EventKind.REFUTE, EventKind.ACCUSE):
+        raise ValueError("clause type must be REFUTE or ACCUSE")
+    if actor is not None and view is None:
+        raise ValueError("actor filtering requires the player view")
+
+    accusation_events = None
+    if view is not None:
+        accusation_events = tuple(
+            event for index, event in enumerate(view.events)
+            if is_incorrect_accusation(view.events, index)
+        )
+        if len(accusation_events) != len(knowledge.wrong_accusations):
+            raise ValueError("player view does not match the knowledge's incorrect accusations")
+        for event, cards in zip(accusation_events, knowledge.wrong_accusations, strict=True):
+            combo = event.combo
+            if combo is None or frozenset(
+                (combo.suspect_id, combo.weapon_id, combo.room_id)
+            ) != cards:
+                raise ValueError("player view does not match the knowledge's incorrect accusations")
+
     lines = ["Clauses:"]
 
     def names(cards: list[int]) -> str:
         return ", ".join(CARDS_BY_ID[card_id].name for card_id in cards)
 
     for clause in knowledge.clauses:
+        if kind is EventKind.ACCUSE or (actor is not None and clause.holder != actor):
+            continue
         cards = sorted(clause.cards)
         held = [card_id for card_id in cards if knowledge.mark_of(clause.holder, card_id) is Mark.HELD]
         remaining = [
@@ -84,7 +115,10 @@ def format_clauses(knowledge: Knowledge) -> str:
         status = f"satisfied: {names(held)}" if held else f"unresolved; remaining: {names(remaining)}"
         lines.append(f"Player {clause.holder} holds at least one of: {names(cards)} ({status}).")
 
-    for clause in knowledge.wrong_accusations:
+    for index, clause in enumerate(knowledge.wrong_accusations):
+        event = accusation_events[index] if accusation_events is not None else None
+        if kind is EventKind.REFUTE or (actor is not None and (event is None or event.actor != actor)):
+            continue
         cards = sorted(clause)
         excluded = [
             card_id for card_id in cards
@@ -98,9 +132,16 @@ def format_clauses(knowledge: Knowledge) -> str:
             f"satisfied: {names(excluded)}" if excluded
             else f"unresolved; remaining: {names(remaining)}"
         )
-        lines.append(f"Incorrect accusation: {names(cards)}; at least one is not in the envelope ({status}).")
+        source = f" by Player {event.actor}" if event is not None else ""
+        lines.append(
+            f"Incorrect accusation{source}: {names(cards)}; "
+            f"at least one is not in the envelope ({status})."
+        )
     if len(lines) == 1:
-        lines.append("No clauses recorded.")
+        lines.append(
+            "No clauses match the current filters."
+            if actor is not None or kind is not None else "No clauses recorded."
+        )
     return "\n".join(lines)
 
 

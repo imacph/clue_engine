@@ -16,6 +16,8 @@ from ..batch import (
     read_game_trace,
     run_batch,
 )
+from ..distributions import Distributions, read_distributions
+from .distribution_view import DistributionView
 
 
 def _load_trace_text(path: Path, game: int) -> str:
@@ -42,6 +44,8 @@ class BatchWindow(tk.Toplevel):
         self._updates: Queue[BatchSummary] = Queue(maxsize=1)
         self._future: Future[BatchSummary] | None = None
         self._trace_future: Future[str] | None = None
+        self._distribution_future: Future[Distributions] | None = None
+        self._building_distributions: Distributions | None = None
         self._poll_id: str | None = None
         self._render_id: str | None = None
         self._render_text: str | None = None
@@ -84,8 +88,12 @@ class BatchWindow(tk.Toplevel):
         self.open_button = ttk.Button(buttons, text="Open trace", command=self.open_trace)
         self.open_button.pack(side="left", padx=3)
         ttk.Label(self, textvariable=self.status, padding=(10, 0)).grid(row=1, column=0, sticky="w")
-        output_frame = ttk.Frame(self, padding=10)
-        output_frame.grid(row=2, column=0, sticky="nsew")
+        notebook = ttk.Notebook(self)
+        notebook.grid(row=2, column=0, sticky="nsew")
+        output_frame = ttk.Frame(notebook, padding=10)
+        notebook.add(output_frame, text="Summary and trace")
+        self.distribution_view = DistributionView(notebook, self.load_distributions)
+        notebook.add(self.distribution_view, text="Distributions")
         output_frame.columnconfigure(0, weight=1)
         output_frame.rowconfigure(0, weight=1)
         self.output = tk.Text(output_frame, wrap="word", state="disabled")
@@ -117,7 +125,8 @@ class BatchWindow(tk.Toplevel):
         self.output.configure(state="disabled")
 
     def start(self) -> None:
-        if self._future is not None or self._trace_future is not None or self._render_id is not None:
+        if (self._future is not None or self._trace_future is not None
+                or self._distribution_future is not None or self._render_id is not None):
             return
         try:
             count, players = int(self.games.get()), int(self.players.get())
@@ -146,6 +155,9 @@ class BatchWindow(tk.Toplevel):
         self.start_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
         self.open_button.configure(state="disabled")
+        self.distribution_view.load_button.configure(state="disabled")
+        self.distribution_view.set_data(None)
+        self._building_distributions = Distributions()
         self.status.set("Running batch...")
         self._show("")
 
@@ -154,7 +166,8 @@ class BatchWindow(tk.Toplevel):
                 self._updates.put_nowait(summary)
 
         self._future = self._executor.submit(
-            run_batch, config, path, progress=progress, cancelled=self._cancel.is_set
+            run_batch, config, path, progress=progress, cancelled=self._cancel.is_set,
+            on_game=self._building_distributions.add_game,
         )
         self._schedule_poll()
 
@@ -185,16 +198,20 @@ class BatchWindow(tk.Toplevel):
                 else:
                     self.status.set("Batch complete.")
                 self._show(format_summary(summary))
+                self.distribution_view.set_data(self._building_distributions)
+            self._building_distributions = None
             self._future = None
             self.start_button.configure(state="normal")
             self.cancel_button.configure(state="disabled")
             self.open_button.configure(state="normal")
+            self.distribution_view.load_button.configure(state="normal")
         if self._trace_future is not None and self._trace_future.done():
             error = self._trace_future.exception()
             if error is not None:
                 self.status.set(f"Unable to open trace: {error}")
                 self.open_button.configure(state="normal")
                 self.start_button.configure(state="normal")
+                self.distribution_view.load_button.configure(state="normal")
             else:
                 self._render_text = self._trace_future.result()
                 self._render_position = 0
@@ -202,7 +219,18 @@ class BatchWindow(tk.Toplevel):
                 self.output.delete("1.0", "end")
                 self._render_chunk()
             self._trace_future = None
-        if self._future is not None or self._trace_future is not None:
+        if self._distribution_future is not None and self._distribution_future.done():
+            error = self._distribution_future.exception()
+            if error is not None:
+                self.status.set(f"Unable to load distributions: {error}")
+            else:
+                self.distribution_view.set_data(self._distribution_future.result())
+                self.status.set("Loaded distributions from private trace.")
+            self._distribution_future = None
+            self.open_button.configure(state="normal")
+            self.start_button.configure(state="normal")
+            self.distribution_view.load_button.configure(state="normal")
+        if self._future is not None or self._trace_future is not None or self._distribution_future is not None:
             self._schedule_poll()
 
     def _render_chunk(self) -> None:
@@ -219,6 +247,7 @@ class BatchWindow(tk.Toplevel):
             self.status.set(f"Showing game {self._trace_game} (private trace).")
             self.open_button.configure(state="normal")
             self.start_button.configure(state="normal")
+            self.distribution_view.load_button.configure(state="normal")
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -226,7 +255,8 @@ class BatchWindow(tk.Toplevel):
         self.cancel_button.configure(state="disabled")
 
     def open_trace(self) -> None:
-        if self._future is not None or self._trace_future is not None or self._render_id is not None:
+        if (self._future is not None or self._trace_future is not None
+                or self._distribution_future is not None or self._render_id is not None):
             return
         try:
             path = self.trace.get().strip()
@@ -241,8 +271,28 @@ class BatchWindow(tk.Toplevel):
         self.status.set(f"Loading game {game}...")
         self.open_button.configure(state="disabled")
         self.start_button.configure(state="disabled")
+        self.distribution_view.load_button.configure(state="disabled")
         self._trace_game = game
         self._trace_future = self._executor.submit(_load_trace_text, Path(path), game)
+        self._schedule_poll()
+
+    def load_distributions(self) -> None:
+        if (self._future is not None or self._trace_future is not None
+                or self._distribution_future is not None or self._render_id is not None):
+            return
+        path = self.trace.get().strip()
+        if not path:
+            messagebox.showerror("Invalid trace", "Choose a trace file.", parent=self)
+            return
+        self._cancel.clear()
+        self.status.set("Loading distributions from private trace...")
+        self.open_button.configure(state="disabled")
+        self.start_button.configure(state="disabled")
+        self.distribution_view.load_button.configure(state="disabled")
+        self.distribution_view.set_data(None)
+        self._distribution_future = self._executor.submit(
+            read_distributions, Path(path), cancelled=self._cancel.is_set,
+        )
         self._schedule_poll()
 
     def destroy(self) -> None:

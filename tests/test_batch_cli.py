@@ -40,6 +40,45 @@ def test_batch_cli_accepts_advanced_profiles(tmp_path):
     assert "strategic:" in result.stdout
 
 
+def test_batch_and_existing_trace_cli_display_distributions(tmp_path):
+    trace = tmp_path / "distribution.jsonl"
+    result = subprocess.run(
+        [sys.executable, "-m", "clue_engine.batch_cli", "--games", "2", "--players", "2",
+         "--max-steps", "0", "--trace", str(trace), "--metric", "outcomes", "--display", "percent"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 1
+    assert "Distribution: Outcomes" in result.stdout
+    assert "100.0%" in result.stdout
+    loaded = subprocess.run(
+        [sys.executable, "-m", "clue_engine.distributions_cli", "--trace", str(trace),
+         "--metric", "outcomes", "--display", "percent"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert loaded.returncode == 0
+    assert "100.0%" in loaded.stdout
+    deduction = subprocess.run(
+        [sys.executable, "-m", "clue_engine.distributions_cli", "--trace", str(trace),
+         "--metric", "deduction", "--filter-policy", "deductive", "--filter-seat", "1"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert deduction.returncode == 0
+    assert "policy=deductive, seat=1" in deduction.stdout
+    assert "2 seat exposures" in deduction.stdout
+
+
+def test_invalid_distribution_options_do_not_create_trace(tmp_path):
+    trace = tmp_path / "bad.jsonl"
+    result = subprocess.run(
+        [sys.executable, "-m", "clue_engine.batch_cli", "--trace", str(trace),
+         "--metric", "actions", "--filter-seat", "0"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 2
+    assert "only to deduction" in result.stderr
+    assert not trace.exists()
+
+
 def test_batch_cli_success_and_incomplete_rotation_warning(tmp_path):
     trace = tmp_path / "successful.jsonl"
     result = subprocess.run(

@@ -7,9 +7,12 @@ import pytest
 
 tk = pytest.importorskip("tkinter")
 
+from clue_engine.batch import GameResult
+from clue_engine.distributions import Distributions
 from clue_engine.engine import Engine
 from clue_engine.gui.app import GuiApp
 from clue_engine.gui.batch_window import BatchWindow
+from clue_engine.gui.distribution_view import DistributionView
 from clue_engine.gui.widgets import GameFrame
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.policies import ProbingPolicy, StrategicPolicy
@@ -135,6 +138,110 @@ def test_player_cannot_switch_to_another_players_knowledge(root):
     assert frame.knowledge_player_choice["values"] == ("Player 0",)
 
 
+def select_filter(root, choice, value):
+    choice.set(value)
+    choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+
+
+def test_history_filters_update_live_and_preserve_unfiltered_context(root):
+    engine = make_engine()
+    session = GameSession(
+        engine,
+        [ScriptedPolicy(Suggest(SUGGESTION), EndTurn()), ScriptedPolicy(Reveal(7)),
+         ScriptedPolicy(), ScriptedPolicy()],
+    )
+    frame = GameFrame(root, session, paused=True)
+    frame.pack()
+    root.update()
+    select_filter(root, frame.history_actor_choice, "Player 1")
+    select_filter(root, frame.history_type_choice, "Refute")
+    assert "No events match" in frame.history.get("1.0", "end")
+    frame.next_button.invoke()
+    assert "No events match" in frame.history.get("1.0", "end")
+    frame.next_button.invoke()
+    assert "Player 1 refuted" in frame.history.get("1.0", "end")
+    assert "suggested" not in frame.history.get("1.0", "end")
+    frame.next_button.invoke()
+    assert frame.history_actor_choice.get() == "Player 1"
+    assert frame.history_type_choice.get() == "Refute"
+    assert frame.history.get("1.0", "end").count("refuted") == 1
+    select_filter(root, frame.history_actor_choice, "All players")
+    select_filter(root, frame.history_type_choice, "All types")
+    assert "Player 0 suggested" in frame.history.get("1.0", "end")
+    assert "Player 0 ended their turn" in frame.history.get("1.0", "end")
+
+    engine = make_engine()
+    engine.step(Accuse(Combination(1, 6, 12)))
+    frame = GameFrame(root, GameSession(engine, [ScriptedPolicy()] * 4), paused=True)
+    frame.pack()
+    root.update()
+    select_filter(root, frame.history_type_choice, "End turn")
+    history = frame.history.get("1.0", "end")
+    assert "was eliminated after an incorrect accusation" in history
+    assert "accused:" not in history
+
+
+def test_clause_filters_do_not_change_matrix_and_follow_selected_view(root):
+    engine = make_engine()
+    engine.step(Suggest(SUGGESTION))
+    engine.step(Reveal(7))
+    engine.step(EndTurn())
+    engine.step(Accuse(Combination(2, 8, 14)))
+    engine.step(Accuse(Combination(2, 8, 14)))
+    frame = GameFrame(root, GameSession(engine, [ScriptedPolicy()] * 4), paused=True)
+    frame.pack()
+    root.update()
+    matrix = [frame.notebook.item(item)["values"] for item in frame.notebook.get_children()]
+    select_filter(root, frame.clause_actor_choice, "Player 2")
+    select_filter(root, frame.clause_type_choice, "Incorrect accusation")
+    clauses = frame.clauses.get("1.0", "end")
+    assert "Incorrect accusation by Player 2:" in clauses
+    assert "Player 1" not in clauses
+    assert matrix == [frame.notebook.item(item)["values"] for item in frame.notebook.get_children()]
+    select_filter(root, frame.knowledge_player_choice, "Player 3")
+    assert frame.clause_actor_choice.get() == "Player 2"
+    assert frame.clause_type_choice.get() == "Incorrect accusation"
+    assert "Incorrect accusation by Player 2:" in frame.clauses.get("1.0", "end")
+    select_filter(root, frame.clause_type_choice, "Refutation")
+    assert "No clauses match" in frame.clauses.get("1.0", "end")
+    select_filter(root, frame.clause_actor_choice, "Player 1")
+    assert "Player 1 holds at least one of" in frame.clauses.get("1.0", "end")
+    select_filter(root, frame.clause_actor_choice, "All players")
+    select_filter(root, frame.clause_type_choice, "All types")
+    assert "Incorrect accusation by Player 1:" in frame.clauses.get("1.0", "end")
+    assert "Incorrect accusation by Player 2:" in frame.clauses.get("1.0", "end")
+
+
+@pytest.mark.parametrize(
+    ("human_player", "debug", "can_see_show"),
+    [(None, False, False), (None, True, True), (0, False, True),
+     (1, False, True), (2, False, False)],
+)
+def test_history_show_filter_respects_view_privacy(root, human_player, debug, can_see_show):
+    engine = make_engine()
+    engine.step(Suggest(SUGGESTION))
+    engine.step(Reveal(7))
+    frame = GameFrame(
+        root,
+        GameSession(engine, [ScriptedPolicy()] * 4, human_player=human_player, debug=debug),
+        paused=True,
+    )
+    frame.pack()
+    root.update()
+    select_filter(root, frame.history_actor_choice, "Player 1")
+    select_filter(root, frame.history_type_choice, "Show")
+    text = frame.history.get("1.0", "end")
+    assert ("Player 1 showed Dagger to Player 0" in text) is can_see_show
+    assert ("No events match" in text) is not can_see_show
+    if can_see_show:
+        select_filter(root, frame.history_actor_choice, "Player 0")
+        assert "No events match" in frame.history.get("1.0", "end")
+    if human_player is None and not debug:
+        select_filter(root, frame.knowledge_player_choice, "Player 0")
+        assert "showed" not in frame.history.get("1.0", "end")
+
+
 def test_gui_displays_player_zero_completed_turns(root):
     engine = make_engine()
     frame = GameFrame(root, GameSession(engine, [ScriptedPolicy()] * 4, human_player=0), paused=True)
@@ -227,6 +334,14 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     assert window._future is None
     assert "timeouts" in window.status.get()
     assert "timeout=2" in window.output.get("1.0", "end")
+    assert window.distribution_view.data is not None
+    window.distribution_view.metric.set("outcomes")
+    window.distribution_view.mode.set("percent")
+    window.distribution_view.refresh()
+    assert window.distribution_view.chart is not None
+    assert window.distribution_view.chart.samples == 2
+    assert any("100.0%" == window.distribution_view.canvas.itemcget(item, "text")
+               for item in window.distribution_view.canvas.find_withtag("value"))
     window.open_trace()
     while (window._trace_future is not None or window._render_id is not None) and time.monotonic() < deadline:
         root.update()
@@ -248,6 +363,78 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
         time.sleep(0.01)
     assert "Showing game 0" in existing.status.get()
     assert '"type": "game_start"' in existing.output.get("1.0", "end")
+    existing.load_distributions()
+    while existing._distribution_future is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert existing._distribution_future is None
+    assert existing.distribution_view.data is not None
+    assert existing.distribution_view.data.outcomes["timeout"] == 2
+
+
+def test_distribution_chart_filters_bins_and_invalid_input(root):
+    data = Distributions()
+    data.add_game(GameResult(
+        0, 0, ("random", "strategic"), "won", 1, 12, [3, 2], 0, 0, 0, [None, 5], [],
+    ))
+    data.add_game(GameResult(
+        1, 1, ("strategic", "random"), "timeout", None, 10, [2, 2], 0, 0, 0, [None, 7], [],
+    ))
+    view = DistributionView(root, lambda: None)
+    view.pack()
+    view.set_data(data)
+    assert view.chart is not None and view.chart.samples == 1
+    view.metric.set("deduction")
+    view.policy.set("strategic")
+    view.seat.set("1")
+    view.width.set("5")
+    view.mode.set("percent")
+    view.refresh()
+    assert view.chart is not None and view.chart.samples == 1
+    assert view.chart.bins[0].label == "5-9"
+    assert "1 seat exposures" in view.description.get()
+    assert len(view.canvas.find_withtag("bar")) == 1
+    view.width.set("0")
+    view.refresh()
+    assert view.chart is None
+    assert "width" in view.description.get()
+
+
+def test_loading_invalid_distribution_trace_is_visible(root, tmp_path):
+    path = tmp_path / "bad.jsonl"
+    path.write_text("invalid", encoding="utf-8")
+    window = BatchWindow(root)
+    window.trace.set(str(path))
+    window.load_distributions()
+    deadline = time.monotonic() + 10
+    while window._distribution_future is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert window._distribution_future is None
+    assert "Unable to load distributions" in window.status.get()
+    assert "line 1" in window.status.get()
+
+
+def test_closing_batch_window_cancels_distribution_loading(root, tmp_path, monkeypatch):
+    from clue_engine.gui import batch_window
+
+    started, finished = Event(), Event()
+
+    def wait_for_cancel(path, *, cancelled):
+        started.set()
+        while not cancelled():
+            time.sleep(0.01)
+        finished.set()
+        raise RuntimeError("trace loading cancelled")
+
+    monkeypatch.setattr(batch_window, "read_distributions", wait_for_cancel)
+    window = BatchWindow(root)
+    window.trace.set(str(tmp_path / "trace.jsonl"))
+    window.load_distributions()
+    assert started.wait(5)
+    window.destroy()
+    assert finished.wait(5)
+    root.update()
 
 
 def test_batch_window_reports_existing_trace_error(root, tmp_path, monkeypatch):
@@ -276,12 +463,12 @@ def test_batch_window_cancels_worker_and_callbacks(root, tmp_path, monkeypatch, 
     started, finished = Event(), Event()
     real_run_batch = batch_window.run_batch
 
-    def wait_for_cancel(config, path, *, progress, cancelled):
+    def wait_for_cancel(config, path, *, progress, cancelled, on_game):
         started.set()
         while not cancelled():
             time.sleep(0.01)
         try:
-            return real_run_batch(config, path, progress=progress, cancelled=cancelled)
+            return real_run_batch(config, path, progress=progress, cancelled=cancelled, on_game=on_game)
         finally:
             finished.set()
 

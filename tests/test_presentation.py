@@ -1,6 +1,13 @@
+from dataclasses import replace
+
+import pytest
+
 from clue_engine.engine import Engine
-from clue_engine.models import Accuse, Combination, Reveal, Suggest
+from clue_engine.knowledge import knowledge_for
+from clue_engine.models import Accuse, Combination, EndTurn, Reveal, Suggest
+from clue_engine.observations import EventKind
 from clue_engine.presentation import (
+    format_clauses,
     format_event,
     format_hand,
     format_knowledge,
@@ -79,3 +86,49 @@ def test_knowledge_displays_unresolved_wrong_accusation_clause():
     engine.step(Accuse(Combination(2, 8, 14)))
     text = format_knowledge(engine.view(3), engine.num_players)
     assert "unresolved; remaining: Mrs. White, Lead Pipe, Conservatory" in text
+
+
+def test_clause_filters_use_source_actors_for_repeated_accusations():
+    engine = Engine(GameState(
+        Combination(0, 6, 12),
+        [frozenset({1, 2, 3, 4, 5}), frozenset({7, 8, 9, 10, 11}),
+         frozenset({13, 14, 15, 16}), frozenset({17, 18, 19, 20})],
+        0,
+    ))
+    engine.step(Suggest(Combination(0, 7, 13)))
+    engine.step(Reveal(7))
+    engine.step(EndTurn())
+    engine.step(Accuse(Combination(2, 8, 14)))
+    engine.step(Accuse(Combination(2, 8, 14)))
+    engine.step(Accuse(Combination(0, 6, 12)))
+    view = engine.view(0)
+    knowledge = knowledge_for(view, engine.num_players)
+
+    text = format_clauses(knowledge, view=view)
+    assert "Player 1 holds at least one of" in text
+    assert "Incorrect accusation by Player 1:" in text
+    assert "Incorrect accusation by Player 2:" in text
+    assert "Incorrect accusation by Player 3:" not in text
+
+    text = format_clauses(knowledge, view=view, actor=1, kind=EventKind.ACCUSE)
+    assert "Incorrect accusation by Player 1:" in text
+    assert "Player 2" not in text
+    assert "holds at least one" not in text
+    text = format_clauses(knowledge, view=view, actor=1, kind=EventKind.REFUTE)
+    assert "Player 1 holds at least one of" in text
+    assert "Incorrect accusation" not in text
+    assert "No clauses match" in format_clauses(
+        knowledge, view=view, actor=2, kind=EventKind.REFUTE
+    )
+
+    with pytest.raises(ValueError, match="requires the player view"):
+        format_clauses(knowledge, actor=1)
+    with pytest.raises(ValueError, match="clause type"):
+        format_clauses(knowledge, view=view, kind=EventKind.SHOW)
+    altered_events = tuple(
+        replace(event, combo=Combination(1, 6, 12))
+        if event.kind is EventKind.ACCUSE and event.actor == 1 else event
+        for event in view.events
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        format_clauses(knowledge, view=replace(view, events=altered_events))
