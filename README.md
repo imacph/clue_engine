@@ -11,6 +11,10 @@ a correct accusation or when every player has made an incorrect accusation.
 in seat order as evenly as possible. The random generator is supplied by the
 caller for reproducibility.
 
+The future board mode is specified in the [board rules contract](docs/board-rules.md).
+It is not playable yet. The [card-only baseline](docs/card-only-baseline.md)
+records reproducible pre-board measurements.
+
 ```python
 import random
 

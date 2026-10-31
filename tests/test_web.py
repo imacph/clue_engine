@@ -116,6 +116,23 @@ def test_start_game_and_submit_actions_without_exposing_solution(client):
     assert response.get_json()["error"]
 
 
+@pytest.mark.parametrize("players", [2, 7])
+def test_default_card_only_web_game_supports_counts_outside_board_range(client, players):
+    token = csrf_token(client)
+    response = post(client, token, "/api/game", {"players": players, "progress": "step"})
+    assert response.status_code == 201
+    assert response.get_json()["legal"]["suggest"] is True
+
+    response = post(client, token, "/api/action", {
+        "action": "suggest",
+        "suspect_id": 0,
+        "weapon_id": 6,
+        "room_id": 20,
+    })
+    assert response.status_code == 200
+    assert response.get_json()["to_move"] == 1
+
+
 def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
     client, monkeypatch
 ):

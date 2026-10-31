@@ -1,0 +1,2047 @@
+{
+  "python_version": "3.13.3",
+  "python_implementation": "CPython",
+  "games_per_group": 120,
+  "seed": 42,
+  "max_steps": 10000,
+  "rotate": true,
+  "groups": [
+    {
+      "players": 2,
+      "profile": "random",
+      "policies": [
+        "random",
+        "random"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 14.983333333333333,
+        "median": 14.0,
+        "p90": 26
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          72,
+          48
+        ],
+        "policy_stats": {
+          "random": {
+            "seat_games": 240,
+            "completed_seats": 240,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.5,
+            "learned_solution": 120,
+            "mean_first_solution_step": 86.93333333333334,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 72,
+                "win_rate_per_completed_seat": 0.6,
+                "learned_solution": 72,
+                "mean_first_solution_step": 88.13888888888889
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 48,
+                "win_rate_per_completed_seat": 0.4,
+                "learned_solution": 48,
+                "mean_first_solution_step": 85.125
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          14.983333333333333,
+          14.383333333333333
+        ],
+        "mean_actions": 87.93333333333334,
+        "median_actions": 82.5,
+        "p90_actions": 156,
+        "mean_suggestions": 29.283333333333335,
+        "mean_passes": 4.95,
+        "mean_refutations": 24.333333333333332
+      }
+    },
+    {
+      "players": 2,
+      "profile": "deductive",
+      "policies": [
+        "deductive",
+        "deductive"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 6.216666666666667,
+        "median": 6.5,
+        "p90": 9
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          78,
+          42
+        ],
+        "policy_stats": {
+          "deductive": {
+            "seat_games": 240,
+            "completed_seats": 240,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.5,
+            "learned_solution": 120,
+            "mean_first_solution_step": 34.35,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 78,
+                "win_rate_per_completed_seat": 0.65,
+                "learned_solution": 78,
+                "mean_first_solution_step": 36.46153846153846
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 42,
+                "win_rate_per_completed_seat": 0.35,
+                "learned_solution": 42,
+                "mean_first_solution_step": 30.428571428571427
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          6.216666666666667,
+          5.566666666666666
+        ],
+        "mean_actions": 35.35,
+        "median_actions": 37.5,
+        "p90_actions": 51,
+        "mean_suggestions": 11.783333333333333,
+        "mean_passes": 0.9166666666666666,
+        "mean_refutations": 10.866666666666667
+      }
+    },
+    {
+      "players": 2,
+      "profile": "probing",
+      "policies": [
+        "probing",
+        "probing"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 5.633333333333334,
+        "median": 6.0,
+        "p90": 7
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          76,
+          44
+        ],
+        "policy_stats": {
+          "probing": {
+            "seat_games": 240,
+            "completed_seats": 240,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.5,
+            "learned_solution": 120,
+            "mean_first_solution_step": 30.9,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 76,
+                "win_rate_per_completed_seat": 0.6333333333333333,
+                "learned_solution": 76,
+                "mean_first_solution_step": 29.157894736842106
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 44,
+                "win_rate_per_completed_seat": 0.36666666666666664,
+                "learned_solution": 44,
+                "mean_first_solution_step": 33.90909090909091
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          5.633333333333334,
+          5.0
+        ],
+        "mean_actions": 31.9,
+        "median_actions": 33.0,
+        "p90_actions": 42,
+        "mean_suggestions": 10.633333333333333,
+        "mean_passes": 3.35,
+        "mean_refutations": 7.283333333333333
+      }
+    },
+    {
+      "players": 2,
+      "profile": "strategic",
+      "policies": [
+        "strategic",
+        "strategic"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 5.633333333333334,
+        "median": 6.0,
+        "p90": 7
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          76,
+          44
+        ],
+        "policy_stats": {
+          "strategic": {
+            "seat_games": 240,
+            "completed_seats": 240,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.5,
+            "learned_solution": 120,
+            "mean_first_solution_step": 30.9,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 76,
+                "win_rate_per_completed_seat": 0.6333333333333333,
+                "learned_solution": 76,
+                "mean_first_solution_step": 29.157894736842106
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 44,
+                "win_rate_per_completed_seat": 0.36666666666666664,
+                "learned_solution": 44,
+                "mean_first_solution_step": 33.90909090909091
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          5.633333333333334,
+          5.0
+        ],
+        "mean_actions": 31.9,
+        "median_actions": 33.0,
+        "p90_actions": 42,
+        "mean_suggestions": 10.633333333333333,
+        "mean_passes": 3.35,
+        "mean_refutations": 7.283333333333333
+      }
+    },
+    {
+      "players": 3,
+      "profile": "random",
+      "policies": [
+        "random",
+        "random",
+        "random"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 10.966666666666667,
+        "median": 11.0,
+        "p90": 17
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          36,
+          45,
+          39
+        ],
+        "policy_stats": {
+          "random": {
+            "seat_games": 360,
+            "completed_seats": 360,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.3333333333333333,
+            "learned_solution": 143,
+            "mean_first_solution_step": 106.26573426573427,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 36,
+                "win_rate_per_completed_seat": 0.3,
+                "learned_solution": 47,
+                "mean_first_solution_step": 109.27659574468085
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 45,
+                "win_rate_per_completed_seat": 0.375,
+                "learned_solution": 50,
+                "mean_first_solution_step": 92.98
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 39,
+                "win_rate_per_completed_seat": 0.325,
+                "learned_solution": 46,
+                "mean_first_solution_step": 117.6304347826087
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          10.966666666666667,
+          10.666666666666666,
+          10.291666666666666
+        ],
+        "mean_actions": 106.18333333333334,
+        "median_actions": 104.0,
+        "p90_actions": 161,
+        "mean_suggestions": 31.65,
+        "mean_passes": 13.091666666666667,
+        "mean_refutations": 29.516666666666666
+      }
+    },
+    {
+      "players": 3,
+      "profile": "deductive",
+      "policies": [
+        "deductive",
+        "deductive",
+        "deductive"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 5.641666666666667,
+        "median": 6.0,
+        "p90": 8
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          46,
+          42,
+          32
+        ],
+        "policy_stats": {
+          "deductive": {
+            "seat_games": 360,
+            "completed_seats": 360,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.3333333333333333,
+            "learned_solution": 148,
+            "mean_first_solution_step": 52.486486486486484,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 46,
+                "win_rate_per_completed_seat": 0.38333333333333336,
+                "learned_solution": 52,
+                "mean_first_solution_step": 50.48076923076923
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 42,
+                "win_rate_per_completed_seat": 0.35,
+                "learned_solution": 53,
+                "mean_first_solution_step": 52.54716981132076
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 32,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 43,
+                "mean_first_solution_step": 54.83720930232558
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          5.641666666666667,
+          5.258333333333334,
+          4.908333333333333
+        ],
+        "mean_actions": 52.28333333333333,
+        "median_actions": 53.0,
+        "p90_actions": 72,
+        "mean_suggestions": 15.7,
+        "mean_passes": 5.758333333333334,
+        "mean_refutations": 15.016666666666667
+      }
+    },
+    {
+      "players": 3,
+      "profile": "probing",
+      "policies": [
+        "probing",
+        "probing",
+        "probing"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 5.608333333333333,
+        "median": 6.0,
+        "p90": 7
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          50,
+          39,
+          31
+        ],
+        "policy_stats": {
+          "probing": {
+            "seat_games": 360,
+            "completed_seats": 360,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.3333333333333333,
+            "learned_solution": 134,
+            "mean_first_solution_step": 55.3955223880597,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 50,
+                "win_rate_per_completed_seat": 0.4166666666666667,
+                "learned_solution": 54,
+                "mean_first_solution_step": 54.148148148148145
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 39,
+                "win_rate_per_completed_seat": 0.325,
+                "learned_solution": 41,
+                "mean_first_solution_step": 54.41463414634146
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 31,
+                "win_rate_per_completed_seat": 0.25833333333333336,
+                "learned_solution": 39,
+                "mean_first_solution_step": 58.15384615384615
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          5.608333333333333,
+          5.191666666666666,
+          4.866666666666666
+        ],
+        "mean_actions": 56.35,
+        "median_actions": 57.0,
+        "p90_actions": 72,
+        "mean_suggestions": 15.508333333333333,
+        "mean_passes": 13.725,
+        "mean_refutations": 11.45
+      }
+    },
+    {
+      "players": 3,
+      "profile": "strategic",
+      "policies": [
+        "strategic",
+        "strategic",
+        "strategic"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 6.583333333333333,
+        "median": 7.0,
+        "p90": 8
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          43,
+          47,
+          30
+        ],
+        "policy_stats": {
+          "strategic": {
+            "seat_games": 360,
+            "completed_seats": 360,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.3333333333333333,
+            "learned_solution": 125,
+            "mean_first_solution_step": 67.408,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 43,
+                "win_rate_per_completed_seat": 0.35833333333333334,
+                "learned_solution": 45,
+                "mean_first_solution_step": 67.26666666666667
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 47,
+                "win_rate_per_completed_seat": 0.39166666666666666,
+                "learned_solution": 49,
+                "mean_first_solution_step": 66.51020408163265
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 30,
+                "win_rate_per_completed_seat": 0.25,
+                "learned_solution": 31,
+                "mean_first_solution_step": 69.03225806451613
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          6.583333333333333,
+          6.225,
+          5.833333333333333
+        ],
+        "mean_actions": 68.50833333333334,
+        "median_actions": 69.0,
+        "p90_actions": 79,
+        "mean_suggestions": 18.533333333333335,
+        "mean_passes": 15.441666666666666,
+        "mean_refutations": 15.891666666666667
+      }
+    },
+    {
+      "players": 4,
+      "profile": "random",
+      "policies": [
+        "random",
+        "random",
+        "random",
+        "random"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 9.025,
+        "median": 9.0,
+        "p90": 14
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          27,
+          41,
+          23,
+          29
+        ],
+        "policy_stats": {
+          "random": {
+            "seat_games": 480,
+            "completed_seats": 480,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.25,
+            "learned_solution": 150,
+            "mean_first_solution_step": 125.12666666666667,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 27,
+                "win_rate_per_completed_seat": 0.225,
+                "learned_solution": 35,
+                "mean_first_solution_step": 125.4
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 41,
+                "win_rate_per_completed_seat": 0.3416666666666667,
+                "learned_solution": 51,
+                "mean_first_solution_step": 123.15686274509804
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 23,
+                "win_rate_per_completed_seat": 0.19166666666666668,
+                "learned_solution": 30,
+                "mean_first_solution_step": 123.23333333333333
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 29,
+                "win_rate_per_completed_seat": 0.24166666666666667,
+                "learned_solution": 34,
+                "mean_first_solution_step": 129.47058823529412
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          9.025,
+          8.8,
+          8.458333333333334,
+          8.266666666666667
+        ],
+        "mean_actions": 124.99166666666666,
+        "median_actions": 126.0,
+        "p90_actions": 201,
+        "mean_suggestions": 34.025,
+        "mean_passes": 23.758333333333333,
+        "mean_refutations": 32.65833333333333
+      }
+    },
+    {
+      "players": 4,
+      "profile": "deductive",
+      "policies": [
+        "deductive",
+        "deductive",
+        "deductive",
+        "deductive"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 4.883333333333334,
+        "median": 5.0,
+        "p90": 7
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          32,
+          40,
+          21,
+          27
+        ],
+        "policy_stats": {
+          "deductive": {
+            "seat_games": 480,
+            "completed_seats": 480,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.25,
+            "learned_solution": 189,
+            "mean_first_solution_step": 68.22751322751323,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 32,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 52,
+                "mean_first_solution_step": 71.3076923076923
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 40,
+                "win_rate_per_completed_seat": 0.3333333333333333,
+                "learned_solution": 58,
+                "mean_first_solution_step": 64.01724137931035
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 21,
+                "win_rate_per_completed_seat": 0.175,
+                "learned_solution": 37,
+                "mean_first_solution_step": 66.10810810810811
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 27,
+                "win_rate_per_completed_seat": 0.225,
+                "learned_solution": 42,
+                "mean_first_solution_step": 72.0952380952381
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          4.883333333333334,
+          4.616666666666666,
+          4.283333333333333,
+          4.108333333333333
+        ],
+        "mean_actions": 64.875,
+        "median_actions": 66.0,
+        "p90_actions": 89,
+        "mean_suggestions": 17.808333333333334,
+        "mean_passes": 12.116666666666667,
+        "mean_refutations": 17.058333333333334
+      }
+    },
+    {
+      "players": 4,
+      "profile": "probing",
+      "policies": [
+        "probing",
+        "probing",
+        "probing",
+        "probing"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 4.958333333333333,
+        "median": 5.0,
+        "p90": 6
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          35,
+          38,
+          21,
+          26
+        ],
+        "policy_stats": {
+          "probing": {
+            "seat_games": 480,
+            "completed_seats": 480,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.25,
+            "learned_solution": 165,
+            "mean_first_solution_step": 75.13333333333334,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 35,
+                "win_rate_per_completed_seat": 0.2916666666666667,
+                "learned_solution": 48,
+                "mean_first_solution_step": 74.75
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 38,
+                "win_rate_per_completed_seat": 0.31666666666666665,
+                "learned_solution": 50,
+                "mean_first_solution_step": 75.92
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 21,
+                "win_rate_per_completed_seat": 0.175,
+                "learned_solution": 34,
+                "mean_first_solution_step": 75.5
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 26,
+                "win_rate_per_completed_seat": 0.21666666666666667,
+                "learned_solution": 33,
+                "mean_first_solution_step": 74.12121212121212
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          4.958333333333333,
+          4.666666666666667,
+          4.35,
+          4.175
+        ],
+        "mean_actions": 75.8,
+        "median_actions": 75.0,
+        "p90_actions": 92,
+        "mean_suggestions": 17.933333333333334,
+        "mean_passes": 25.95,
+        "mean_refutations": 13.766666666666667
+      }
+    },
+    {
+      "players": 4,
+      "profile": "strategic",
+      "policies": [
+        "strategic",
+        "strategic",
+        "strategic",
+        "strategic"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 5.591666666666667,
+        "median": 6.0,
+        "p90": 7
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          38,
+          41,
+          20,
+          21
+        ],
+        "policy_stats": {
+          "strategic": {
+            "seat_games": 480,
+            "completed_seats": 480,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.25,
+            "learned_solution": 139,
+            "mean_first_solution_step": 87.61151079136691,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 38,
+                "win_rate_per_completed_seat": 0.31666666666666665,
+                "learned_solution": 45,
+                "mean_first_solution_step": 88.73333333333333
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 41,
+                "win_rate_per_completed_seat": 0.3416666666666667,
+                "learned_solution": 47,
+                "mean_first_solution_step": 85.91489361702128
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 20,
+                "win_rate_per_completed_seat": 0.16666666666666666,
+                "learned_solution": 23,
+                "mean_first_solution_step": 86.73913043478261
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 21,
+                "win_rate_per_completed_seat": 0.175,
+                "learned_solution": 24,
+                "mean_first_solution_step": 89.66666666666667
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          5.591666666666667,
+          5.275,
+          4.933333333333334,
+          4.766666666666667
+        ],
+        "mean_actions": 88.68333333333334,
+        "median_actions": 90.0,
+        "p90_actions": 104,
+        "mean_suggestions": 20.441666666666666,
+        "mean_passes": 29.908333333333335,
+        "mean_refutations": 17.766666666666666
+      }
+    },
+    {
+      "players": 5,
+      "profile": "random",
+      "policies": [
+        "random",
+        "random",
+        "random",
+        "random",
+        "random"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 7.55,
+        "median": 7.5,
+        "p90": 10
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          25,
+          27,
+          29,
+          19,
+          20
+        ],
+        "policy_stats": {
+          "random": {
+            "seat_games": 600,
+            "completed_seats": 600,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.2,
+            "learned_solution": 196,
+            "mean_first_solution_step": 137.00510204081633,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 25,
+                "win_rate_per_completed_seat": 0.20833333333333334,
+                "learned_solution": 42,
+                "mean_first_solution_step": 141.23809523809524
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 27,
+                "win_rate_per_completed_seat": 0.225,
+                "learned_solution": 46,
+                "mean_first_solution_step": 122.43478260869566
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 29,
+                "win_rate_per_completed_seat": 0.24166666666666667,
+                "learned_solution": 42,
+                "mean_first_solution_step": 150.16666666666666
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 19,
+                "win_rate_per_completed_seat": 0.15833333333333333,
+                "learned_solution": 33,
+                "mean_first_solution_step": 130.72727272727272
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 20,
+                "win_rate_per_completed_seat": 0.16666666666666666,
+                "learned_solution": 33,
+                "mean_first_solution_step": 141.45454545454547
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          7.55,
+          7.341666666666667,
+          7.116666666666666,
+          6.875,
+          6.716666666666667
+        ],
+        "mean_actions": 139.08333333333334,
+        "median_actions": 137.5,
+        "p90_actions": 198,
+        "mean_suggestions": 35.15833333333333,
+        "mean_passes": 34.1,
+        "mean_refutations": 34.225
+      }
+    },
+    {
+      "players": 5,
+      "profile": "deductive",
+      "policies": [
+        "deductive",
+        "deductive",
+        "deductive",
+        "deductive",
+        "deductive"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 4.333333333333333,
+        "median": 4.0,
+        "p90": 6
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          31,
+          31,
+          24,
+          16,
+          18
+        ],
+        "policy_stats": {
+          "deductive": {
+            "seat_games": 600,
+            "completed_seats": 600,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.2,
+            "learned_solution": 244,
+            "mean_first_solution_step": 78.9139344262295,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 31,
+                "win_rate_per_completed_seat": 0.25833333333333336,
+                "learned_solution": 63,
+                "mean_first_solution_step": 80.95238095238095
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 31,
+                "win_rate_per_completed_seat": 0.25833333333333336,
+                "learned_solution": 52,
+                "mean_first_solution_step": 78.86538461538461
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 24,
+                "win_rate_per_completed_seat": 0.2,
+                "learned_solution": 51,
+                "mean_first_solution_step": 74.70588235294117
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 16,
+                "win_rate_per_completed_seat": 0.13333333333333333,
+                "learned_solution": 39,
+                "mean_first_solution_step": 80.28205128205128
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 18,
+                "win_rate_per_completed_seat": 0.15,
+                "learned_solution": 39,
+                "mean_first_solution_step": 79.82051282051282
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          4.333333333333333,
+          4.075,
+          3.816666666666667,
+          3.6166666666666667,
+          3.4833333333333334
+        ],
+        "mean_actions": 75.86666666666666,
+        "median_actions": 79.0,
+        "p90_actions": 102,
+        "mean_suggestions": 19.241666666666667,
+        "mean_passes": 18.766666666666666,
+        "mean_refutations": 18.533333333333335
+      }
+    },
+    {
+      "players": 5,
+      "profile": "probing",
+      "policies": [
+        "probing",
+        "probing",
+        "probing",
+        "probing",
+        "probing"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 4.341666666666667,
+        "median": 4.0,
+        "p90": 5
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          31,
+          26,
+          22,
+          19,
+          22
+        ],
+        "policy_stats": {
+          "probing": {
+            "seat_games": 600,
+            "completed_seats": 600,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.2,
+            "learned_solution": 217,
+            "mean_first_solution_step": 91.32718894009217,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 31,
+                "win_rate_per_completed_seat": 0.25833333333333336,
+                "learned_solution": 53,
+                "mean_first_solution_step": 90.58490566037736
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 26,
+                "win_rate_per_completed_seat": 0.21666666666666667,
+                "learned_solution": 45,
+                "mean_first_solution_step": 91.0
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 22,
+                "win_rate_per_completed_seat": 0.18333333333333332,
+                "learned_solution": 40,
+                "mean_first_solution_step": 93.875
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 19,
+                "win_rate_per_completed_seat": 0.15833333333333333,
+                "learned_solution": 37,
+                "mean_first_solution_step": 88.08108108108108
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 22,
+                "win_rate_per_completed_seat": 0.18333333333333332,
+                "learned_solution": 42,
+                "mean_first_solution_step": 93.04761904761905
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          4.341666666666667,
+          4.083333333333333,
+          3.8666666666666667,
+          3.683333333333333,
+          3.525
+        ],
+        "mean_actions": 92.90833333333333,
+        "median_actions": 93.5,
+        "p90_actions": 107,
+        "mean_suggestions": 19.333333333333332,
+        "mean_passes": 38.93333333333333,
+        "mean_refutations": 15.141666666666667
+      }
+    },
+    {
+      "players": 5,
+      "profile": "strategic",
+      "policies": [
+        "strategic",
+        "strategic",
+        "strategic",
+        "strategic",
+        "strategic"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 4.983333333333333,
+        "median": 5.0,
+        "p90": 6
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          33,
+          25,
+          22,
+          23,
+          17
+        ],
+        "policy_stats": {
+          "strategic": {
+            "seat_games": 600,
+            "completed_seats": 600,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.2,
+            "learned_solution": 180,
+            "mean_first_solution_step": 108.13888888888889,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 33,
+                "win_rate_per_completed_seat": 0.275,
+                "learned_solution": 46,
+                "mean_first_solution_step": 105.82608695652173
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 25,
+                "win_rate_per_completed_seat": 0.20833333333333334,
+                "learned_solution": 39,
+                "mean_first_solution_step": 109.97435897435898
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 22,
+                "win_rate_per_completed_seat": 0.18333333333333332,
+                "learned_solution": 36,
+                "mean_first_solution_step": 106.80555555555556
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 23,
+                "win_rate_per_completed_seat": 0.19166666666666668,
+                "learned_solution": 33,
+                "mean_first_solution_step": 106.60606060606061
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 26,
+                "mean_first_solution_step": 113.26923076923077
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          4.983333333333333,
+          4.708333333333333,
+          4.5,
+          4.316666666666666,
+          4.125
+        ],
+        "mean_actions": 108.6,
+        "median_actions": 111.5,
+        "p90_actions": 128,
+        "mean_suggestions": 22.408333333333335,
+        "mean_passes": 43.891666666666666,
+        "mean_refutations": 19.666666666666668
+      }
+    },
+    {
+      "players": 6,
+      "profile": "random",
+      "policies": [
+        "random",
+        "random",
+        "random",
+        "random",
+        "random",
+        "random"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 6.508333333333334,
+        "median": 6.0,
+        "p90": 9
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          23,
+          26,
+          17,
+          21,
+          17,
+          16
+        ],
+        "policy_stats": {
+          "random": {
+            "seat_games": 720,
+            "completed_seats": 720,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.16666666666666666,
+            "learned_solution": 234,
+            "mean_first_solution_step": 144.83333333333334,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 23,
+                "win_rate_per_completed_seat": 0.19166666666666668,
+                "learned_solution": 43,
+                "mean_first_solution_step": 137.3953488372093
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 26,
+                "win_rate_per_completed_seat": 0.21666666666666667,
+                "learned_solution": 46,
+                "mean_first_solution_step": 144.93478260869566
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 36,
+                "mean_first_solution_step": 139.97222222222223
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 21,
+                "win_rate_per_completed_seat": 0.175,
+                "learned_solution": 38,
+                "mean_first_solution_step": 152.55263157894737
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 36,
+                "mean_first_solution_step": 148.08333333333334
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 16,
+                "win_rate_per_completed_seat": 0.13333333333333333,
+                "learned_solution": 35,
+                "mean_first_solution_step": 147.11428571428573
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          6.508333333333334,
+          6.316666666666666,
+          6.1,
+          5.958333333333333,
+          5.783333333333333,
+          5.641666666666667
+        ],
+        "mean_actions": 150.45,
+        "median_actions": 149.0,
+        "p90_actions": 222,
+        "mean_suggestions": 35.71666666666667,
+        "mean_passes": 43.483333333333334,
+        "mean_refutations": 34.94166666666667
+      }
+    },
+    {
+      "players": 6,
+      "profile": "deductive",
+      "policies": [
+        "deductive",
+        "deductive",
+        "deductive",
+        "deductive",
+        "deductive",
+        "deductive"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 3.9916666666666667,
+        "median": 4.0,
+        "p90": 5
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          17,
+          20,
+          12,
+          26,
+          17,
+          28
+        ],
+        "policy_stats": {
+          "deductive": {
+            "seat_games": 720,
+            "completed_seats": 720,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.16666666666666666,
+            "learned_solution": 368,
+            "mean_first_solution_step": 91.3804347826087,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 64,
+                "mean_first_solution_step": 91.625
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 20,
+                "win_rate_per_completed_seat": 0.16666666666666666,
+                "learned_solution": 60,
+                "mean_first_solution_step": 91.76666666666667
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 12,
+                "win_rate_per_completed_seat": 0.1,
+                "learned_solution": 53,
+                "mean_first_solution_step": 92.39622641509433
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 26,
+                "win_rate_per_completed_seat": 0.21666666666666667,
+                "learned_solution": 66,
+                "mean_first_solution_step": 87.36363636363636
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 61,
+                "mean_first_solution_step": 91.8360655737705
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 28,
+                "win_rate_per_completed_seat": 0.23333333333333334,
+                "learned_solution": 64,
+                "mean_first_solution_step": 93.640625
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          3.9916666666666667,
+          3.85,
+          3.683333333333333,
+          3.5833333333333335,
+          3.3666666666666667,
+          3.225
+        ],
+        "mean_actions": 91.975,
+        "median_actions": 96.0,
+        "p90_actions": 116,
+        "mean_suggestions": 21.558333333333334,
+        "mean_passes": 27.816666666666666,
+        "mean_refutations": 20.9
+      }
+    },
+    {
+      "players": 6,
+      "profile": "probing",
+      "policies": [
+        "probing",
+        "probing",
+        "probing",
+        "probing",
+        "probing",
+        "probing"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 3.7,
+        "median": 4.0,
+        "p90": 4
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          18,
+          21,
+          19,
+          22,
+          19,
+          21
+        ],
+        "policy_stats": {
+          "probing": {
+            "seat_games": 720,
+            "completed_seats": 720,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.16666666666666666,
+            "learned_solution": 267,
+            "mean_first_solution_step": 104.49063670411985,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 18,
+                "win_rate_per_completed_seat": 0.15,
+                "learned_solution": 44,
+                "mean_first_solution_step": 102.25
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 21,
+                "win_rate_per_completed_seat": 0.175,
+                "learned_solution": 41,
+                "mean_first_solution_step": 102.34146341463415
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 19,
+                "win_rate_per_completed_seat": 0.15833333333333333,
+                "learned_solution": 41,
+                "mean_first_solution_step": 104.34146341463415
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 22,
+                "win_rate_per_completed_seat": 0.18333333333333332,
+                "learned_solution": 44,
+                "mean_first_solution_step": 105.93181818181819
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 19,
+                "win_rate_per_completed_seat": 0.15833333333333333,
+                "learned_solution": 46,
+                "mean_first_solution_step": 105.06521739130434
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 21,
+                "win_rate_per_completed_seat": 0.175,
+                "learned_solution": 51,
+                "mean_first_solution_step": 106.50980392156863
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          3.7,
+          3.55,
+          3.375,
+          3.216666666666667,
+          3.033333333333333,
+          2.875
+        ],
+        "mean_actions": 104.90833333333333,
+        "median_actions": 106.5,
+        "p90_actions": 127,
+        "mean_suggestions": 19.541666666666668,
+        "mean_passes": 50.09166666666667,
+        "mean_refutations": 15.525
+      }
+    },
+    {
+      "players": 6,
+      "profile": "strategic",
+      "policies": [
+        "strategic",
+        "strategic",
+        "strategic",
+        "strategic",
+        "strategic",
+        "strategic"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 4.408333333333333,
+        "median": 4.0,
+        "p90": 5
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          27,
+          29,
+          12,
+          18,
+          17,
+          17
+        ],
+        "policy_stats": {
+          "strategic": {
+            "seat_games": 720,
+            "completed_seats": 720,
+            "wins": 120,
+            "win_rate_per_completed_seat": 0.16666666666666666,
+            "learned_solution": 212,
+            "mean_first_solution_step": 124.99056603773585,
+            "by_seat": [
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 27,
+                "win_rate_per_completed_seat": 0.225,
+                "learned_solution": 45,
+                "mean_first_solution_step": 121.86666666666666
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 29,
+                "win_rate_per_completed_seat": 0.24166666666666667,
+                "learned_solution": 42,
+                "mean_first_solution_step": 123.76190476190476
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 12,
+                "win_rate_per_completed_seat": 0.1,
+                "learned_solution": 32,
+                "mean_first_solution_step": 127.0
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 18,
+                "win_rate_per_completed_seat": 0.15,
+                "learned_solution": 30,
+                "mean_first_solution_step": 127.76666666666667
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 33,
+                "mean_first_solution_step": 125.75757575757575
+              },
+              {
+                "seat_games": 120,
+                "completed_seats": 120,
+                "wins": 17,
+                "win_rate_per_completed_seat": 0.14166666666666666,
+                "learned_solution": 30,
+                "mean_first_solution_step": 125.63333333333334
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          4.408333333333333,
+          4.183333333333334,
+          3.941666666666667,
+          3.841666666666667,
+          3.691666666666667,
+          3.55
+        ],
+        "mean_actions": 124.71666666666667,
+        "median_actions": 124.0,
+        "p90_actions": 146,
+        "mean_suggestions": 23.316666666666666,
+        "mean_passes": 57.21666666666667,
+        "mean_refutations": 20.566666666666666
+      }
+    },
+    {
+      "players": 4,
+      "profile": "mixed",
+      "policies": [
+        "random",
+        "deductive",
+        "probing",
+        "strategic"
+      ],
+      "winner_turns": {
+        "count": 120,
+        "mean": 5.65,
+        "median": 6.0,
+        "p90": 7
+      },
+      "summary": {
+        "requested_games": 120,
+        "started_games": 120,
+        "completed_games": 120,
+        "outcomes": {
+          "won": 120,
+          "all_eliminated": 0,
+          "timeout": 0,
+          "error": 0,
+          "cancelled": 0
+        },
+        "cancelled": false,
+        "wins_by_seat": [
+          36,
+          33,
+          24,
+          27
+        ],
+        "policy_stats": {
+          "deductive": {
+            "seat_games": 120,
+            "completed_seats": 120,
+            "wins": 40,
+            "win_rate_per_completed_seat": 0.3333333333333333,
+            "learned_solution": 60,
+            "mean_first_solution_step": 80.13333333333334,
+            "by_seat": [
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 14,
+                "win_rate_per_completed_seat": 0.4666666666666667,
+                "learned_solution": 15,
+                "mean_first_solution_step": 79.0
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 10,
+                "win_rate_per_completed_seat": 0.3333333333333333,
+                "learned_solution": 23,
+                "mean_first_solution_step": 79.1304347826087
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 8,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 11,
+                "mean_first_solution_step": 79.27272727272727
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 8,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 11,
+                "mean_first_solution_step": 84.63636363636364
+              }
+            ]
+          },
+          "probing": {
+            "seat_games": 120,
+            "completed_seats": 120,
+            "wins": 31,
+            "win_rate_per_completed_seat": 0.25833333333333336,
+            "learned_solution": 46,
+            "mean_first_solution_step": 84.19565217391305,
+            "by_seat": [
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 7,
+                "win_rate_per_completed_seat": 0.23333333333333334,
+                "learned_solution": 11,
+                "mean_first_solution_step": 78.18181818181819
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 8,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 11,
+                "mean_first_solution_step": 81.45454545454545
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 8,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 13,
+                "mean_first_solution_step": 87.6923076923077
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 8,
+                "win_rate_per_completed_seat": 0.26666666666666666,
+                "learned_solution": 11,
+                "mean_first_solution_step": 88.81818181818181
+              }
+            ]
+          },
+          "random": {
+            "seat_games": 120,
+            "completed_seats": 120,
+            "wins": 9,
+            "win_rate_per_completed_seat": 0.075,
+            "learned_solution": 36,
+            "mean_first_solution_step": 83.13888888888889,
+            "by_seat": [
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 3,
+                "win_rate_per_completed_seat": 0.1,
+                "learned_solution": 13,
+                "mean_first_solution_step": 85.76923076923077
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 2,
+                "win_rate_per_completed_seat": 0.06666666666666667,
+                "learned_solution": 9,
+                "mean_first_solution_step": 87.0
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 2,
+                "win_rate_per_completed_seat": 0.06666666666666667,
+                "learned_solution": 6,
+                "mean_first_solution_step": 77.0
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 2,
+                "win_rate_per_completed_seat": 0.06666666666666667,
+                "learned_solution": 8,
+                "mean_first_solution_step": 79.125
+              }
+            ]
+          },
+          "strategic": {
+            "seat_games": 120,
+            "completed_seats": 120,
+            "wins": 40,
+            "win_rate_per_completed_seat": 0.3333333333333333,
+            "learned_solution": 57,
+            "mean_first_solution_step": 85.57894736842105,
+            "by_seat": [
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 12,
+                "win_rate_per_completed_seat": 0.4,
+                "learned_solution": 16,
+                "mean_first_solution_step": 89.25
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 13,
+                "win_rate_per_completed_seat": 0.43333333333333335,
+                "learned_solution": 17,
+                "mean_first_solution_step": 80.05882352941177
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 6,
+                "win_rate_per_completed_seat": 0.2,
+                "learned_solution": 10,
+                "mean_first_solution_step": 80.7
+              },
+              {
+                "seat_games": 30,
+                "completed_seats": 30,
+                "wins": 9,
+                "win_rate_per_completed_seat": 0.3,
+                "learned_solution": 14,
+                "mean_first_solution_step": 91.57142857142857
+              }
+            ]
+          }
+        },
+        "mean_turns_by_seat": [
+          5.65,
+          5.35,
+          5.075,
+          4.875
+        ],
+        "mean_actions": 82.25833333333334,
+        "median_actions": 83.5,
+        "p90_actions": 105,
+        "mean_suggestions": 20.8,
+        "mean_passes": 22.208333333333332,
+        "mean_refutations": 18.3
+      }
+    }
+  ]
+}
