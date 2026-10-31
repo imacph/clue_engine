@@ -14,6 +14,7 @@ const cardNamePattern = [...cardsByName.keys()]
   .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   .join("|");
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+const activeGameKey = "clue-engine-active-game";
 const $ = (id) => document.getElementById(id);
 let currentState = null;
 let refreshTimer = null;
@@ -26,6 +27,9 @@ let desktopThemeWrite = Promise.resolve();
 let cardView = "hand";
 let lastActivityKey = null;
 let lastRenderedState = null;
+let lastNotebookFingerprint = null;
+let notebookGeneration = 0;
+let notebookQueue = Promise.resolve();
 let lastBoardState = null;
 let lastBoardLayout = null;
 let lastSuggestionRoom = null;
@@ -72,12 +76,15 @@ async function requestJson(path, { method = "GET", body } = {}) {
 
 async function startGame(event) {
   event.preventDefault();
+  notebookGeneration++;
+  notebookQueue = Promise.resolve();
   const version = ++requestVersion;
   showError("");
   clearSelectedCards();
   cardView = "hand";
   lastActivityKey = null;
   lastRenderedState = null;
+  lastNotebookFingerprint = null;
   lastBoardState = null;
   lastSuggestionRoom = null;
   hadReveal = false;
@@ -96,20 +103,39 @@ async function startGame(event) {
     });
     if (version !== requestVersion) return;
     window.setupWizard.rememberStarted(setup);
-    lastError = "";
-    document.body.classList.add("game-active");
-    document.body.classList.toggle("board-game", Boolean(state.board));
-    configureBoardWorkspace(Boolean(state.board));
-    $("setup-screen").hidden = true;
-    $("game-screen").hidden = false;
-    $("error-message").hidden = true;
-    currentState = state;
-    buildPlayerFilters(state);
-    renderState(state);
-    clearInterval(refreshTimer);
-    refreshTimer = setInterval(refreshState, state.board ? 250 : 700);
+    sessionStorage.setItem(activeGameKey, "1");
+    activateGame(state);
   } catch (error) {
     showError(error.message);
+  }
+}
+
+function activateGame(state) {
+  lastError = "";
+  document.body.classList.add("game-active");
+  document.body.classList.toggle("board-game", Boolean(state.board));
+  document.body.classList.toggle("manual-notebook-active", state.notebook_mode === "manual");
+  configureBoardWorkspace(Boolean(state.board));
+  $("setup-screen").hidden = true;
+  $("game-screen").hidden = false;
+  $("error-message").hidden = true;
+  currentState = state;
+  buildPlayerFilters(state);
+  renderState(state);
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(refreshState, state.board ? 250 : 700);
+}
+
+async function restoreGame() {
+  if (sessionStorage.getItem(activeGameKey) !== "1") return;
+  const version = requestVersion;
+  try {
+    const state = await requestJson("/api/state");
+    if (version === requestVersion) activateGame(state);
+  } catch (error) {
+    if (version !== requestVersion) return;
+    if (error.status === 404) sessionStorage.removeItem(activeGameKey);
+    showError(error.status === 404 ? "The previous game is no longer available." : error.message);
   }
 }
 
@@ -145,6 +171,16 @@ function selectedFilters() {
   });
 }
 
+function acceptState(state) {
+  if (currentState && state.notebook_mode === "manual"
+    && currentState.notebook_mode === "manual"
+    && state.notebook_revision < currentState.notebook_revision) {
+    state.matrix = currentState.matrix;
+    state.notebook_revision = currentState.notebook_revision;
+  }
+  currentState = state;
+}
+
 async function refreshState() {
   if (refreshing || submitting) return;
   refreshing = true;
@@ -152,7 +188,7 @@ async function refreshState() {
   try {
     const state = await requestJson(`/api/state?${selectedFilters()}`);
     if (version !== requestVersion || !currentState) return;
-    currentState = state;
+    acceptState(state);
     renderState(state);
     if (state.auto_progress && !state.paused && shouldAdvance(state)) {
       await advanceBot(false);
@@ -919,6 +955,14 @@ function cardIllustration(cardId) {
 
 function renderNotebook(state) {
   const notebook = $("notebook");
+  $("notebook-instructions").hidden = state.notebook_mode !== "manual";
+  const fingerprint = JSON.stringify([state.notebook_mode, state.num_players, state.matrix]);
+  if (fingerprint === lastNotebookFingerprint) return;
+  lastNotebookFingerprint = fingerprint;
+  const focused = document.activeElement.closest("[data-notebook-card]");
+  const focusCard = focused?.dataset.notebookCard;
+  const focusHolder = focused?.dataset.notebookHolder;
+  notebook.classList.toggle("manual-notebook", state.notebook_mode === "manual");
   notebook.replaceChildren();
   for (const type of ["suspect", "weapon", "room"]) {
     const category = document.createElement("section");
@@ -927,6 +971,9 @@ function renderNotebook(state) {
     title.textContent = type;
     category.append(title);
     const table = document.createElement("table");
+    if (state.notebook_mode === "manual") {
+      table.style.minWidth = `${Math.ceil(24 * (state.num_players + 1) / 0.52)}px`;
+    }
     const head = document.createElement("thead");
     const body = document.createElement("tbody");
     const heading = document.createElement("tr");
@@ -960,11 +1007,25 @@ function renderNotebook(state) {
       label.append(icon, cardName);
       name.append(label);
       row.append(name);
-      for (const mark of card.marks) {
+      for (const [holder, mark] of card.marks.entries()) {
         const cell = document.createElement("td");
-        cell.textContent = mark;
         cell.className = mark === "+" ? "mark-held" : mark === "-" ? "mark-not-held" : "mark-unknown";
-        cell.setAttribute("aria-label", mark === "+" ? "held" : mark === "-" ? "not held" : "unknown");
+        const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
+        const owner = holder === state.num_players ? "Envelope" : `Player ${holder + 1}`;
+        if (card.editable[holder]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "notebook-mark";
+          button.dataset.notebookCard = String(card.id);
+          button.dataset.notebookHolder = String(holder);
+          button.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}. Activate to change.`);
+          button.title = `${card.name}, ${owner}: ${meaning}. Activate to change.`;
+          button.textContent = mark;
+          cell.append(button);
+        } else {
+          cell.textContent = mark;
+          cell.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}`);
+        }
         row.append(cell);
       }
       body.append(row);
@@ -973,6 +1034,32 @@ function renderNotebook(state) {
     category.append(table);
     notebook.append(category);
   }
+  if (focusCard !== undefined) {
+    notebook.querySelector(`[data-notebook-card="${focusCard}"][data-notebook-holder="${focusHolder}"]`)
+      ?.focus({ preventScroll: true });
+  }
+}
+
+function changeNotebook(cardId, holder) {
+  const generation = notebookGeneration;
+  notebookQueue = notebookQueue.then(async () => {
+    if (generation !== notebookGeneration || !currentState) return;
+    const card = currentState.matrix.find((item) => item.id === cardId);
+    if (!card || !card.editable[holder]) return;
+    const next = { "?": "+", "+": "-", "-": "?" }[card.marks[holder]];
+    const result = await requestJson("/api/notebook", {
+      method: "PUT", body: { card_id: cardId, holder, mark: next },
+    });
+    if (generation !== notebookGeneration || !currentState) return;
+    if (result.notebook_revision >= currentState.notebook_revision) {
+      currentState.matrix = result.matrix;
+      currentState.notebook_revision = result.notebook_revision;
+      renderState(currentState);
+    }
+    if (lastError.startsWith("Could not save notebook:")) showError("");
+  }).catch((error) => {
+    if (generation === notebookGeneration) showError(`Could not save notebook: ${error.message}`);
+  });
 }
 
 function renderHistory(events) {
@@ -1065,7 +1152,7 @@ async function submitAction(action) {
       body: action,
     });
     if (version !== requestVersion || !currentState) return;
-    currentState = state;
+    acceptState(state);
     if (["reveal", "end_turn", "pass", "accuse"].includes(action.action)) clearSelectedCards();
     renderState(state);
     if (focusBoardAfterRoll && state.legal.moves.length
@@ -1090,7 +1177,7 @@ async function advanceBot(step) {
       body: { step },
     });
     if (version !== requestVersion || !currentState) return;
-    currentState = state;
+    acceptState(state);
     renderState(state);
   } catch (error) {
     if (version === requestVersion) {
@@ -1108,7 +1195,7 @@ async function togglePause() {
   try {
     const state = await requestJson(`/api/pause?${selectedFilters()}`, { method: "POST", body: {} });
     if (version !== requestVersion || !currentState) return;
-    currentState = state;
+    acceptState(state);
     renderState(state);
   } catch (error) {
     showError(error.message);
@@ -1117,12 +1204,16 @@ async function togglePause() {
 
 function newGame() {
   requestVersion++;
+  sessionStorage.removeItem(activeGameKey);
+  notebookGeneration++;
+  notebookQueue = Promise.resolve();
   clearInterval(refreshTimer);
   currentState = null;
   clearSelectedCards();
   cardView = "hand";
   lastActivityKey = null;
   lastRenderedState = null;
+  lastNotebookFingerprint = null;
   lastBoardState = null;
   lastBoardLayout = null;
   lastSuggestionRoom = null;
@@ -1130,7 +1221,7 @@ function newGame() {
   hadBoardMovement = false;
   hadBoardResponse = false;
   lastError = "";
-  document.body.classList.remove("game-active", "board-game");
+  document.body.classList.remove("game-active", "board-game", "manual-notebook-active");
   $("board-map-shell").classList.remove("zoomed");
   $("board-zoom-button").setAttribute("aria-pressed", "false");
   showError("");
@@ -1187,9 +1278,20 @@ function switchBoardTab(name) {
   }
 }
 
-function updateMode() {
+function updateMode(restoreNotebook = true) {
   const spectating = $("mode").value === "spectate";
+  const notebook = $("notebook-mode");
+  if (spectating) {
+    if (!notebook.disabled) notebook.dataset.playMode = notebook.value;
+    notebook.value = "automatic";
+    notebook.disabled = true;
+  } else {
+    if (notebook.disabled && restoreNotebook) notebook.value = notebook.dataset.playMode || "manual";
+    notebook.disabled = false;
+  }
   $("seat-field").hidden = spectating;
+  $("notebook-mode-field").hidden = spectating;
+  $("notebook-mode-hint").hidden = spectating;
   $("spectator-warning").hidden = !spectating;
 }
 
@@ -1245,6 +1347,34 @@ for (const choice of document.querySelectorAll('input[name="game-type"]')) {
 $("players").addEventListener("input", updateGameType);
 $("theme-toggle").addEventListener("click", () => {
   setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
+});
+$("notebook").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-notebook-card]");
+  if (button) changeNotebook(Number(button.dataset.notebookCard), Number(button.dataset.notebookHolder));
+});
+$("notebook").addEventListener("keydown", (event) => {
+  const button = event.target.closest("[data-notebook-card]");
+  if (!button || !currentState || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const direction = {
+    ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1],
+  }[event.key];
+  if (!direction) return;
+  let cardIndex = currentState.matrix.findIndex((card) => card.id === Number(button.dataset.notebookCard));
+  let holder = Number(button.dataset.notebookHolder);
+  while (true) {
+    cardIndex += direction[0];
+    holder += direction[1];
+    if (cardIndex < 0 || cardIndex >= currentState.matrix.length
+      || holder < 0 || holder > currentState.num_players) return;
+    const target = $("notebook").querySelector(
+      `[data-notebook-card="${currentState.matrix[cardIndex].id}"][data-notebook-holder="${holder}"]`
+    );
+    if (target) {
+      event.preventDefault();
+      target.focus();
+      return;
+    }
+  }
 });
 $("card-suggest-button").addEventListener("click", () => {
   submitAction({ action: "suggest", ...selectedCombination() });
@@ -1367,3 +1497,4 @@ $("insights-tabs").addEventListener("keydown", (event) => {
 });
 updateMode();
 updateGameType();
+restoreGame();

@@ -372,6 +372,12 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
 .category-table td.mark-held { color: var(--green); }
 .category-table td.mark-not-held { color: var(--mark-negative); }
 .category-table td.mark-unknown { color: var(--mark-unknown); }
+.notebook-grid.manual-notebook { align-content: start; grid-auto-rows: max-content; overflow: auto; }
+.notebook-grid.manual-notebook .category-table { overflow-x: auto; }
+.manual-notebook .category-table td:not(:first-child) { padding: 0 2px; }
+.notebook-mark { background: transparent; border: 0; border-radius: 4px; color: inherit; cursor: pointer; font: inherit; height: 22px; padding: 0; width: 100%; }
+.notebook-mark:hover { background: var(--card-tint); }
+#notebook-instructions { font-size: .73rem; line-height: 1.25; margin: 3px 0 0; }
 .matrix-card-label { align-items: center; display: flex; gap: 4px; min-width: 0; }
 .matrix-card-label > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .matrix-card-icon { color: var(--card-accent); flex: 0 0 17px; height: 17px; width: 17px; }
@@ -443,6 +449,21 @@ body.game-active .insights-column { grid-column: 2; grid-row: 2; }
 body.game-active .notebook-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 body.game-active .category-table { overflow: hidden; }
 body.game-active .category-table table { min-width: 0; }
+
+@media (min-width: 901px) and (min-height: 621px) {
+  body.game-active.manual-notebook-active:not(.board-game) .game-dashboard {
+    grid-template-rows: minmax(220px, .75fr) minmax(0, 1fr);
+  }
+  body.game-active.manual-notebook-active:not(.board-game) .card-workspace,
+  body.game-active.manual-notebook-active:not(.board-game) .card-interaction { min-height: 0; }
+  body.game-active.manual-notebook-active:not(.board-game) .card-interaction { gap: 4px; overflow: auto; padding: 6px; }
+  body.game-active.manual-notebook-active:not(.board-game) .selection-slot,
+  body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card { min-height: 50px; }
+  body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card { gap: 2px; padding: 3px; }
+  body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card .card-topline { display: none; }
+  body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card .card-art { height: 26px; width: 26px; }
+  body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card .card-illustration { height: 22px; width: 22px; }
+}
 
 @media (max-width: 1020px) and (min-width: 901px) {
   body.game-active .game-dashboard { grid-template-columns: minmax(0, 1.5fr) minmax(260px, .9fr); }

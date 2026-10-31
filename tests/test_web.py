@@ -125,6 +125,135 @@ def test_start_game_and_submit_actions_without_exposing_solution(client):
     assert response.get_json()["error"]
 
 
+@pytest.mark.parametrize("game_type,players", [("card_only", 4), ("board", 3)])
+def test_manual_notebook_starts_with_only_hand_facts_and_persists(client, game_type, players):
+    token = csrf_token(client)
+    headers = {"X-CSRF-Token": token}
+    config = {
+        "game_type": game_type, "players": players, "seat": 0,
+        "seed": 42, "progress": "step", "notebook_mode": "manual",
+    }
+    state = post(client, token, "/api/game", config).get_json()
+    assert state["notebook_mode"] == "manual"
+    assert "disabled" in state["clauses"]
+    hand = set(state["hand"])
+    for row in state["matrix"]:
+        in_hand = row["id"] in hand
+        assert row["marks"][0] == ("+" if in_hand else "-")
+        for holder in range(1, players + 1):
+            assert row["marks"][holder] == ("-" if in_hand else "?")
+            assert row["editable"][holder] == (not in_hand)
+        assert row["editable"][0] is False
+    card_id = next(row["id"] for row in state["matrix"] if row["id"] not in hand)
+    edit = {"card_id": card_id, "holder": players, "mark": "+"}
+    response = client.put("/api/notebook", json=edit, headers=headers)
+    assert response.status_code == 200
+    assert response.get_json()["notebook_revision"] == 1
+    state = client.get("/api/state").get_json()
+    row = next(row for row in state["matrix"] if row["id"] == card_id)
+    assert row["marks"][players] == "+"
+    assert client.put("/api/notebook", json=edit, headers=headers).get_json()["notebook_revision"] == 1
+    edit["mark"] = "?"
+    reset = client.put("/api/notebook", json=edit, headers=headers).get_json()
+    assert reset["notebook_revision"] == 2
+    assert next(row for row in reset["matrix"] if row["id"] == card_id)["marks"][players] == "?"
+    edit["mark"] = "-"
+    client.put("/api/notebook", json=edit, headers=headers)
+    new_state = post(client, token, "/api/game", config).get_json()
+    assert new_state["notebook_revision"] == 0
+    assert next(row for row in new_state["matrix"] if row["id"] == card_id)["marks"][players] == "?"
+
+
+@pytest.mark.parametrize("mode", ["manual", "automatic"])
+def test_notebook_only_automatic_mode_records_shown_cards(client, monkeypatch, mode):
+    def create_scripted_game(num_players, seed, policy_name):
+        return make_engine(), (
+            ScriptedPolicy(), ScriptedPolicy(Reveal(7)),
+            ScriptedPolicy(), ScriptedPolicy(),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", create_scripted_game)
+    token = csrf_token(client)
+    state = post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step", "notebook_mode": mode,
+    }).get_json()
+    assert state["notebook_mode"] == mode
+    if mode == "manual":
+        response = client.put(
+            "/api/notebook",
+            json={"card_id": 13, "holder": 4, "mark": "-"},
+            headers={"X-CSRF-Token": token},
+        )
+        assert response.status_code == 200
+    assert post(client, token, "/api/action", {
+        "action": "suggest", "suspect_id": 0, "weapon_id": 7, "room_id": 13,
+    }).status_code == 200
+    response = post(client, token, "/api/advance", {"step": True})
+    assert response.status_code == 200
+    state = response.get_json()
+    assert state["activity"]["card_id"] == 7
+    assert next(row for row in state["matrix"] if row["id"] == 7)["marks"][1] == (
+        "?" if mode == "manual" else "+"
+    )
+    if mode == "manual":
+        assert "disabled" in state["clauses"]
+        assert next(row for row in state["matrix"] if row["id"] == 13)["marks"][4] == "-"
+    else:
+        assert "disabled" not in state["clauses"]
+
+
+def test_notebook_rejects_invalid_edits_and_preserves_legacy_auto_mode(client):
+    token = csrf_token(client)
+    headers = {"X-CSRF-Token": token}
+    edit = {"card_id": 0, "holder": 1, "mark": "+"}
+    assert client.put("/api/notebook", json=edit, headers=headers).status_code == 404
+    assert post(client, token, "/api/game", {"notebook_mode": []}).status_code == 400
+    assert post(client, token, "/api/game", {
+        "mode": "spectate", "notebook_mode": "manual",
+    }).status_code == 400
+    state = post(client, token, "/api/game", {"progress": "step"}).get_json()
+    assert state["notebook_mode"] == "automatic"
+    assert client.put("/api/notebook", json=edit, headers=headers).status_code == 409
+    state = post(client, token, "/api/game", {
+        "progress": "step", "notebook_mode": "manual",
+    }).get_json()
+    free_card = next(row["id"] for row in state["matrix"] if row["id"] not in state["hand"])
+    for invalid in (
+        {"card_id": -1, "holder": 1, "mark": "+"},
+        {"card_id": True, "holder": 1, "mark": "+"},
+        {"card_id": free_card, "holder": -1, "mark": "+"},
+        {"card_id": free_card, "holder": 5, "mark": "+"},
+        {"card_id": free_card, "holder": 1, "mark": "maybe"},
+        {"card_id": free_card, "holder": 1, "mark": "+", "extra": True},
+    ):
+        assert client.put("/api/notebook", json=invalid, headers=headers).status_code == 400
+    for locked in (
+        {"card_id": free_card, "holder": 0, "mark": "+"},
+        {"card_id": state["hand"][0], "holder": 1, "mark": "+"},
+    ):
+        assert client.put("/api/notebook", json=locked, headers=headers).status_code == 409
+    assert client.put("/api/notebook", json=edit).status_code == 403
+    assert client.get("/api/state").get_json()["notebook_revision"] == 0
+
+
+def test_manual_notebooks_are_isolated_between_sessions():
+    app = create_app()
+    first, second = app.test_client(), app.test_client()
+    first_token, second_token = csrf_token(first), csrf_token(second)
+    config = {"notebook_mode": "manual", "seed": 12, "progress": "step"}
+    state = post(first, first_token, "/api/game", config).get_json()
+    post(second, second_token, "/api/game", config)
+    card_id = next(row["id"] for row in state["matrix"] if row["id"] not in state["hand"])
+    response = first.put(
+        "/api/notebook", json={"card_id": card_id, "holder": 1, "mark": "+"},
+        headers={"X-CSRF-Token": first_token},
+    )
+    assert response.status_code == 200
+    other = second.get("/api/state").get_json()
+    assert other["notebook_revision"] == 0
+    assert next(row for row in other["matrix"] if row["id"] == card_id)["marks"][1] == "?"
+
+
 @pytest.mark.parametrize("players", [2, 7])
 def test_default_card_only_web_game_supports_counts_outside_board_range(client, players):
     token = csrf_token(client)

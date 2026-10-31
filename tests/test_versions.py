@@ -9,9 +9,9 @@ from clue_engine.webapp import create_app
 
 
 def test_versions_are_semantic_and_package_uses_api_version():
-    assert clue_engine.__version__ == __version__ == "0.3.0"
-    assert FRONTEND_VERSION == "0.2.1"
-    assert DESKTOP_VERSION == "0.2.1"
+    assert clue_engine.__version__ == __version__ == "0.4.0"
+    assert FRONTEND_VERSION == "0.3.0"
+    assert DESKTOP_VERSION == "0.3.0"
     assert all(re.fullmatch(r"\d+\.\d+\.\d+", version) for version in (
         __version__, FRONTEND_VERSION, DESKTOP_VERSION
     ))

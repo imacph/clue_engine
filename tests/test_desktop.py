@@ -80,6 +80,17 @@ def test_desktop_profiles_persist_validate_and_require_csrf(tmp_path):
         "/api/desktop/profiles", json={"profiles": {"Bad": invalid}}, headers=headers
     ).status_code == 400
     assert preferences.get_profiles() == {"Game": profile}
+    for mode in ("manual", "automatic"):
+        updated = dict(profile, notebook_mode=mode)
+        response = client.put(
+            "/api/desktop/profiles", json={"profiles": {"Game": updated}}, headers=headers
+        )
+        assert response.status_code == 200
+        assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": updated}}
+    invalid_mode = dict(profile, notebook_mode="unknown")
+    assert client.put(
+        "/api/desktop/profiles", json={"profiles": {"Bad": invalid_mode}}, headers=headers
+    ).status_code == 400
 
 
 @pytest.mark.parametrize("fail", [False, True])

@@ -1,6 +1,22 @@
 # Changelog
 
-## App 0.2.1 / Desktop 0.2.1 / API 0.3.0 - Unreleased
+## App 0.3.0 / Desktop 0.3.0 / API 0.4.0 - Unreleased
+
+### Added
+
+- Added a manual detective notebook for browser and Windows play. Hand facts
+  are filled in; players can mark the remaining cells themselves.
+- Kept notes for the active game across updates and page reloads, and added
+  notebook mode to setup profiles, replay, and the review screen.
+
+### Changed
+
+- Manual notebooks are the default for new player setups. Automatic deductions
+  remain an explicit option and are always used for spectator views.
+- Manual mode does not display calculated deduction clauses. The legacy HTTP
+  game setup remains automatic when its notebook mode is omitted.
+
+## App 0.2.1 / Desktop 0.2.1 / API 0.3.0 - Earlier unreleased build
 
 ### Changed
 

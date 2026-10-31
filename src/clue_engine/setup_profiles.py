@@ -15,7 +15,7 @@ def validate_setup_profile(value: object) -> None:
     board_fields = {"seat_suspects", "board_rules"}
     game_type = value.get("game_type")
     expected = required | board_fields if game_type == "board" else required
-    if set(value) != expected or game_type not in {"board", "card_only"}:
+    if set(value) not in (expected, expected | {"notebook_mode"}) or game_type not in {"board", "card_only"}:
         raise ValueError("Invalid setup profile fields or game type.")
     players = value["players"]
     seat = value["seat"]
@@ -25,6 +25,8 @@ def validate_setup_profile(value: object) -> None:
         raise ValueError("Profile seat must identify an existing player.")
     if value["mode"] not in {"play", "spectate"} or value["progress"] not in {"auto", "step"}:
         raise ValueError("Invalid profile mode or progression.")
+    if "notebook_mode" in value and value["notebook_mode"] not in ("manual", "automatic"):
+        raise ValueError("Invalid profile notebook mode.")
     if type(value["max_steps"]) is not int or value["max_steps"] < 0:
         raise ValueError("Profile action limit must be non-negative.")
     if type(value["debug"]) is not bool:

@@ -81,8 +81,15 @@
                   <input id="players" type="number" min="2" value="4" required>
                 </label>
               </div>
+              <label id="notebook-mode-field">Detective notebook
+                <select id="notebook-mode" aria-describedby="notebook-mode-hint">
+                  <option value="manual">Manual - make your own deductions</option>
+                  <option value="automatic">Automatic - fill in deductions for me</option>
+                </select>
+              </label>
+              <p id="notebook-mode-hint" class="hint">Manual starts with facts from your hand; you record the rest.</p>
               <p id="spectator-warning" class="notice" hidden>
-                Spectator mode lets you inspect each player's private hand and notebook. It is not suitable for preserving hidden information.
+                Spectator mode uses automatic notebooks and lets you inspect each player's private hand. It is not suitable for preserving hidden information.
               </p>
             </div>
             <div class="setup-game-sidebar">
@@ -300,6 +307,7 @@
             <div>
               <p class="eyebrow">Deductions</p>
               <h3 id="notebook-title">Detective notebook</h3>
+              <p id="notebook-instructions" class="hint" hidden>Manual: use arrows to move; activate a cell to cycle ? / + / −. Hand facts are fixed.</p>
             </div>
             <div id="notebook-heading-tools" class="notebook-heading-tools">
               <span class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown<span class="board-envelope-legend"> <b>E</b> envelope</span></span>

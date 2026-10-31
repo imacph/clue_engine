@@ -292,6 +292,7 @@ window.setupWizard = (() => {
     const count = Number($("players").value);
     const value = {
       mode: $("mode").value, game_type: isBoard() ? "board" : "card_only",
+      notebook_mode: $("mode").value === "spectate" ? "automatic" : $("notebook-mode").value,
       players: count, seat: Number($("seat").value), seed: Number($("seed").value),
       bots: copy(bots.slice(0, count)), progress: $("progress").value,
       max_steps: Number($("max-steps").value), debug: $("debug").checked,
@@ -315,6 +316,7 @@ window.setupWizard = (() => {
       review.append(paragraph);
     };
     add("Game", `${data.game_type === "board" ? "Board" : "Cards only"} · ${data.mode} · ${data.players} players`);
+    add("Notebook", data.notebook_mode === "manual" ? "Manual" : "Automatic");
     add("Seed", String(data.seed));
     for (let i = 0; i < data.players; i++) {
       const human = data.mode === "play" && i === data.seat;
@@ -352,6 +354,7 @@ window.setupWizard = (() => {
     validateProfile(data, useSeed);
     document.querySelector(`input[name="game-type"][value="${data.game_type}"]`).checked = true;
     $("mode").value = data.mode;
+    $("notebook-mode").value = data.notebook_mode === undefined ? "manual" : data.notebook_mode;
     $("players").value = String(data.players);
     $("progress").value = data.progress;
     $("max-steps").value = String(data.max_steps);
@@ -359,7 +362,7 @@ window.setupWizard = (() => {
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
     bots = copy(data.bots);
     if (data.board_rules) setRules(data.board_rules);
-    updateMode();
+    updateMode(false);
     updateGameType();
     syncSeats();
     $("seat").value = String(data.seat);
@@ -371,11 +374,12 @@ window.setupWizard = (() => {
 
   function validateProfile(data, withSeed = false) {
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid setup profile.");
-    const allowed = ["mode", "game_type", "players", "seat", "bots", "seat_suspects",
+    const allowed = ["mode", "game_type", "notebook_mode", "players", "seat", "bots", "seat_suspects",
       "board_rules", "progress", "max_steps", "debug", ...(withSeed ? ["seed"] : [])];
     if (Object.keys(data).some((key) => !allowed.includes(key))
       || !["play", "spectate"].includes(data.mode)
       || !["board", "card_only"].includes(data.game_type)
+      || (data.notebook_mode !== undefined && !["manual", "automatic"].includes(data.notebook_mode))
       || !Number.isInteger(data.players) || data.players < 2
       || (data.game_type === "board" && (data.players < 3 || data.players > 6))
       || !Number.isInteger(data.seat) || data.seat < 0 || data.seat >= data.players

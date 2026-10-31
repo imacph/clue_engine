@@ -46,6 +46,9 @@ class WebGame:
     auto_progress: bool
     paused: bool
     selected_player: int
+    notebook_mode: str = "automatic"
+    notebook_marks: dict[tuple[int, int], str] = field(default_factory=dict)
+    notebook_revision: int = 0
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -251,15 +254,30 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
     view = snapshot.view
     if view is None:
         view = game.game.spectator_view(selected_player)
-    knowledge = knowledge_for(view, snapshot.num_players)
+    knowledge = (
+        knowledge_for(view, snapshot.num_players)
+        if game.notebook_mode == "automatic" else None
+    )
     marks = {Mark.UNKNOWN: "?", Mark.HELD: "+", Mark.NOT_HELD: "-"}
+
+    def card_mark(holder: int, card_id: int) -> str:
+        if knowledge is not None:
+            return marks[knowledge.mark_of(holder, card_id)]
+        if holder == view.player:
+            return "+" if card_id in view.own_hand else "-"
+        if card_id in view.own_hand:
+            return "-"
+        return game.notebook_marks.get((holder, card_id), "?")
+
     matrix = [
         {
             "id": card.id,
             "name": card.name,
             "type": card_type.name.lower(),
-            "marks": [
-                marks[knowledge.mark_of(holder, card.id)]
+            "marks": [card_mark(holder, card.id) for holder in range(snapshot.num_players + 1)],
+            "editable": [
+                game.notebook_mode == "manual"
+                and holder != view.player and card.id not in view.own_hand
                 for holder in range(snapshot.num_players + 1)
             ],
         }
@@ -284,11 +302,10 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
     }
     if clause_kind_value not in clause_kinds:
         raise ValueError("Clause type must be all, refute, or accuse.")
-    clauses = format_clauses(
-        knowledge,
-        view=view,
-        actor=actor,
-        kind=clause_kinds[clause_kind_value],
+    clauses = (
+        format_clauses(knowledge, view=view, actor=actor, kind=clause_kinds[clause_kind_value])
+        if knowledge is not None else
+        "Automatic clause deductions are disabled in manual notebook mode."
     )
 
     legal = snapshot.legal_actions
@@ -329,6 +346,8 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
 
     return {
         "mode": game.mode,
+        "notebook_mode": game.notebook_mode,
+        "notebook_revision": game.notebook_revision,
         "game_type": "board" if board is not None else "card_only",
         "board": board,
         "board_rules": asdict(game.game.board_rules) if board is not None else None,
@@ -463,6 +482,11 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             mode = body.get("mode", "play")
             if mode not in {"play", "spectate"}:
                 raise ValueError("Mode must be play or spectate.")
+            notebook_mode = body.get("notebook_mode", "automatic")
+            if not isinstance(notebook_mode, str) or notebook_mode not in {"manual", "automatic"}:
+                raise ValueError("Notebook mode must be manual or automatic.")
+            if mode == "spectate" and notebook_mode == "manual":
+                raise ValueError("Spectator games require an automatic notebook.")
             game_type = body.get("game_type", "card_only")
             if not isinstance(game_type, str) or game_type not in {"card_only", "board"}:
                 raise ValueError("Game type must be card_only or board.")
@@ -554,6 +578,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             auto_progress=progress == "auto",
             paused=progress == "step",
             selected_player=0,
+            notebook_mode=notebook_mode,
         )
         now = time.monotonic()
         with games_lock:
@@ -585,6 +610,45 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 return jsonify(_serialize_state(game, request.args))
             except ValueError as exc:
                 return jsonify(error=str(exc)), 400
+
+    @app.put("/api/notebook")
+    def update_notebook():
+        game = _game_from_request(games, games_lock)
+        if game is None:
+            return jsonify(error="Start a game before editing its notebook."), 404
+        try:
+            body = _json_body()
+            if set(body) != {"card_id", "holder", "mark"}:
+                raise ValueError("Supply a card_id, holder, and mark.")
+            card_id = _integer(body, "card_id")
+            holder = _integer(body, "holder")
+            mark = body["mark"]
+            if card_id not in CARDS_BY_ID:
+                raise ValueError("Card must identify an existing card.")
+            if not isinstance(mark, str) or mark not in {"?", "+", "-"}:
+                raise ValueError("Mark must be ?, +, or -.")
+        except (TypeError, ValueError) as exc:
+            return jsonify(error=str(exc)), 400
+
+        with game.lock:
+            if game.notebook_mode != "manual":
+                return jsonify(error="This notebook is automatic and cannot be edited."), 409
+            snapshot = game.game.snapshot()
+            view = snapshot.view
+            if view is None:
+                return jsonify(error="A manual notebook requires a player view."), 409
+            if not 0 <= holder <= snapshot.num_players:
+                return jsonify(error="Holder must identify a player or the envelope."), 400
+            if holder == view.player or card_id in view.own_hand:
+                return jsonify(error="Facts from your hand cannot be edited."), 409
+            key = (holder, card_id)
+            if game.notebook_marks.get(key, "?") != mark:
+                if mark == "?":
+                    game.notebook_marks.pop(key, None)
+                else:
+                    game.notebook_marks[key] = mark
+                game.notebook_revision += 1
+            return jsonify(_serialize_state(game, {}))
 
     @app.post("/api/action")
     def submit_action():

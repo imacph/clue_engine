@@ -10,8 +10,8 @@ or when every player has made an incorrect accusation.
 
 ## Versions
 
-The game API and Python distribution are **0.3.0**, the shared browser/desktop
-frontend is **0.2.1**, and the Windows desktop wrapper is **0.2.1**. These are
+The game API and Python distribution are **0.4.0**, the shared browser/desktop
+frontend is **0.3.0**, and the Windows desktop wrapper is **0.3.0**. These are
 pre-1.0 versions and do not yet promise a stable public API.
 
 The source of truth is `src/clue_engine/_version.py`. The Python package exposes
@@ -188,9 +188,9 @@ Include the human seat in play mode; its profile is ignored. Select
 to play; when responding, only legal cards are offered for reveal. An accusation
 requires confirmation. The read-only notebook shows deductions from the human
 player's view. Spectators can select any player's private hand and notebook; the
-history remains public unless omniscient debug is enabled. Both interfaces show
-the recorded refutation and incorrect-accusation clauses, distinguishing
-unresolved constraints from those already satisfied.
+history remains public unless omniscient debug is enabled. The console and
+Tkinter interfaces show the recorded refutation and incorrect-accusation
+clauses, distinguishing unresolved constraints from those already satisfied.
 
 In the desktop game window, the history and clause panels each have independent
 **Actor** and **Type** filters. History actors are the players who performed
@@ -250,6 +250,27 @@ action limit, and debug settings, or **Saved setup profiles** to manage
 profiles. Saved profiles omit the seed, and loading one rolls a fresh seed.
 Profiles are stored in browser local storage or, for Windows, in
 `%LOCALAPPDATA%\ClueEngine`.
+
+The browser and Windows player setup defaults to a **Manual** detective
+notebook. Facts from your own hand are filled in and cannot be changed; every
+other cell begins unknown. Activate a cell with the mouse, touch, Enter, or
+Space to cycle through unknown (`?`), held (`+`), and not held (`-`). Record
+shown cards and other deductions yourself; arrow keys move between editable
+cells. Your notes do not affect the bots.
+Automatic deduction clauses are disabled in manual mode, while the history and
+cards shown to you remain available. Choose **Automatic** in setup to use the
+read-only deduction matrix and clauses instead. Spectator games always use the
+automatic notebook for the selected player's view.
+
+Manual notes belong to the current game and survive updates and page reloads
+while its local server session remains active. They are not saved as a game
+file: starting a new game, restarting the server, or allowing the session to
+expire discards them. Existing setup profiles without a notebook setting load
+with the manual player default. For compatibility, HTTP callers that omit
+`notebook_mode` from `POST /api/game` retain the automatic notebook; send
+`"manual"` explicitly to opt in. In manual mode, `PUT /api/notebook` accepts
+`card_id`, a zero-based `holder` (the number of players denotes the envelope),
+and a `mark` of `?`, `+`, or `-`.
 
 The wizard offers per-bot presets and custom strategy controls, plus standard
 rules and optional board house rules. The strategy toolkit score describes the
