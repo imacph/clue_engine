@@ -1,6 +1,11 @@
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .board import DEFAULT_BOARD, BoardLayout
+from .board_setup import BoardSetup
+from .board_state import create_board
+from .board_turn import BoardTurn
 from .cards import CARDS, CARDS_BY_ID
 from .models import CardType, Combination
 
@@ -10,6 +15,7 @@ class GameState:
     solution: Combination
     player_hands: list[frozenset[int]]
     current_player: int
+    board: BoardTurn | None = None
 
 def deal(rng: random.Random, num_players: int) -> GameState:
     if num_players < 2:
@@ -30,3 +36,22 @@ def deal(rng: random.Random, num_players: int) -> GameState:
         player_hands=[frozenset(hand) for hand in hands],
         current_player=0,
     )
+
+
+def deal_board(
+    rng: random.Random,
+    num_players: int,
+    *,
+    layout: BoardLayout = DEFAULT_BOARD,
+    seat_suspects: Sequence[int] | None = None,
+    weapon_rooms: Sequence[int] | None = None,
+) -> GameState:
+    """Deal an opt-in board game; invalid setup is rejected before dealing."""
+    board = create_board(
+        BoardSetup(num_players), layout=layout,
+        seat_suspects=seat_suspects, weapon_rooms=weapon_rooms,
+    )
+    state = deal(rng, num_players)
+    state.current_player = board.first_player
+    state.board = BoardTurn(board)
+    return state

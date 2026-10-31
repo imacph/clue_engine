@@ -1,8 +1,7 @@
 # Board-mode rules contract
 
-This is the contract for the **future** board mode, not a description of a
-currently playable feature. A board topology and initial token state are
-available independently of the engine. The reference is the
+This is the contract for the programmatic board engine. Board play is not yet
+exposed in any interface; web controls are planned. The reference is the
 [Hasbro Clue C00045 instructions (2002)](https://www.hasbro.com/common/instruct/Clue%282002%29.pdf).
 The game rules are summarized here; the board artwork and instructions are not
 reproduced. Card-only mode keeps its current rules and remains the default.
@@ -10,8 +9,8 @@ reproduced. Card-only mode keeps its current rules and remains the default.
 ## Setup
 
 - **BR-01 — Players:** Board games have 3–6 players. Two-player and larger
-  games remain supported by card-only mode. `BoardSetup` validates the board
-  player count, but does not create a game or enable board play.
+  games remain supported by card-only mode. Both `BoardSetup` and the board
+  game factory validate the board player count.
 - **BR-02 — Characters and weapons:** Put all six suspect tokens on their
   starting spaces, including unassigned tokens. Put the six weapon tokens in
   six different rooms. Assign each player a different suspect.
@@ -32,8 +31,8 @@ reproduced. Card-only mode keeps its current rules and remains the default.
   a room ends movement early. The engine generates and records the roll.
 - **BR-07 — Paths:** A token cannot enter an occupied hallway square, visit the
   same square twice during one turn, or re-enter a room it left during that
-  turn. A door is an opening, not an additional square. Entering a room ends
-  movement even when the roll has steps left.
+  turn. A door is an opening, not an additional square. Entering a room costs
+  one step and ends movement even when the roll has steps left.
 - **BR-08 — Passage:** At the start of a turn in a corner room, a player may
   take its secret passage to the opposite corner room instead of rolling.
 - **BR-09 — Blocked movement:** A player trapped in a room by blocked doors
@@ -78,7 +77,7 @@ The reference edition uses different labels for some equivalent cards
 Any edition-specific display aliases must not change card IDs or old traces.
 No optional rule variants are enabled by this phase.
 
-## Implemented board model
+## Implemented board engine
 
 `clue_engine.board.DEFAULT_BOARD` is an original 25-by-27 layout identified as
 `original-25x27-v1`. It has all nine card rooms, connected hallway squares,
@@ -107,29 +106,35 @@ her seat. All six suspect tokens remain present, including unassigned tokens,
 and occupy distinct hallway starts. The six weapons initially occupy six
 different rooms; callers can supply different room and seat assignments.
 Positions and layout are immutable, and room occupancy may be shared.
-Creating this state does not create an `Engine`, add movement actions, or
-enable board mode in any interface.
+`create_board` creates positions only; `create_board_game` creates an engine
+and bots. The engine exposes incremental movement actions and public board
+observations, enforces the rules above, and records rolls and relocation.
+Full private records can be written and verified with
+`clue_engine.board_record`; they contain the hands and solution and must not
+be shared with players. Existing card-only actions and trace formats remain
+unchanged. Board controls remain future web work.
 
-## Acceptance checklist for later phases
+## Acceptance checklist
 
-Each item is a test obligation for board-mode implementation, not a claim that
-the feature already exists.
+The engine and bot obligations below are implemented and covered by tests.
+The web-interface obligation remains for a later phase.
 
-- [ ] **BR-01–05:** Reject invalid player counts at every board setup entry
+- [x] **BR-01–05:** Reject invalid player counts at every board setup entry
   point; verify assignments, starting tokens, weapon placement, deck partition,
   room connectivity, doors, and passage pairs.
-- [ ] **BR-06–09:** Test controlled rolls, exact paths, direction changes,
+- [x] **BR-06–09:** Test controlled rolls, exact paths, direction changes,
   occupied squares including unassigned tokens, no revisits, room entry and
   exit, door blocking, passages, and blocked/no-continuation cases.
-- [ ] **BR-10–13:** Test room restrictions, repeat suggestions, all token
+- [x] **BR-10–13:** Test room restrictions, repeat suggestions, all token
   relocations, summoned turns, own-card suggestions, mandatory refutation,
   unrefuted suggestions, and private visibility.
-- [ ] **BR-14–16:** Test accusations before and after suggestions, both
+- [x] **BR-14–16:** Test accusations before and after suggestions, both
   outcomes and their solution visibility, eliminated responders, relocated
   eliminated tokens, blocked-door removal, and the all-eliminated extension.
-- [ ] Preserve card-only defaults, action ordering, seeded behavior, existing
+- [x] Preserve card-only defaults, action ordering, seeded behavior, existing
   trace readers, and support for player counts outside the board-mode range.
-- [ ] Replay board games with recorded rolls and positions; ensure public
+- [x] Replay board games with recorded rolls and positions; ensure public
   snapshots never expose private cards or future random outcomes.
-- [ ] Verify all bot profiles and the web interface through complete games
-  without adding board-play controls to console or desktop interfaces.
+- [x] Verify all bot profiles through complete board games.
+- [ ] Add and verify board play in the web interface without adding board-play
+  controls to console or desktop interfaces.

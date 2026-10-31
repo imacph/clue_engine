@@ -1,4 +1,5 @@
 from .actions import ACCUSES, ENDTURNS, PASSES, SUGGESTIONS
+from .board_turn import legal_board_actions
 from .models import Action, Reveal
 from .observations import Event, EventKind, last_suggest_index, pending
 from .state import GameState
@@ -37,6 +38,8 @@ def legal_actions(state: GameState, log: tuple[Event, ...], player: int) -> tupl
         return ()
     if player in eliminated(state, log):
         return ENDTURNS
+    if state.board is not None:
+        return legal_board_actions(state.board, player)
     if _suggested_this_turn(log):
         return _AFTER_SUGGESTION_ACTIONS
     return _TURN_START_ACTIONS

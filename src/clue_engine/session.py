@@ -4,11 +4,13 @@ import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .board import DEFAULT_BOARD, BoardLayout
+from .board_turn import BoardTurn
 from .engine import Engine
 from .models import Action, Combination
 from .observations import Event, EventKind, PlayerView, public_events
 from .policies import Policy, make_policy, policies_for_players
-from .state import deal
+from .state import deal, deal_board
 
 
 @dataclass(frozen=True)
@@ -32,11 +34,32 @@ class SessionSnapshot:
     events: tuple[Event, ...]
     legal_actions: tuple[Action, ...]
     debug_info: DebugInfo | None
+    board: BoardTurn | None = None
 
 
 def create_game(num_players: int, seed: int, policy_name: str) -> tuple[Engine, tuple[Policy, ...]]:
     names = policies_for_players(policy_name, num_players)
     engine = Engine(deal(random.Random(seed), num_players))
+    policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
+    return engine, policies
+
+
+def create_board_game(
+    num_players: int,
+    seed: int,
+    policy_name: str,
+    *,
+    layout: BoardLayout = DEFAULT_BOARD,
+    seat_suspects: Sequence[int] | None = None,
+    weapon_rooms: Sequence[int] | None = None,
+) -> tuple[Engine, tuple[Policy, ...]]:
+    """Create an opt-in board game with dice independent of the card deal and bots."""
+    names = policies_for_players(policy_name, num_players)
+    state = deal_board(
+        random.Random(seed), num_players, layout=layout,
+        seat_suspects=seat_suspects, weapon_rooms=weapon_rooms,
+    )
+    engine = Engine(state, dice_rng=random.Random(f"{seed}:movement"))
     policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
     return engine, policies
 
@@ -102,6 +125,7 @@ class GameSession:
             events=events,
             legal_actions=legal,
             debug_info=debug_info,
+            board=engine.state.board,
         )
 
     def spectator_view(self, player: int) -> PlayerView:

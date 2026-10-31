@@ -1,7 +1,11 @@
+import heapq
 import random
 from collections.abc import Sequence
 from typing import Protocol
 
+from .board import Square
+from .board_state import RoomPosition
+from .board_turn import Move, Roll, UsePassage, suspect_location
 from .knowledge import Knowledge, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, Combination, Reveal, Suggest
 from .observations import EventKind, PlayerView, last_suggest_index
@@ -27,10 +31,111 @@ class RandomPolicy:
     def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
         knowledge = knowledge_for(view, num_players)
         options = sound_actions(legal, known_solution(knowledge))
+        if view.board is not None:
+            return self._pick_board(view, knowledge, options)
         return self._pick(knowledge, options)
 
     def _pick(self, knowledge: Knowledge, options: tuple[Action, ...]) -> Action:
         return self.rng.choice(options)
+
+    def _pick_board(
+        self, view: PlayerView, knowledge: Knowledge, options: tuple[Action, ...],
+    ) -> Action:
+        if len(options) == 1:
+            return options[0]
+        reveals = tuple(action for action in options if isinstance(action, Reveal))
+        if reveals:
+            return self._board_reveal(view, reveals)
+        suggestions = tuple(action for action in options if isinstance(action, Suggest))
+        if suggestions:
+            return self._board_suggestion(view, knowledge, suggestions)
+        moves = tuple(action for action in options if isinstance(action, Move))
+        if moves:
+            return self._board_move(view, knowledge, moves)
+        if UsePassage() in options:
+            assert view.board is not None
+            board = view.board.board
+            location = suspect_location(board, board.seat_suspects[view.player])
+            assert isinstance(location, RoomPosition)
+            destination = board.layout.passage_from(location.room_id)
+            occupied = board.occupied_hallways(
+                excluding_suspect_id=board.seat_suspects[view.player]
+            )
+            exits_blocked = all(
+                door.hallway_square in occupied for door in board.layout.doors_for(location.room_id)
+            )
+            if exits_blocked or destination not in self._recent_rooms(view):
+                return UsePassage()
+        if Roll() in options:
+            return Roll()
+        return self.rng.choice(options)
+
+    def _board_reveal(self, view: PlayerView, reveals: tuple[Reveal, ...]) -> Reveal:
+        return self.rng.choice(reveals)
+
+    def _board_suggestion(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+    ) -> Action:
+        return self.rng.choice(suggestions)
+
+    @staticmethod
+    def _recent_rooms(view: PlayerView) -> tuple[int, ...]:
+        return tuple(
+            event.combo.room_id for event in view.events
+            if event.kind is EventKind.SUGGEST and event.actor == view.player
+            and event.combo is not None
+        )[-2:]
+
+    def _room_penalty(self, knowledge: Knowledge, room_id: int, recent: tuple[int, ...]) -> int:
+        return 8 if room_id in recent else 0
+
+    def _board_move(
+        self, view: PlayerView, knowledge: Knowledge, moves: tuple[Move, ...],
+    ) -> Move:
+        assert view.board is not None
+        turn = view.board
+        board = turn.board
+        recent = self._recent_rooms(view)
+        fresh_rooms = tuple(
+            move for move in moves
+            if isinstance(move.destination, RoomPosition) and move.destination.room_id not in recent
+        )
+        if fresh_rooms:
+            return self.rng.choice(fresh_rooms)
+
+        blocked = board.occupied_hallways(
+            excluding_suspect_id=board.seat_suspects[view.player]
+        ) | turn.visited
+        distances: dict[Square, int] = {}
+        queue: list[tuple[int, Square]] = []
+        for door in board.layout.doors:
+            if door.room_id == turn.starting_room or door.hallway_square in blocked:
+                continue
+            cost = 1 + self._room_penalty(knowledge, door.room_id, recent)
+            if cost < distances.get(door.hallway_square, 1_000_000):
+                distances[door.hallway_square] = cost
+                heapq.heappush(queue, (cost, door.hallway_square))
+        while queue:
+            cost, square = heapq.heappop(queue)
+            if cost != distances[square]:
+                continue
+            for neighbor in board.layout.hallway_neighbors(square):
+                if neighbor in blocked or cost + 1 >= distances.get(neighbor, 1_000_000):
+                    continue
+                distances[neighbor] = cost + 1
+                heapq.heappush(queue, (cost + 1, neighbor))
+
+        scored = [
+            (
+                self._room_penalty(knowledge, move.destination.room_id, recent)
+                if isinstance(move.destination, RoomPosition)
+                else distances.get(move.destination, 1_000_000),
+                move,
+            )
+            for move in moves
+        ]
+        best = min(score for score, _ in scored)
+        return self.rng.choice(tuple(move for score, move in scored if score == best))
 
 
 class DeductivePolicy(RandomPolicy):
@@ -51,6 +156,29 @@ class DeductivePolicy(RandomPolicy):
         if suggestions:
             return self.rng.choice(suggestions)
         return super()._pick(knowledge, options)
+
+    @staticmethod
+    def _board_candidates(
+        knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+    ) -> tuple[Suggest, ...]:
+        candidates = tuple(
+            action for action in suggestions
+            if all(
+                knowledge.mark_of(knowledge.envelope, card_id) is not Mark.NOT_HELD
+                for card_id in (action.combination.suspect_id, action.combination.weapon_id)
+            )
+        )
+        return candidates or suggestions
+
+    def _board_suggestion(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+    ) -> Action:
+        return self.rng.choice(self._board_candidates(knowledge, suggestions))
+
+    def _room_penalty(self, knowledge: Knowledge, room_id: int, recent: tuple[int, ...]) -> int:
+        return super()._room_penalty(knowledge, room_id, recent) + (
+            2 if knowledge.mark_of(knowledge.envelope, room_id) is Mark.NOT_HELD else 0
+        )
 
 
 def _cards(combination: Combination) -> tuple[int, int, int]:
@@ -75,6 +203,8 @@ class ProbingPolicy(DeductivePolicy):
     def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
         knowledge = knowledge_for(view, num_players)
         options = sound_actions(legal, known_solution(knowledge))
+        if view.board is not None:
+            return self._pick_board(view, knowledge, options)
         reveals = tuple(action for action in options if isinstance(action, Reveal))
         if reveals:
             return self._pick_reveal(view, reveals)
@@ -82,6 +212,16 @@ class ProbingPolicy(DeductivePolicy):
         if suggestions:
             return self._pick_suggestion(view, knowledge, options, suggestions)
         return self.rng.choice(options)
+
+    def _board_reveal(self, view: PlayerView, reveals: tuple[Reveal, ...]) -> Reveal:
+        return self._pick_reveal(view, reveals)
+
+    def _board_suggestion(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+    ) -> Action:
+        probes = tuple(action for action in suggestions if _is_probe(view, knowledge, action))
+        candidates = probes or self._board_candidates(knowledge, suggestions)
+        return self._pick_suggestion(view, knowledge, candidates, candidates)
 
     def _pick_reveal(self, view: PlayerView, reveals: tuple[Reveal, ...]) -> Reveal:
         index = last_suggest_index(view.events)

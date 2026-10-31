@@ -1,5 +1,7 @@
 """Formatting helpers for public and player-specific game observations."""
 
+from .board import Square
+from .board_state import RoomPosition
 from .cards import CARDS, CARDS_BY_ID
 from .knowledge import Knowledge, Mark, knowledge_for
 from .models import Combination
@@ -49,6 +51,29 @@ def format_event(event: Event, previous: Event | None = None) -> str:
             ):
                 return f"{actor} was eliminated after an incorrect accusation."
             return f"{actor} ended their turn."
+        case EventKind.ROLL:
+            if event.dice is None:
+                raise ValueError("ROLL event without dice")
+            return f"{actor} rolled {event.dice[0]} and {event.dice[1]}."
+        case EventKind.MOVE | EventKind.PASSAGE | EventKind.SUSPECT_MOVED:
+            if event.suspect_id is None or event.location is None:
+                raise ValueError(f"{event.kind.name} event without a suspect or location")
+            if isinstance(event.location, Square):
+                destination = f"hallway ({event.location.x}, {event.location.y})"
+            elif isinstance(event.location, RoomPosition):
+                destination = CARDS_BY_ID[event.location.room_id].name
+            else:
+                raise TypeError(f"invalid movement location: {event.location!r}")
+            suspect = CARDS_BY_ID[event.suspect_id].name
+            verb = "used a passage to" if event.kind is EventKind.PASSAGE else "moved to"
+            return f"{actor}: {suspect} {verb} {destination}."
+        case EventKind.WEAPON_MOVED:
+            if event.weapon_id is None or not isinstance(event.location, RoomPosition):
+                raise ValueError("WEAPON_MOVED event without a weapon or room")
+            return (
+                f"{actor}: {CARDS_BY_ID[event.weapon_id].name} moved to "
+                f"{CARDS_BY_ID[event.location.room_id].name}."
+            )
     raise ValueError(f"unknown event kind: {event.kind!r}")
 
 

@@ -1,21 +1,23 @@
 # Clue Engine
 
-A card-deduction simulator with player-specific observations and configurable bot policies.
-It models suggestions, mandatory refutations, accusations, elimination, and turns;
-the playable game does not yet apply board movement, room restrictions, or
-character relocation.
-Players may suggest any combination once per turn and may end a turn without
-suggesting. Eliminated players still respond to suggestions. The game ends after
-a correct accusation or when every player has made an incorrect accusation.
+A Clue simulator with player-specific observations and configurable bot policies.
+The default card-only game models suggestions, mandatory refutations,
+accusations, elimination, and turns. Players may suggest any combination once
+per turn and may end a turn without suggesting. An opt-in board engine adds
+movement, rooms, passages, and movement-aware bots. Eliminated players still
+respond to suggestions in both modes. A game ends after a correct accusation
+or when every player has made an incorrect accusation.
 
 `deal` supports two or more players and distributes the 18 non-solution cards
 in seat order as evenly as possible. The random generator is supplied by the
 caller for reproducibility.
 
-The future board mode is specified in the [board rules contract](docs/board-rules.md).
-An independent full-board model is available for future engine and web work,
-but board mode is not playable yet. The [card-only baseline](docs/card-only-baseline.md)
-records reproducible pre-board measurements.
+The [board rules contract](docs/board-rules.md) describes the board rules and
+documented interpretations. Board games are currently available through the
+Python API only; the web, desktop, console, and batch interfaces remain
+card-only. Board controls are planned for the web interface, not the other
+interfaces. The [card-only baseline](docs/card-only-baseline.md) records
+reproducible pre-board measurements.
 
 ```python
 import random
@@ -37,6 +39,58 @@ for a trusted controller and can contain the solution or privately shown cards.
 Pass views rather than the engine to player policies. `play` requires one policy
 per player and raises `RuntimeError` if the game has not ended after `max_steps`;
 policies are not guaranteed to terminate every game.
+
+## Board engine
+
+Board games support 3–6 players, with Miss Scarlet starting. The original
+25-by-27 layout has all nine rooms, 20 doors, all six suspect tokens, six
+weapons, and two secret passages. Its geometry is **not** a reproduction of
+the C00045 printed board, so travel distances and balance differ. Unassigned
+suspects still block hallways. The default card-only mode continues to support
+two or more players.
+
+The engine rolls two dice using a movement RNG separate from the deal and bot
+RNGs. Board actions are incremental: `Roll()` starts movement;
+`Move(Square(x, y))` moves one hallway square; `Move(RoomPosition(room_id))`
+enters a room; and `UsePassage()` takes an available passage instead of
+rolling. Entering a room costs one movement step and stops movement; the door
+is not an extra square. The engine enforces blockers, no hallway revisits,
+no same-turn room re-entry, room-specific suggestions, token relocation, and
+summoned-player turns. If movement cannot continue, the player may end at the
+last reachable square. Public board state, rolls, and movements are included in
+player views and session snapshots, without exposing future dice or other
+players' hands.
+
+To run a board game programmatically:
+
+```python
+from copy import deepcopy
+from pathlib import Path
+
+from clue_engine.board_record import read_board_record, write_board_record
+from clue_engine.session import create_board_game
+from clue_engine.simulation import play
+
+engine, policies = create_board_game(4, seed=42, policy_name="strategic")
+initial_state = deepcopy(engine.state)
+play(engine, policies)
+print(engine.winner)
+
+write_board_record(Path("private-board-game.json"), initial_state, engine.history)
+replayed = read_board_record(Path("private-board-game.json"))
+assert replayed.log == engine.log
+```
+
+`create_board_game` also accepts per-seat policy names, optional suspect and
+weapon assignments, and a validated custom layout. `Engine.legal_actions()`
+supplies the actions legal at the current movement or response phase.
+`engine.history` is a trusted-controller record, not a player view.
+The replay file contains **the solution, every hand, and private reveals**;
+keep it private. Files are created without overwriting existing files. Replay
+verifies recorded actors, dice, actions, events, and positions. To continue
+an unfinished replay, pass `dice_rng=` to `read_board_record`; to reproduce
+the original future rolls, provide an RNG already advanced to the appropriate
+state. The recorded dice alone do not reveal future random outcomes.
 
 ## Console play and observation
 
@@ -152,7 +206,7 @@ All profiles use only their own player view, and accuse only when the existing
 knowledge engine has deduced the complete solution and an accusation is legal.
 They use seeded randomness for choices and ties.
 
-- `random`: chooses among legal non-accusation actions at random.
+- `random`: chooses among legal card-only non-accusation actions at random.
 - `deductive`: randomly suggests cards still possible in the envelope.
 - `probing`: when possible, tests one unknown solution candidate alongside two
   controls known to be in its own hand or the envelope. It otherwise falls
@@ -166,10 +220,15 @@ The newer profiles use heuristics to select actions; they share the existing
 deduction engine rather than an exhaustive possible-deal solver. They are not
 guaranteed to win more often in every matchup. Use batch comparisons to measure
 their behavior with different opponents, seeds, and seat positions.
+In board mode, all profiles navigate toward reachable rooms while avoiding
+recently suggested rooms when practical. They use passages and summoned-room
+suggestions, and continue to apply their existing card and reveal heuristics.
+The deductive profile evaluates suspect and weapon candidates even when the
+fixed room is known not to be in the solution.
 
 ## Batch statistics and private traces
 
-Run reproducible simulations from the command line:
+Run reproducible **card-only** simulations from the command line:
 
 ```text
 python -m clue_engine.batch_cli --games 100 --players 4 --policies random,deductive,probing,strategic --seed 42 --trace batch-42.jsonl
@@ -259,8 +318,9 @@ actions are written before deduction snapshots. One game's records can be
 loaded in Python with `read_game_trace(Path("batch-42.jsonl"), 0)` from
 `clue_engine.batch`.
 
-`clue_engine.actions.ACTIONS` provides a fixed action ordering. The project does
-not yet define an RL environment, observation encoding, rewards, or action mask.
+`clue_engine.actions.ACTIONS` retains the fixed card-only action ordering.
+Board movement actions are generated dynamically. The project does not yet
+define an RL environment, observation encoding, rewards, or action mask.
 
 Install the project with its development dependencies and run the checks:
 

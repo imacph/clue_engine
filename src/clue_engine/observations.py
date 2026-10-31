@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from .board import Square
+from .board_state import RoomPosition
+from .board_turn import BoardTurn
 from .models import Combination
 
 
@@ -11,6 +14,11 @@ class EventKind(Enum):
     SHOW = auto()
     ACCUSE = auto()
     END_TURN = auto()
+    ROLL = auto()
+    MOVE = auto()
+    PASSAGE = auto()
+    SUSPECT_MOVED = auto()
+    WEAPON_MOVED = auto()
 
 @dataclass(frozen=True)
 class Event:
@@ -19,12 +27,17 @@ class Event:
     combo: Combination | None = None
     card_id: int | None = None
     private_to: int | None = None
+    dice: tuple[int, int] | None = None
+    location: Square | RoomPosition | None = None
+    suspect_id: int | None = None
+    weapon_id: int | None = None
 
 @dataclass(frozen=True)
 class PlayerView:
     player: int
     own_hand: frozenset[int]
     events: tuple[Event, ...]
+    board: BoardTurn | None = None
 
 def refutation_events(refuter: int, refutation_card_id: int, suggest: Event ) -> tuple[Event, ...]:
     return (
@@ -32,11 +45,15 @@ def refutation_events(refuter: int, refutation_card_id: int, suggest: Event ) ->
         Event(kind=EventKind.SHOW, actor=refuter, card_id=refutation_card_id, private_to=suggest.actor),
     )
 
-def view_for(log: tuple[Event, ...], player: int, own_hand: frozenset[int]) -> PlayerView:
+def view_for(
+    log: tuple[Event, ...], player: int, own_hand: frozenset[int],
+    board: BoardTurn | None = None,
+) -> PlayerView:
     return PlayerView(
         player=player,
         own_hand=own_hand,
-        events=tuple(event for event in log if visible_to(event, player))
+        events=tuple(event for event in log if visible_to(event, player)),
+        board=board,
     )
 
 def visible_to(event: Event, player: int) -> bool:
