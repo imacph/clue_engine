@@ -22,6 +22,7 @@ let submitting = false;
 let refreshing = false;
 let requestVersion = 0;
 let lastError = "";
+let desktopThemeWrite = Promise.resolve();
 let cardView = "hand";
 let lastActivityKey = null;
 let lastRenderedState = null;
@@ -42,8 +43,8 @@ function option(value, label) {
   return item;
 }
 
-function initializeChoices() {
-  for (const policy of window.clueOptions.policies) $("policy").append(option(policy, policy));
+function displayPlayerText(text) {
+  return text.replace(/\bPlayer (\d+)\b/g, (_, seat) => `Player ${Number(seat) + 1}`);
 }
 
 function showError(message) {
@@ -82,29 +83,19 @@ async function startGame(event) {
   hadReveal = false;
   hadBoardMovement = false;
   hadBoardResponse = false;
-  const mode = $("mode").value;
   const debug = $("debug").checked;
   if (debug && !window.confirm("Debug mode reveals every hand, the solution, and private events. Continue?")) {
     $("debug").checked = false;
     return;
   }
   try {
+    const setup = window.setupWizard.payload();
     const state = await requestJson("/api/game", {
       method: "POST",
-      body: {
-        mode,
-        game_type: document.querySelector('input[name="game-type"]:checked').value,
-        players: Number($("players").value),
-        seat: Number($("seat").value),
-        seed: Number($("seed").value),
-        policy: $("policy").value,
-        policies: $("policies").value,
-        progress: $("progress").value,
-        max_steps: Number($("max-steps").value),
-        debug,
-      },
+      body: setup,
     });
     if (version !== requestVersion) return;
+    window.setupWizard.rememberStarted(setup);
     lastError = "";
     document.body.classList.add("game-active");
     document.body.classList.toggle("board-game", Boolean(state.board));
@@ -130,7 +121,7 @@ function buildPlayerFilters(state) {
     select.replaceChildren();
     if (id !== "viewer-select") select.append(option("all", "All players"));
     for (let seat = 0; seat < numPlayers; seat++) {
-      select.append(option(seat, `Player ${seat}`));
+      select.append(option(seat, `Player ${seat + 1}`));
     }
   }
   const historyKind = $("history-kind");
@@ -223,10 +214,12 @@ function renderState(state) {
     clearSelectedCards();
   }
   lastActivityKey = activityKey;
-  setText("game-status", state.status);
+  setText("game-status", displayPlayerText(state.status));
   $("game-meta").textContent =
-    `Actions: ${state.steps} · Player 0 turns: ${state.player0_turns}`
-    + (state.paused ? " · Paused" : "");
+    `Actions: ${state.steps} · Player 1 turns: ${state.player0_turns}`
+    + (state.paused ? " · Paused" : "")
+    + (state.board_rules && Object.values(state.board_rules).some((value) => !value)
+      ? " · House rules active" : "");
   $("pause-button").textContent = state.paused ? "Resume" : "Pause";
   $("pause-button").disabled = state.is_over || state.limit_reached;
   $("next-button").hidden = !(state.paused && shouldAdvance(state));
@@ -238,7 +231,7 @@ function renderState(state) {
   renderNotebook(state);
   renderHistory(state.events);
   $("clauses").replaceChildren();
-  appendCardReferences($("clauses"), state.clauses);
+  appendCardReferences($("clauses"), displayPlayerText(state.clauses));
   renderDebug(state.debug_info);
   renderActions(state);
   $("error-message").hidden = !lastError;
@@ -275,7 +268,7 @@ function boardLocation(location) {
 
 function pawnController(pawn, state) {
   if (pawn.seat === null) return "Unassigned";
-  return `Player ${pawn.seat} (${pawn.seat === state.human_player ? "you" : "bot"})`;
+  return `Player ${pawn.seat + 1} (${pawn.seat === state.human_player ? "you" : "bot"})`;
 }
 
 function moveLabel(move, state) {
@@ -316,14 +309,14 @@ function directionalMoves(state, dx, dy) {
 
 function boardInstruction(state) {
   const board = state.board;
-  if (state.is_over || state.limit_reached) return state.status;
+  if (state.is_over || state.limit_reached) return displayPlayerText(state.status);
   if (state.to_move !== board.turn_player) {
     return state.to_move === state.human_player
       ? "Respond to the suggestion in Cards & actions."
-      : `Player ${state.to_move} is responding to Player ${board.turn_player}'s suggestion.`;
+      : `Player ${state.to_move + 1} is responding to Player ${board.turn_player + 1}'s suggestion.`;
   }
   if (state.to_move !== state.human_player) {
-    return `Following Player ${board.turn_player}. Watch the highlighted pawn move around the mansion.`;
+    return `Following Player ${board.turn_player + 1}. Watch the highlighted pawn move around the mansion.`;
   }
   const legal = state.legal;
   if (legal.suggest && legal.roll) {
@@ -354,8 +347,7 @@ function roomBounds(room) {
   };
 }
 
-function buildBoardBase(layout) {
-  const map = $("board-map");
+function buildBoardBase(layout, map = $("board-map"), dynamicId = "board-dynamic") {
   map.replaceChildren();
   map.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
   const base = svgElement("g", { "aria-hidden": "true" });
@@ -392,7 +384,7 @@ function buildBoardBase(layout) {
       }, "↗"));
     }
   }
-  map.append(base, svgElement("g", { id: "board-dynamic" }));
+  map.append(base, svgElement("g", { id: dynamicId }));
 }
 
 function appendPawn(group, pawn, state, x, y, active, radius) {
@@ -406,7 +398,7 @@ function appendPawn(group, pawn, state, x, y, active, radius) {
   }));
   marker.append(svgElement("text", {
     x, y: y + .09, fill: style.ink, class: "board-pawn-text", "aria-hidden": "true",
-  }, pawn.seat === null ? style.label : `P${pawn.seat}`));
+  }, pawn.seat === null ? style.label : `P${pawn.seat + 1}`));
   group.append(marker);
 }
 
@@ -424,7 +416,7 @@ function renderBoard(state) {
   const activeElement = document.activeElement;
   const restoreMoveFocus = panel.contains(activeElement) && activeElement?.hasAttribute("data-board-move");
   const actor = board.suspects.find((pawn) => pawn.seat === board.turn_player);
-  setText("board-turn", actor ? `P${board.turn_player} · ${actor.name}` : "Board");
+  setText("board-turn", actor ? `P${board.turn_player + 1} · ${actor.name}` : "Board");
   setText("board-instruction", boardInstruction(state));
   setText("board-remaining", board.phase === "move"
     ? `${board.remaining} step${board.remaining === 1 ? "" : "s"} left`
@@ -438,9 +430,11 @@ function renderBoard(state) {
   $("board-passage-button").hidden = !state.legal.passage;
   $("board-end-button").hidden = !state.legal.end_turn;
 
-  const layoutKey = JSON.stringify(board.layout);
+  const displayLayout = state.board_rules && !state.board_rules.secret_passages
+    ? { ...board.layout, passages: [] } : board.layout;
+  const layoutKey = JSON.stringify(displayLayout);
   if (layoutKey !== lastBoardLayout) {
-    buildBoardBase(board.layout);
+    buildBoardBase(displayLayout);
     lastBoardLayout = layoutKey;
   }
   const dynamic = $("board-dynamic");
@@ -516,7 +510,7 @@ function renderBoard(state) {
     chip.className = `pawn-chip${pawn.seat === null ? " pawn-chip-unassigned" : ""}`;
     chip.style.backgroundColor = pawnStyles[pawn.id].color;
     chip.style.color = pawnStyles[pawn.id].ink;
-    chip.textContent = pawn.seat === null ? pawnStyles[pawn.id].label : `P${pawn.seat}`;
+    chip.textContent = pawn.seat === null ? pawnStyles[pawn.id].label : `P${pawn.seat + 1}`;
     const label = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = pawn.name;
@@ -532,7 +526,7 @@ function renderBoard(state) {
     const pawnNames = board.suspects.filter((pawn) =>
       pawn.location.kind === "room" && pawn.location.room_id === room.id).map((pawn) => pawn.name);
     const weaponNames = board.weapons.filter((weapon) => weapon.room_id === room.id).map((weapon) => weapon.name);
-    const passage = board.layout.passages.find((pair) => pair.includes(room.id));
+    const passage = displayLayout.passages.find((pair) => pair.includes(room.id));
     const item = document.createElement("li");
     const title = document.createElement("strong");
     title.textContent = `${room.name}: `;
@@ -678,14 +672,14 @@ function renderCardInteraction(state) {
     renderActivityMeta(actor === undefined ? null : { kind: "suggest", actor });
     $("card-interaction-hint").textContent = actor === undefined
       ? "Click one of your matching cards to reveal it."
-      : `Player ${actor} suggested these cards. Click a matching card you hold to reveal it.`;
+      : `Player ${actor + 1} suggested these cards. Click a matching card you hold to reveal it.`;
     renderMiniCards(focusCards, state.activity?.cards || []);
   } else if (humanTurn && (legal.suggest || legal.accuse)) {
     const activity = state.activity;
     if (activity?.kind === "reveal") {
       $("card-interaction-title").textContent = "Latest reveal";
       renderActivityMeta(activity);
-      $("card-interaction-hint").textContent = `Shown to Player ${activity.recipient}.`;
+      $("card-interaction-hint").textContent = `Shown to Player ${activity.recipient + 1}.`;
       renderMiniCards(focusCards, [activity.card_id], activity.card_id);
     } else {
       $("card-interaction-title").textContent = legal.suggest
@@ -735,13 +729,13 @@ function renderCardInteraction(state) {
     renderActivityMeta(activity);
     let hint = "No suggestion, accusation, or refutation has been made yet.";
     if (activity?.kind === "suggest") {
-      hint = `Player ${activity.actor} suggested these cards.`;
+      hint = `Player ${activity.actor + 1} suggested these cards.`;
     } else if (activity?.kind === "accuse") {
-      hint = `Player ${activity.actor} accused this combination.`;
+      hint = `Player ${activity.actor + 1} accused this combination.`;
     } else if (activity?.kind === "refute") {
-      hint = `Player ${activity.actor} refuted Player ${activity.suggestion_actor}'s suggestion.`;
+      hint = `Player ${activity.actor + 1} refuted Player ${activity.suggestion_actor + 1}'s suggestion.`;
     } else if (activity?.kind === "reveal") {
-      hint = `Shown to Player ${activity.recipient}.`;
+      hint = `Shown to Player ${activity.recipient + 1}.`;
     }
     if (humanTurn && legal.pass && !legal.reveals.length) {
       hint += " You have no matching card; select Pass below.";
@@ -774,7 +768,7 @@ function renderActivityMeta(activity) {
   };
   if (!activity || !labels[activity.kind]) return;
   $("activity-kind").textContent = labels[activity.kind];
-  $("activity-player").textContent = `Player ${activity.actor}`;
+  $("activity-player").textContent = `Player ${activity.actor + 1}`;
   $("activity-meta").hidden = false;
 }
 
@@ -941,7 +935,7 @@ function renderNotebook(state) {
     heading.append(cardHeading);
     for (let seat = 0; seat < state.num_players; seat++) {
       const th = document.createElement("th");
-      th.textContent = `P${seat}`;
+      th.textContent = `P${seat + 1}`;
       heading.append(th);
     }
     const envelope = document.createElement("th");
@@ -1003,7 +997,7 @@ function renderHistory(events) {
     number.textContent = `#${event.number}`;
     const text = document.createElement("span");
     text.className = "event-text";
-    appendCardReferences(text, event.text);
+    appendCardReferences(text, displayPlayerText(event.text));
     item.append(number, text);
     list.append(item);
   }
@@ -1033,7 +1027,7 @@ function renderDebug(debugInfo) {
   const solution = debugInfo.solution.map(cardName).join(", ");
   const lines = [`WARNING: omniscient debug mode is enabled.`, `Solution: ${solution}`];
   debugInfo.hands.forEach((hand, seat) => {
-    lines.push(`Player ${seat} hand: ${hand.map(cardName).join(", ") || "(empty)"}`);
+    lines.push(`Player ${seat + 1} hand: ${hand.map(cardName).join(", ") || "(empty)"}`);
   });
   appendCardReferences(panel, lines.join("\n"));
 }
@@ -1142,6 +1136,7 @@ function newGame() {
   showError("");
   $("game-screen").hidden = true;
   $("setup-screen").hidden = false;
+  window.setupWizard.beginFresh();
 }
 
 function configureBoardWorkspace(isBoard) {
@@ -1203,9 +1198,6 @@ function updateGameType() {
   $("players").min = board ? "3" : "2";
   if (board) $("players").max = "6";
   else $("players").removeAttribute("max");
-  const count = Number($("players").value);
-  if (Number.isInteger(count) && count >= 2) $("seat").max = String(count - 1);
-  else $("seat").removeAttribute("max");
   $("players-hint").textContent = board ? "(3–6 players)" : "(at least 2)";
   $("game-style-hint").textContent = board
     ? "Board games use 3–6 players and an original layout inspired by Clue."
@@ -1231,10 +1223,19 @@ function setTheme(theme, persist = false) {
     "aria-label",
     isDark ? "Switch to light mode" : "Switch to dark mode"
   );
-  if (persist) localStorage.setItem("clue-engine-theme", isDark ? "dark" : "light");
+  if (persist) {
+    if (window.clueOptions.desktop) {
+      desktopThemeWrite = desktopThemeWrite
+        .then(() => requestJson("/api/desktop/theme", {
+          method: "POST", body: { theme: isDark ? "dark" : "light" },
+        }))
+        .catch((error) => showError(error.message));
+    } else {
+      localStorage.setItem("clue-engine-theme", isDark ? "dark" : "light");
+    }
+  }
 }
 
-initializeChoices();
 setTheme(document.documentElement.dataset.theme);
 $("setup-form").addEventListener("submit", startGame);
 $("mode").addEventListener("change", updateMode);

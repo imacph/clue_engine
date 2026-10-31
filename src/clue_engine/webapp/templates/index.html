@@ -6,7 +6,7 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Clue Engine</title>
   <script>
-    const savedTheme = localStorage.getItem("clue-engine-theme");
+    const savedTheme = {% if desktop_mode %}{{ desktop_theme|tojson }}{% else %}localStorage.getItem("clue-engine-theme"){% endif %};
     const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     document.documentElement.dataset.theme =
       savedTheme === "light" || savedTheme === "dark"
@@ -15,9 +15,10 @@
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script>
-    window.clueOptions = {{ {"cards": cards, "policies": policies}|tojson }};
+    window.clueOptions = {{ {"cards": cards, "policies": policies, "desktop": desktop_mode}|tojson }};
   </script>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='setup.js') }}" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -44,61 +45,156 @@
         </div>
       </div>
       <form id="setup-form">
-        <fieldset class="game-style" aria-describedby="game-style-hint">
-          <legend>Choose your game</legend>
-          <div class="game-style-options">
-            <label class="game-style-option">
-              <input type="radio" name="game-type" value="card_only" checked>
-              <span><strong>Cards only</strong><small>Quick deduction, without the board.</small></span>
-            </label>
-            <label class="game-style-option">
-              <input type="radio" name="game-type" value="board">
-              <span><strong>Board game</strong><small>Roll, move through rooms, and make suggestions.</small></span>
-            </label>
+        <nav class="wizard-progress" aria-label="New game steps">
+          <button type="button" data-setup-step="0">1. Game</button>
+          <button type="button" data-setup-step="1">2. Seats</button>
+          <button type="button" data-setup-step="2">3. Bots</button>
+          <button type="button" data-setup-step="3">4. Rules</button>
+          <button type="button" data-setup-step="4">5. Review</button>
+        </nav>
+        <section class="setup-step" data-step="0" aria-labelledby="setup-game-title">
+          <h3 id="setup-game-title" tabindex="-1">Choose your game</h3>
+          <div class="setup-game-layout">
+            <div class="setup-game-primary">
+              <fieldset class="game-style" aria-describedby="game-style-hint">
+                <legend>Game type</legend>
+                <div class="game-style-options">
+                  <label class="game-style-option">
+                    <input type="radio" name="game-type" value="card_only" checked>
+                    <span><strong>Cards only</strong><small>Quick deduction, without the board.</small></span>
+                  </label>
+                  <label class="game-style-option">
+                    <input type="radio" name="game-type" value="board">
+                    <span><strong>Board game</strong><small>Roll, move through rooms, and make suggestions.</small></span>
+                  </label>
+                </div>
+                <p id="game-style-hint" class="hint">Cards only supports two or more players.</p>
+              </fieldset>
+              <div class="form-grid">
+                <label>Mode
+                  <select id="mode">
+                    <option value="play">Play against bots</option>
+                    <option value="spectate">Spectate bots</option>
+                  </select>
+                </label>
+                <label>Players <span id="players-hint" class="hint">(at least 2)</span>
+                  <input id="players" type="number" min="2" value="4" required>
+                </label>
+              </div>
+              <p id="spectator-warning" class="notice" hidden>
+                Spectator mode lets you inspect each player's private hand and notebook. It is not suitable for preserving hidden information.
+              </p>
+            </div>
+            <div class="setup-game-sidebar">
+              <div class="setup-seed-panel">
+                <div class="setup-seed-input">
+                  <label>Random seed
+                    <input id="seed" type="number" min="0" max="4294967295" step="1" required>
+                  </label>
+                  <button class="button button-secondary" id="roll-seed" type="button">Roll seed</button>
+                </div>
+                <div class="form-actions setup-seed-actions">
+                  <button class="button button-quiet" id="copy-seed" type="button">Copy seed</button>
+                  <button class="button button-quiet" id="replay-setup" type="button" disabled>Replay previous setup</button>
+                </div>
+                <p class="hint">A seed can reveal the deal and solution. Share it only after the game.</p>
+              </div>
+              <details class="setup-advanced">
+                <summary>Advanced options</summary>
+                <div class="form-grid">
+                  <label>Bot progression
+                    <select id="progress">
+                      <option value="auto">Automatic</option>
+                      <option value="step">Step-by-step (paused)</option>
+                    </select>
+                  </label>
+                  <label>Action limit
+                    <input id="max-steps" type="number" min="0" value="10000">
+                  </label>
+                </div>
+                <label class="check-row">
+                  <input id="debug" type="checkbox">
+                  <span><strong>Omniscient debug</strong><small>Reveals all hands, the solution, and private events.</small></span>
+                </label>
+              </details>
+              <details class="setup-advanced profile-box">
+                <summary>Saved setup profiles</summary>
+                <div class="form-grid">
+                  <label>Profile name <input id="profile-name" type="text" maxlength="80"></label>
+                  <label>Saved profile <select id="profile-select"><option value="">Choose a profile</option></select></label>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="button button-secondary" id="profile-save">Save</button>
+                  <button type="button" class="button button-quiet" id="profile-load">Load</button>
+                  <button type="button" class="button button-quiet" id="profile-rename">Rename</button>
+                  <button type="button" class="button button-quiet" id="profile-delete">Delete</button>
+                </div>
+                <p id="profile-status" class="hint" role="status"></p>
+              </details>
+            </div>
           </div>
-          <p id="game-style-hint" class="hint">Cards only supports two or more players.</p>
-        </fieldset>
-        <div class="form-grid">
-          <label>Mode
-            <select id="mode">
-              <option value="play">Play against bots</option>
-              <option value="spectate">Spectate bots</option>
-            </select>
+        </section>
+        <section class="setup-step" data-step="1" aria-labelledby="setup-seats-title" hidden>
+          <h3 id="setup-seats-title" tabindex="-1">Seats and characters</h3>
+          <label id="seat-field">Your seat
+            <select id="seat"></select>
           </label>
-          <label>Players <span id="players-hint" class="hint">(at least 2)</span>
-            <input id="players" type="number" min="2" value="4" required>
-          </label>
-          <label id="seat-field">Your seat <span class="hint">(zero-based)</span>
-            <input id="seat" type="number" min="0" value="0">
-          </label>
-          <label>Random seed
-            <input id="seed" type="number" value="0">
-          </label>
-          <label>Bot policy
-            <select id="policy"></select>
-          </label>
-          <label>Per-seat policies <span class="hint">(optional)</span>
-            <input id="policies" type="text" placeholder="random,deductive,probing,strategic">
-          </label>
-          <label>Bot progression
-            <select id="progress">
-              <option value="auto">Automatic</option>
-              <option value="step">Step-by-step (paused)</option>
-            </select>
-          </label>
-          <label>Action limit
-            <input id="max-steps" type="number" min="0" value="10000">
-          </label>
-        </div>
-        <label class="check-row">
-          <input id="debug" type="checkbox">
-          <span><strong>Omniscient debug</strong><small>Reveals all hands, the solution, and private events.</small></span>
-        </label>
-        <p id="spectator-warning" class="notice" hidden>
-          Spectator mode lets you inspect each player's private hand and notebook. It is not suitable for preserving hidden information.
-        </p>
-        <div class="form-actions">
-          <button class="button button-primary" type="submit">Start game</button>
+          <p id="seat-notice" class="hint" role="status"></p>
+          <div class="setup-seats-layout">
+            <div id="seat-list" class="setup-seat-list"></div>
+            <div id="setup-board-preview" class="setup-board-preview" hidden>
+              <p>Starting positions <span class="hint">Select a character to highlight it.</span></p>
+              <svg id="setup-board-map" role="img" aria-label="Board character starting positions"></svg>
+              <p class="hint">No cards are dealt until you start the game.</p>
+            </div>
+          </div>
+        </section>
+        <section class="setup-step" data-step="2" aria-labelledby="setup-bots-title" hidden>
+          <h3 id="setup-bots-title" tabindex="-1">Bot players</h3>
+          <div class="form-actions setup-bots-toolbar">
+            <label>Apply preset to all bots <select id="all-bots"></select></label>
+            <button type="button" class="button button-secondary" id="apply-bots">Apply to all</button>
+          </div>
+          <div class="setup-bots-intro">
+            <p class="hint">Toolkit scores describe enabled techniques, not win probability.</p>
+            <details>
+              <summary>How the toolkit score works</summary>
+              <p class="hint">Possible-card suggestions count 20 points; probes, ranking, repeat reveals, and possible-room preference each count 15. Card-only suggestion priority counts 10. Only options applicable to the game type count, scaled to 100. All bots share deduction and legal movement.</p>
+            </details>
+          </div>
+          <div id="bot-list" class="setup-seat-list"></div>
+        </section>
+        <section class="setup-step" data-step="3" aria-labelledby="setup-rules-title" hidden>
+          <h3 id="setup-rules-title" tabindex="-1">Rules</h3>
+          <p id="card-rules-note" class="hint">These house rules apply to board games only.</p>
+          <fieldset id="board-rules-fields">
+            <legend>Board rules</legend>
+            <div class="setup-rules-toolbar">
+              <label>Rule preset
+                <select id="rule-preset">
+                  <option value="standard">Standard</option>
+                  <option value="no-relocation">No relocation</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <button type="button" class="button button-quiet" id="reset-rules">Reset to standard</button>
+            </div>
+            <div class="setup-rules-grid">
+              <label class="check-row"><input type="checkbox" id="rule-move-suspect" checked><span><strong>Move named suspect</strong><small>Move the named token to the suggestion room, including unassigned and eliminated characters.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-move-weapon" checked><span><strong>Move named weapon</strong><small>Move the named weapon to the suggestion room.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-summoned" checked><span><strong>Summoned players may suggest</strong><small>A player moved by a suggestion can suggest there on their next turn. Requires suspect movement.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-passages" checked><span><strong>Allow secret passages</strong><small>Disabling passages may leave players blocked and reach the action limit.</small></span></label>
+            </div>
+          </fieldset>
+        </section>
+        <section class="setup-step" data-step="4" aria-labelledby="setup-review-title" hidden>
+          <h3 id="setup-review-title" tabindex="-1">Review your game</h3>
+          <div id="setup-review"></div>
+        </section>
+        <div class="form-actions setup-navigation">
+          <button class="button button-quiet" id="setup-back" type="button" hidden>Back</button>
+          <button class="button button-primary" id="setup-next" type="button">Next</button>
+          <button class="button button-primary" id="setup-start" type="submit" hidden>Start game</button>
         </div>
       </form>
     </section>
@@ -159,7 +255,7 @@
             <svg id="board-map" class="board-map" role="group" aria-labelledby="board-title"
                  aria-describedby="board-instruction"></svg>
           </div>
-          <p class="board-map-key">P0–P5 players · initials unassigned · ↗ passage · ◆ weapons</p>
+          <p class="board-map-key">P1–P6 players · initials unassigned · ↗ passage · ◆ weapons</p>
         </section>
 
         <section id="cards-panel" class="panel hand-panel">
@@ -259,6 +355,9 @@
       </div>
     </section>
   </main>
-  <footer>Clue Engine runs on this computer. Do not enable debug mode during a fair game.</footer>
+  <footer>
+    <span class="footer-note">Clue Engine runs on this computer. Do not enable debug mode during a fair game.</span>
+    <span class="app-versions">App {{ frontend_version }} · Game API {{ api_version }}{% if desktop_mode %} · Desktop {{ desktop_version }}{% endif %}</span>
+  </footer>
 </body>
 </html>

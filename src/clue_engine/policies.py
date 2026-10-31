@@ -6,6 +6,7 @@ from typing import Protocol
 from .board import Square
 from .board_state import RoomPosition
 from .board_turn import Move, Roll, UsePassage, suspect_location
+from .game_settings import BotStrategy
 from .knowledge import Knowledge, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, Combination, Reveal, Suggest
 from .observations import EventKind, PlayerView, last_suggest_index
@@ -254,6 +255,12 @@ class StrategicPolicy(ProbingPolicy):
         self, view: PlayerView, knowledge: Knowledge, options: tuple[Action, ...],
         suggestions: tuple[Suggest, ...],
     ) -> Action:
+        return self._rank_suggestions(view, knowledge, suggestions, prefer_probe=True)
+
+    def _rank_suggestions(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+        *, prefer_probe: bool,
+    ) -> Action:
         unresolved: dict[int, set[frozenset[int]]] = {}
         for clause in knowledge.clauses:
             if any(knowledge.mark_of(clause.holder, card) is Mark.HELD for card in clause.cards):
@@ -286,13 +293,82 @@ class StrategicPolicy(ProbingPolicy):
                 knowledge.mark_of(knowledge.envelope, card) is Mark.UNKNOWN for card in cards
             )
             return (
-                int(_is_probe(view, knowledge, suggestion)), int(opportunities > 0),
+                int(prefer_probe and _is_probe(view, knowledge, suggestion)), int(opportunities > 0),
                 clause_targets, envelope_unknown, opportunities, unknown_marks,
             )
 
         ranked = [(score(suggestion), suggestion) for suggestion in suggestions]
         best = max(item[0] for item in ranked)
         return self.rng.choice(tuple(suggestion for value, suggestion in ranked if value == best))
+
+
+class CustomPolicy(StrategicPolicy):
+    """Combine independent strategy choices while using only the player's view."""
+
+    def __init__(self, rng: random.Random, strategy: BotStrategy):
+        super().__init__(rng)
+        if not isinstance(strategy, BotStrategy):
+            raise TypeError("strategy must be BotStrategy")
+        self.strategy = strategy
+
+    def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
+        knowledge = knowledge_for(view, num_players)
+        options = sound_actions(legal, known_solution(knowledge))
+        if view.board is not None:
+            return self._pick_board(view, knowledge, options)
+        reveals = tuple(action for action in options if isinstance(action, Reveal))
+        if reveals:
+            return self._board_reveal(view, reveals)
+        suggestions = tuple(action for action in options if isinstance(action, Suggest))
+        if suggestions:
+            if not self.strategy.prefer_suggest:
+                selected = self.rng.choice(options)
+                if not isinstance(selected, Suggest):
+                    return selected
+            return self._custom_suggestion(view, knowledge, suggestions)
+        return self.rng.choice(options)
+
+    def _board_reveal(self, view: PlayerView, reveals: tuple[Reveal, ...]) -> Reveal:
+        if self.strategy.repeat_reveals:
+            return self._pick_reveal(view, reveals)
+        return self.rng.choice(reveals)
+
+    def _board_suggestion(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+    ) -> Action:
+        return self._custom_suggestion(view, knowledge, suggestions)
+
+    def _custom_suggestion(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+    ) -> Action:
+        candidates = suggestions
+        if self.strategy.probe_suggestions:
+            probes = tuple(item for item in candidates if _is_probe(view, knowledge, item))
+            if probes:
+                candidates = probes
+        if candidates is suggestions and self.strategy.candidate_suggestions:
+            if view.board is not None:
+                candidates = self._board_candidates(knowledge, candidates)
+            else:
+                possible = tuple(
+                    item for item in candidates
+                    if all(
+                        knowledge.mark_of(knowledge.envelope, card) is not Mark.NOT_HELD
+                        for card in _cards(item.combination)
+                    )
+                )
+                candidates = possible or candidates
+        if self.strategy.rank_suggestions:
+            return self._rank_suggestions(
+                view, knowledge, candidates, prefer_probe=self.strategy.probe_suggestions,
+            )
+        return self.rng.choice(candidates)
+
+    def _room_penalty(self, knowledge: Knowledge, room_id: int, recent: tuple[int, ...]) -> int:
+        penalty = RandomPolicy._room_penalty(self, knowledge, room_id, recent)
+        if self.strategy.candidate_rooms and knowledge.mark_of(knowledge.envelope, room_id) is Mark.NOT_HELD:
+            penalty += 2
+        return penalty
 
 
 POLICY_TYPES: dict[str, type[RandomPolicy]] = {

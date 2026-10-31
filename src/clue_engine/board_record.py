@@ -10,6 +10,7 @@ from .board import BoardLayout, CharacterStart, Door, Room, Square
 from .board_state import BoardState, RoomPosition, SuspectToken, WeaponToken
 from .board_turn import BoardPhase, BoardTurn, Move, Roll, UsePassage
 from .engine import ActionRecord, DiceRandom, Engine, replay_board
+from .game_settings import BoardRules
 from .models import Accuse, Action, Combination, EndTurn, Pass, Reveal, Suggest
 from .observations import Event, EventKind
 from .state import GameState
@@ -41,7 +42,7 @@ def write_board_record(
             "events": [asdict(event) for event in record.events],
         })
     payload = {
-        "version": 1, "private": True, "initial_state": asdict(initial_state), "history": records,
+        "version": 2, "private": True, "initial_state": asdict(initial_state), "history": records,
     }
     with path.open("x", encoding="utf-8", newline="\n") as stream:
         json.dump(payload, stream, default=_json_value, separators=(",", ":"), ensure_ascii=True)
@@ -131,7 +132,7 @@ def _layout(value: object) -> BoardLayout:
     )
 
 
-def _initial_state(value: object) -> GameState:
+def _initial_state(value: object, version: int) -> GameState:
     data = _object(value)
     turn = _object(data["board"])
     board_data = _object(turn["board"])
@@ -171,6 +172,7 @@ def _initial_state(value: object) -> GameState:
         player_hands=[frozenset(_int(card) for card in _array(hand)) for hand in _array(data["player_hands"])],
         current_player=_int(data["current_player"]),
         board=board_turn,
+        board_rules=BoardRules(**_object(data["board_rules"])) if version == 2 else BoardRules(),
     )
 
 
@@ -219,9 +221,10 @@ def read_board_record(path: Path, *, dice_rng: DiceRandom | None = None) -> Engi
     try:
         with path.open(encoding="utf-8") as stream:
             payload = _object(json.load(stream))
-        if payload["version"] != 1 or payload["private"] is not True:
+        version = payload["version"]
+        if type(version) is not int or version not in (1, 2) or payload["private"] is not True:
             raise ValueError("unsupported board record")
-        initial = _initial_state(payload["initial_state"])
+        initial = _initial_state(payload["initial_state"], version)
         history = tuple(
             ActionRecord(
                 actor=_int(record["actor"]),

@@ -78,6 +78,15 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     assert b"[hidden] { display: none !important; }" in stylesheet.data
 
 
+def test_optional_setup_controls_are_disclosed_on_demand(client):
+    page = client.get("/").get_data(as_text=True)
+    for summary in ("Advanced options", "Saved setup profiles"):
+        details = re.search(rf"<details\b([^>]*)>\s*<summary>{re.escape(summary)}</summary>", page)
+        assert details is not None
+        assert not re.search(r"\bopen(?:\s|=|$)", details.group(1))
+    assert '<nav class="wizard-progress" aria-label="New game steps">' in page
+
+
 def test_start_game_and_submit_actions_without_exposing_solution(client):
     token = csrf_token(client)
     response = post(client, token, "/api/game", {

@@ -7,6 +7,7 @@ from .actions import ACCUSES, ENDTURNS, SUGGESTIONS
 from .board import Square
 from .board_state import BoardState, RoomPosition
 from .cards import CARDS
+from .game_settings import DEFAULT_BOARD_RULES, BoardRules
 from .models import Action, CardType, Suggest
 
 
@@ -79,14 +80,16 @@ def movement_actions(turn: BoardTurn, player: int) -> tuple[Move, ...]:
     return neighbors + rooms
 
 
-def legal_board_actions(turn: BoardTurn, player: int) -> tuple[Action, ...]:
+def legal_board_actions(
+    turn: BoardTurn, player: int, rules: BoardRules = DEFAULT_BOARD_RULES,
+) -> tuple[Action, ...]:
     location = suspect_location(turn.board, turn.board.seat_suspects[player])
     if turn.phase is BoardPhase.START:
         actions: tuple[Action, ...] = (Roll(),)
         if isinstance(location, RoomPosition):
-            if turn.board.layout.passage_from(location.room_id) is not None:
+            if rules.secret_passages and turn.board.layout.passage_from(location.room_id) is not None:
                 actions += (UsePassage(),)
-            if player in turn.summoned_seats:
+            if rules.summoned_suggestion and player in turn.summoned_seats:
                 actions += _ROOM_SUGGESTIONS[location.room_id]
         return actions + ACCUSES
     if turn.phase is BoardPhase.MOVE:

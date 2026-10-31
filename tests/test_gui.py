@@ -1,6 +1,8 @@
+import gc
 import subprocess
 import sys
 import time
+import weakref
 from threading import Event
 
 import pytest
@@ -63,6 +65,8 @@ def root(tk_root):
     for child in tk_root.winfo_children():
         child.destroy()
     tk_root.update_idletasks()
+    # Tk variables in widget cycles must be finalized on the Tk-owning thread.
+    gc.collect()
 
 
 def test_human_suggestion_and_private_reveal_in_real_widgets(root):
@@ -435,6 +439,37 @@ def test_closing_batch_window_cancels_distribution_loading(root, tmp_path, monke
     window.destroy()
     assert finished.wait(5)
     root.update()
+
+
+def test_closed_batch_window_is_not_retained_by_worker(root, tmp_path, monkeypatch):
+    from clue_engine.gui import batch_window
+
+    started, release, finished = Event(), Event(), Event()
+
+    def wait_for_release(config, path, *, progress, cancelled, on_game):
+        started.set()
+        try:
+            if not release.wait(5):
+                raise TimeoutError("batch test worker was not released")
+            progress({"started_games": 1, "requested_games": 1})
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(batch_window, "run_batch", wait_for_release)
+    monkeypatch.setattr(batch_window.messagebox, "askyesno", lambda *args, **kwargs: True)
+    window = BatchWindow(root)
+    window.trace.set(str(tmp_path / "trace.jsonl"))
+    window.start()
+    try:
+        assert started.wait(5)
+        reference = weakref.ref(window)
+        window.destroy()
+        del window
+        gc.collect()
+        assert reference() is None
+    finally:
+        release.set()
+        assert finished.wait(5)
 
 
 def test_batch_window_reports_existing_trace_error(root, tmp_path, monkeypatch):

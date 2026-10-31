@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clue-engine"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A Clue game simulator for reinforcement learning"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,10 +12,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+desktop = [
+    "pywebview>=5.0,<7",
+]
+desktop-build = [
+    "pywebview>=5.0,<7",
+    "pyinstaller>=6.0,<7",
+]
 dev = [
     "pytest",
     "ruff",
 ]
+
+[tool.hatch.version]
+path = "src/clue_engine/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -39,7 +39,7 @@ def legal_actions(state: GameState, log: tuple[Event, ...], player: int) -> tupl
     if player in eliminated(state, log):
         return ENDTURNS
     if state.board is not None:
-        return legal_board_actions(state.board, player)
+        return legal_board_actions(state.board, player, state.board_rules)
     if _suggested_this_turn(log):
         return _AFTER_SUGGESTION_ACTIONS
     return _TURN_START_ACTIONS

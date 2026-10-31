@@ -7,6 +7,7 @@ from . import rules
 from .board import Square
 from .board_state import BoardState, RoomPosition, SuspectToken, WeaponToken
 from .board_turn import BoardPhase, BoardTurn, Move, Roll, UsePassage, suspect_location
+from .game_settings import BoardRules
 from .models import Accuse, Action, Combination, EndTurn, Pass, Reveal, Suggest
 from .observations import (
     Event,
@@ -39,6 +40,8 @@ class Engine:
     """Applies actions to a game. It owns the event log and the turn marker."""
 
     def __init__(self, state: GameState, *, dice_rng: DiceRandom | None = None):
+        if not isinstance(state.board_rules, BoardRules):
+            raise TypeError("board_rules must be BoardRules")
         if len(state.player_hands) < 2:
             raise ValueError("a game requires at least two players")
         if not 0 <= state.current_player < len(state.player_hands):
@@ -191,17 +194,18 @@ class Engine:
         room = RoomPosition(combo.room_id)
         events = (Event(EventKind.SUGGEST, player, combo=combo),)
         summoned = turn.summoned_seats - {player}
-        if suspect_location(board, combo.suspect_id) != room:
+        if self.state.board_rules.move_suspect and suspect_location(board, combo.suspect_id) != room:
             board = self._with_suspect(board, combo.suspect_id, room)
             events += (Event(
                 EventKind.SUSPECT_MOVED, player, location=room, suspect_id=combo.suspect_id,
             ),)
             if combo.suspect_id in board.seat_suspects:
                 seat = board.seat_suspects.index(combo.suspect_id)
-                if seat != player and seat not in rules.eliminated(self.state, self.log):
+                if (self.state.board_rules.summoned_suggestion and seat != player
+                        and seat not in rules.eliminated(self.state, self.log)):
                     summoned = summoned | {seat}
         weapon = next(token for token in board.weapons if token.weapon_id == combo.weapon_id)
-        if weapon.room_id != combo.room_id:
+        if self.state.board_rules.move_weapon and weapon.room_id != combo.room_id:
             board = replace(
                 board,
                 weapons=tuple(

@@ -1,0 +1,49 @@
+"""Validation for reusable setup profiles, which never contain a game seed."""
+
+from dataclasses import fields
+
+from .board_setup import BoardSetup
+from .board_state import create_board
+from .game_settings import BoardRules, BotStrategy
+from .policies import POLICY_NAMES
+
+
+def validate_setup_profile(value: object) -> None:
+    if not isinstance(value, dict):
+        raise TypeError("Setup profile must be an object.")
+    required = {"mode", "game_type", "players", "seat", "bots", "progress", "max_steps", "debug"}
+    board_fields = {"seat_suspects", "board_rules"}
+    game_type = value.get("game_type")
+    expected = required | board_fields if game_type == "board" else required
+    if set(value) != expected or game_type not in {"board", "card_only"}:
+        raise ValueError("Invalid setup profile fields or game type.")
+    players = value["players"]
+    seat = value["seat"]
+    if type(players) is not int or players < 2:
+        raise ValueError("Profile player count must be at least two.")
+    if type(seat) is not int or not 0 <= seat < players:
+        raise ValueError("Profile seat must identify an existing player.")
+    if value["mode"] not in {"play", "spectate"} or value["progress"] not in {"auto", "step"}:
+        raise ValueError("Invalid profile mode or progression.")
+    if type(value["max_steps"]) is not int or value["max_steps"] < 0:
+        raise ValueError("Profile action limit must be non-negative.")
+    if type(value["debug"]) is not bool:
+        raise ValueError("Profile debug must be true or false.")
+    bots = value["bots"]
+    if not isinstance(bots, list) or len(bots) != players:
+        raise ValueError("Profile requires one bot configuration per seat.")
+    for bot in bots:
+        if isinstance(bot, str) and bot in POLICY_NAMES:
+            continue
+        if not isinstance(bot, dict) or set(bot) - {item.name for item in fields(BotStrategy)}:
+            raise ValueError("Invalid bot configuration in setup profile.")
+        BotStrategy(**bot)
+    if game_type == "board":
+        suspects = value["seat_suspects"]
+        if not isinstance(suspects, list):
+            raise ValueError("Profile character assignments must be an array.")
+        create_board(BoardSetup(players), seat_suspects=suspects)
+        rules = value["board_rules"]
+        if not isinstance(rules, dict) or set(rules) != {item.name for item in fields(BoardRules)}:
+            raise ValueError("Invalid board rules in setup profile.")
+        BoardRules(**rules)

@@ -74,7 +74,24 @@ Keep the current card IDs and names to preserve card-only compatibility.
 The reference edition uses different labels for some equivalent cards
 (`Mr. Green`/`Reverend Green`, `Knife`/`Dagger`, and `Pistol`/`Revolver`).
 Any edition-specific display aliases must not change card IDs or old traces.
-No optional rule variants are enabled by this phase.
+
+## Optional house rules
+
+The standard configuration implements BR-01–16. Board games can opt into
+independent settings for suspect relocation, weapon relocation, summoned-player
+suggestions, and secret passages. Disabling suspect relocation leaves all
+suspect tokens in place, including unassigned and eliminated tokens, and also
+requires summoned-player suggestions to be disabled. Disabling weapon
+relocation leaves weapon tokens in place. Disabling summoned-player suggestions
+still moves suspects but requires the affected player to move normally on their
+next turn. Disabling passages removes passage actions and may leave a player
+blocked until the game's action limit. Card dealing, refutation, accusations,
+and private information are unchanged.
+
+The browser and Windows wizard offer Standard and No relocation presets as well
+as custom settings. Rules are fixed when a game starts and are included in
+version-2 private board records. Version-1 records are replayed with standard
+rules.
 
 ## Implemented board engine
 
@@ -110,8 +127,8 @@ observations, enforces the rules above, and records rolls and relocation.
 Full private records can be written and verified with
 `clue_engine.board_record`; they contain the hands and solution and must not
 be shared with players. Existing card-only actions and trace formats remain
-unchanged. The web interface supports board play and spectating; the desktop,
-console, and batch interfaces remain card-only.
+unchanged. The web and Windows interfaces support board play and spectating;
+the original Tkinter, console, and batch interfaces remain card-only.
 
 ## Acceptance checklist
 

@@ -1,20 +1,25 @@
 """Flask application for the local browser interface."""
 
 import hmac
+import random
 import secrets
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 from flask import session as browser_session
 
-from ..board import Square
-from ..board_state import RoomPosition
+from .._version import DESKTOP_VERSION, FRONTEND_VERSION, __version__
+from ..board import DEFAULT_BOARD, Square
+from ..board_setup import BoardSetup
+from ..board_state import RoomPosition, create_board
 from ..board_turn import BoardTurn, Move, Roll, UsePassage
 from ..cards import CARDS, CARDS_BY_ID
+from ..desktop_preferences import DesktopPreferences
 from ..engine import IllegalActionError
+from ..game_settings import BoardRules, BotStrategy
 from ..knowledge import Mark, knowledge_for
 from ..models import (
     Accuse,
@@ -26,7 +31,7 @@ from ..models import (
     Suggest,
 )
 from ..observations import EventKind
-from ..policies import POLICY_NAMES, policies_for_players
+from ..policies import POLICY_NAMES, CustomPolicy, make_policy, policies_for_players
 from ..presentation import format_clauses, format_event
 from ..session import GameSession, create_board_game, create_game
 
@@ -326,6 +331,7 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         "mode": game.mode,
         "game_type": "board" if board is not None else "card_only",
         "board": board,
+        "board_rules": asdict(game.game.board_rules) if board is not None else None,
         "auto_progress": game.auto_progress,
         "paused": game.paused,
         "num_players": snapshot.num_players,
@@ -363,7 +369,7 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
     }
 
 
-def create_app() -> Flask:
+def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flask:
     app = Flask(__name__)
     app.secret_key = secrets.token_bytes(32)
     app.config.update(
@@ -394,7 +400,61 @@ def create_app() -> Flask:
             csrf_token=token,
             cards=_card_options(),
             policies=POLICY_NAMES,
+            desktop_theme=desktop_preferences.get_theme() if desktop_preferences else None,
+            desktop_mode=desktop_preferences is not None,
+            api_version=__version__,
+            frontend_version=FRONTEND_VERSION,
+            desktop_version=DESKTOP_VERSION,
         )
+
+    @app.get("/api/setup")
+    def setup_metadata():
+        board = create_board(BoardSetup(3))
+        return jsonify(
+            layout=_board_payload(BoardTurn(board), None)["layout"],
+            starts=[
+                {"suspect_id": start.suspect_id, **_square_payload(start.square)}
+                for start in DEFAULT_BOARD.starts
+            ],
+        )
+
+    if desktop_preferences is not None:
+        @app.post("/api/desktop/theme")
+        def set_desktop_theme():
+            try:
+                body = _json_body()
+                theme = body.get("theme")
+                if not isinstance(theme, str):
+                    raise TypeError("Theme must be light or dark.")
+                desktop_preferences.set_theme(theme)
+            except (TypeError, ValueError) as exc:
+                return jsonify(error=str(exc)), 400
+            except OSError:
+                app.logger.exception("Failed to save desktop theme")
+                return jsonify(error="Could not save the desktop theme."), 500
+            return jsonify(theme=theme)
+
+        @app.get("/api/desktop/profiles")
+        def get_desktop_profiles():
+            try:
+                return jsonify(profiles=desktop_preferences.get_profiles())
+            except (OSError, ValueError):
+                app.logger.exception("Failed to load desktop setup profiles")
+                return jsonify(error="Could not load the desktop setup profiles."), 500
+
+        @app.put("/api/desktop/profiles")
+        def set_desktop_profiles():
+            try:
+                body = _json_body()
+                if set(body) != {"profiles"}:
+                    raise ValueError("Expected a profiles object.")
+                desktop_preferences.set_profiles(body["profiles"])
+            except (TypeError, ValueError) as exc:
+                return jsonify(error=str(exc)), 400
+            except OSError:
+                app.logger.exception("Failed to save desktop setup profiles")
+                return jsonify(error="Could not save the desktop setup profiles."), 500
+            return jsonify(profiles=body["profiles"])
 
     @app.post("/api/game")
     def start_game():
@@ -421,18 +481,62 @@ def create_app() -> Flask:
                 seat = _integer(body, "seat", 0)
                 if not 0 <= seat < num_players:
                     raise ValueError("Your seat must identify an existing player.")
+            bots = body.get("bots")
+            if "bots" in body and ("policy" in body or "policies" in body):
+                raise ValueError("Use either bots or legacy policy fields, not both.")
+            if "bots" in body:
+                if not isinstance(bots, list) or len(bots) != num_players:
+                    raise ValueError("Supply one bot configuration per seat.")
+                for index, bot in enumerate(bots):
+                    if bot is None:
+                        if index != seat:
+                            raise ValueError("Only the human seat may omit its bot configuration.")
+                    elif isinstance(bot, str):
+                        policies_for_players(bot, 1)
+                    elif isinstance(bot, dict):
+                        allowed = {item.name for item in fields(BotStrategy)}
+                        if set(bot) - allowed:
+                            raise ValueError("Unknown bot strategy setting.")
+                        BotStrategy(**bot)
+                    else:
+                        raise TypeError("Each bot must be a policy name or strategy object.")
             per_seat_policies = body.get("policies", "")
             if not isinstance(per_seat_policies, str):
                 raise TypeError("Policies must be text.")
-            policy_selection = per_seat_policies.strip() or body.get("policy", "deductive")
+            policy_selection = (
+                "random" if bots is not None else
+                per_seat_policies.strip() or body.get("policy", "deductive")
+            )
             if not isinstance(policy_selection, str):
                 raise TypeError("Policy must be text.")
             policies_for_players(policy_selection, num_players)
             debug = body.get("debug", False)
             if type(debug) is not bool:
                 raise ValueError("Debug must be true or false.")
+            board_options: dict[str, Any] = {}
+            if "board_rules" in body:
+                if game_type != "board" or not isinstance(body["board_rules"], dict):
+                    raise ValueError("Board rules require a board game and an object.")
+                raw_rules = body["board_rules"]
+                if set(raw_rules) - {item.name for item in fields(BoardRules)}:
+                    raise ValueError("Unknown board rule.")
+                board_options["board_rules"] = BoardRules(**raw_rules)
+            if "seat_suspects" in body:
+                suspects = body["seat_suspects"]
+                if game_type != "board" or not isinstance(suspects, list):
+                    raise ValueError("Character assignments require a board game and an array.")
+                if len(suspects) != num_players or any(type(item) is not int for item in suspects):
+                    raise ValueError("Assign one character to each seat.")
+                board_options["seat_suspects"] = suspects
             factory = create_board_game if game_type == "board" else create_game
-            engine, policies = factory(num_players, seed, policy_selection)
+            engine, policies = factory(num_players, seed, policy_selection, **board_options)
+            if bots is not None:
+                policies = tuple(
+                    CustomPolicy(random.Random(f"{seed}:{index}"), BotStrategy(**bot))
+                    if isinstance(bot, dict) else
+                    make_policy(bot if isinstance(bot, str) else "random", random.Random(f"{seed}:{index}"))
+                    for index, bot in enumerate(bots)
+                )
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
 

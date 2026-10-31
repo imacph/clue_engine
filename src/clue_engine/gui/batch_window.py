@@ -161,9 +161,11 @@ class BatchWindow(tk.Toplevel):
         self.status.set("Running batch...")
         self._show("")
 
+        updates = self._updates
+
         def progress(summary: BatchSummary) -> None:
-            if not self._updates.full():
-                self._updates.put_nowait(summary)
+            if not updates.full():
+                updates.put_nowait(summary)
 
         self._future = self._executor.submit(
             run_batch, config, path, progress=progress, cancelled=self._cancel.is_set,

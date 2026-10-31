@@ -7,6 +7,7 @@ from .board_setup import BoardSetup
 from .board_state import create_board
 from .board_turn import BoardTurn
 from .cards import CARDS, CARDS_BY_ID
+from .game_settings import DEFAULT_BOARD_RULES, BoardRules
 from .models import CardType, Combination
 
 
@@ -16,6 +17,7 @@ class GameState:
     player_hands: list[frozenset[int]]
     current_player: int
     board: BoardTurn | None = None
+    board_rules: BoardRules = DEFAULT_BOARD_RULES
 
 def deal(rng: random.Random, num_players: int) -> GameState:
     if num_players < 2:
@@ -45,8 +47,11 @@ def deal_board(
     layout: BoardLayout = DEFAULT_BOARD,
     seat_suspects: Sequence[int] | None = None,
     weapon_rooms: Sequence[int] | None = None,
+    board_rules: BoardRules = DEFAULT_BOARD_RULES,
 ) -> GameState:
     """Deal an opt-in board game; invalid setup is rejected before dealing."""
+    if not isinstance(board_rules, BoardRules):
+        raise TypeError("board_rules must be BoardRules")
     board = create_board(
         BoardSetup(num_players), layout=layout,
         seat_suspects=seat_suspects, weapon_rooms=weapon_rooms,
@@ -54,4 +59,5 @@ def deal_board(
     state = deal(rng, num_players)
     state.current_player = board.first_player
     state.board = BoardTurn(board)
+    state.board_rules = board_rules
     return state

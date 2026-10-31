@@ -8,14 +8,27 @@ movement, rooms, passages, and movement-aware bots. Eliminated players still
 respond to suggestions in both modes. A game ends after a correct accusation
 or when every player has made an incorrect accusation.
 
+## Versions
+
+The game API and Python distribution are **0.3.0**, the shared browser/desktop
+frontend is **0.2.1**, and the Windows desktop wrapper is **0.2.1**. These are
+pre-1.0 versions and do not yet promise a stable public API.
+
+The source of truth is `src/clue_engine/_version.py`. The Python package exposes
+its API version as `clue_engine.__version__`. The browser shows the App and Game
+API versions; the Windows app also shows the Desktop version. Update each
+version independently when its component changes. These numbers do not version
+individual HTTP routes or saved game formats. See the [changelog](CHANGELOG.md)
+for the changes in each version.
+
 `deal` supports two or more players and distributes the 18 non-solution cards
 in seat order as evenly as possible. The random generator is supplied by the
 caller for reproducibility.
 
 The [board rules contract](docs/board-rules.md) describes the board rules and
 documented interpretations. Board games are available through the local web
-interface and the Python API; the desktop, console, and batch interfaces remain
-card-only. The [card-only baseline](docs/card-only-baseline.md) records
+interface, packaged Windows desktop app, and Python API; the original Tkinter,
+console, and batch interfaces remain card-only. The [card-only baseline](docs/card-only-baseline.md) records
 reproducible pre-board measurements.
 
 ```python
@@ -129,7 +142,38 @@ including during play. Do not enable it for a fair game.
 
 ## Desktop interface
 
-The desktop interface requires Python's Tkinter support. Start it with:
+The Windows desktop app uses the same interface as the browser, including both
+board and cards-only games. Download or build the portable `ClueEngine` folder
+and run `ClueEngine.exe`; the folder must stay together, but Python does not
+need to be installed. The app requires the
+[Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+It also requires .NET Framework 4.6.2 or newer. Install any missing runtime if
+the app reports it; once installed, the game runs locally without an internet
+connection.
+
+To run the desktop app from source on Windows:
+
+```powershell
+python -m pip install -e ".[desktop]"
+python -m clue_engine.desktop
+```
+
+To build the portable Windows executable on Windows:
+
+```powershell
+python -m pip install -e ".[desktop-build]"
+python -m PyInstaller ClueEngine.spec
+```
+
+Distribute the whole `dist\ClueEngine` folder, or zip it for transfer. Build
+on the Windows architecture you intend to support. The desktop app uses an
+automatically assigned loopback port and stops its local server when the
+window closes. Its theme and explicitly saved setup profiles are stored in
+`%LOCALAPPDATA%\ClueEngine`; games remain in memory and are not saved when the
+app closes.
+
+The original card-only desktop interface requires Python's Tkinter support.
+Start it with:
 
 ```text
 python -m clue_engine.gui
@@ -190,6 +234,28 @@ existing Tkinter app remains available with
 `python -m clue_engine.gui`; its batch statistics and trace tools are not yet
 part of the browser interface.
 
+The browser and Windows app use a five-step new-game wizard for game type,
+seats, bots, rules, and review. Board character selection includes a preview of
+all six starting positions before cards are dealt. Miss Scarlet must be
+assigned and starts; turns then proceed in seat order. The browser and Windows
+interface labels players starting at 1; the Python API, console, and Tkinter
+interface continue to use zero-based seat IDs.
+
+Each new setup rolls a seed; use **Roll seed** to change it or enter one
+manually. **Replay previous setup** restores the last started setup and seed
+while the app remains open. A seed and configuration can reveal the deal and
+solution, so share them only after play. Reproducing a game also depends on the
+application and Python versions. Expand **Advanced options** for progression,
+action limit, and debug settings, or **Saved setup profiles** to manage
+profiles. Saved profiles omit the seed, and loading one rolls a fresh seed.
+Profiles are stored in browser local storage or, for Windows, in
+`%LOCALAPPDATA%\ClueEngine`.
+
+The wizard offers per-bot presets and custom strategy controls, plus standard
+rules and optional board house rules. The strategy toolkit score describes the
+enabled techniques; it is not a predicted win rate. See the
+[board rules contract](docs/board-rules.md) for rule defaults and effects.
+
 Choose **Board game** at setup to play or spectate a 3–6 player board game;
 **Cards only** remains the default. On larger screens the board and notebook
 share the game view; use the workspace tabs to switch the notebook area to
@@ -249,6 +315,12 @@ recently suggested rooms when practical. They use passages and summoned-room
 suggestions, and continue to apply their existing card and reveal heuristics.
 The deductive profile evaluates suspect and weapon candidates even when the
 fixed room is known not to be in the solution.
+
+The browser and Windows wizard also provide custom per-bot choices for
+candidate suggestions, probes, suggestion ranking, repeat reveals, room
+preferences, and card-only suggestion priority. The toolkit score is a weighted
+summary of applicable enabled choices, not a measured difficulty or win
+probability. Named presets retain their existing policy implementations.
 
 ## Batch statistics and private traces
 

@@ -1,0 +1,34 @@
+from pathlib import Path
+
+root = Path(SPECPATH)
+
+a = Analysis(
+    [str(root / "tools" / "run_desktop.py")],
+    pathex=[str(root / "src")],
+    binaries=[],
+    datas=[
+        (str(root / "src" / "clue_engine" / "webapp" / "templates"), "clue_engine/webapp/templates"),
+        (str(root / "src" / "clue_engine" / "webapp" / "static"), "clue_engine/webapp/static"),
+    ],
+    hiddenimports=[],
+    hookspath=[str(root / "tools" / "pyinstaller_hooks")],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="ClueEngine",
+    console=False,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    name="ClueEngine",
+)
