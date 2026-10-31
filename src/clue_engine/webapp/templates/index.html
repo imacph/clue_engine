@@ -110,8 +110,9 @@
                 <summary>Advanced options</summary>
                 <div class="form-grid">
                   <label>Bot progression
-                    <select id="progress">
-                      <option value="auto">Automatic</option>
+                    <select id="progress" aria-describedby="progress-hint">
+                      <option value="turn">Turn-by-turn</option>
+                      <option value="auto">Automatic (continuous in spectator mode)</option>
                       <option value="step">Step-by-step (paused)</option>
                     </select>
                   </label>
@@ -119,6 +120,7 @@
                     <input id="max-steps" type="number" min="0" value="10000">
                   </label>
                 </div>
+                <p id="progress-hint" class="hint">In play mode, confirm after each bot turn. Your own End turn starts the next seat.</p>
                 <label class="check-row">
                   <input id="debug" type="checkbox">
                   <span><strong>Omniscient debug</strong><small>Reveals all hands, the solution, and private events.</small></span>
@@ -215,6 +217,7 @@
         </div>
         <div class="toolbar">
           <button id="pause-button" class="button button-secondary" type="button">Pause</button>
+          <button id="next-turn-button" class="button button-primary" type="button" hidden>Next turn</button>
           <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
           <button id="new-game-button" class="button button-quiet" type="button">New game</button>
         </div>

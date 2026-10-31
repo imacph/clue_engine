@@ -10,8 +10,8 @@ or when every player has made an incorrect accusation.
 
 ## Versions
 
-The game API and Python distribution are **0.4.0**, the shared browser/desktop
-frontend is **0.3.1**, and the Windows desktop wrapper is **0.3.0**. These are
+The game API and Python distribution are **0.5.0**, the shared browser/desktop
+frontend is **0.4.0**, and the Windows desktop wrapper is **0.3.0**. These are
 pre-1.0 versions and do not yet promise a stable public API.
 
 The source of truth is `src/clue_engine/_version.py`. The Python package exposes
@@ -250,6 +250,25 @@ action limit, and debug settings, or **Saved setup profiles** to manage
 profiles. Saved profiles omit the seed, and loading one rolls a fresh seed.
 Profiles are stored in browser local storage or, for Windows, in
 `%LOCALAPPDATA%\ClueEngine`.
+
+In browser and Windows player games, a completed bot turn waits for **Next
+turn**, giving you time to review its suggestion and responses. Your own
+**End turn** action starts the next seat without another confirmation.
+Passes and reveals within a suggestion do not start a new turn; respond when
+prompted. A pending turn confirmation remains in effect if you pause or resume.
+
+The wizard defaults to **Turn-by-turn** progression. Spectators can instead
+choose **Automatic** for continuous play or **Step-by-step** to advance one
+bot action at a time. In player games, automatic actions still wait after each
+bot turn. **Resume** enables automatic actions after a step-by-step start;
+**Pause** and **Next action** control individual automated actions while paused.
+
+For local HTTP clients, `POST /api/game` accepts `progress` values `auto`,
+`turn`, and `step`; omitting it retains the `auto` default. Player games always
+require turn confirmation after a bot turn, while spectator games do so only
+with `turn` progression. When `waiting_for_turn` is true in a state response,
+`POST /api/next-turn` with an empty JSON object and the session's CSRF token
+acknowledges the completed turn without executing another game action.
 
 The browser and Windows player setup defaults to a **Manual** detective
 notebook. Facts from your own hand are filled in and cannot be changed; every

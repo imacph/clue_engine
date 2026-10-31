@@ -12,6 +12,11 @@ def client_and_token():
 
 def test_setup_metadata_is_available_without_dealing():
     client, _ = client_and_token()
+    page = client.get("/").get_data(as_text=True)
+    assert re.search(
+        r'<select id="progress"[^>]*>\s*<option value="turn">Turn-by-turn</option>',
+        page,
+    )
     response = client.get("/api/setup")
     assert response.status_code == 200
     data = response.get_json()

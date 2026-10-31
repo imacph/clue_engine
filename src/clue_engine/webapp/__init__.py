@@ -45,7 +45,9 @@ class WebGame:
     mode: str
     auto_progress: bool
     paused: bool
+    confirm_turns: bool
     selected_player: int
+    waiting_for_turn: bool = False
     notebook_mode: str = "automatic"
     notebook_marks: dict[tuple[int, int], str] = field(default_factory=dict)
     notebook_revision: int = 0
@@ -309,7 +311,10 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
     )
 
     legal = snapshot.legal_actions
-    can_act = game.mode == "play" and snapshot.to_move == snapshot.human_player
+    can_act = (
+        game.mode == "play" and snapshot.to_move == snapshot.human_player
+        and not game.waiting_for_turn
+    )
     reveals = [
         {"id": action.card_id, "name": next(
             card.name for cards in CARDS.values() for card in cards
@@ -341,6 +346,8 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         )
     elif snapshot.limit_reached:
         status = f"Game stopped at the {snapshot.max_steps}-action limit."
+    elif game.waiting_for_turn:
+        status = f"Player {snapshot.turn_player} is next. Select Next turn to continue."
     else:
         status = f"Player {snapshot.to_move} to act."
 
@@ -353,6 +360,7 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         "board_rules": asdict(game.game.board_rules) if board is not None else None,
         "auto_progress": game.auto_progress,
         "paused": game.paused,
+        "waiting_for_turn": game.waiting_for_turn,
         "num_players": snapshot.num_players,
         "human_player": snapshot.human_player,
         "selected_player": selected_player,
@@ -496,8 +504,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             seed = _integer(body, "seed", 0)
             max_steps = _integer(body, "max_steps", 10_000)
             progress = body.get("progress", "auto")
-            if progress not in {"auto", "step"}:
-                raise ValueError("Progress must be auto or step.")
+            if progress not in {"auto", "turn", "step"}:
+                raise ValueError("Progress must be auto, turn, or step.")
             if max_steps < 0:
                 raise ValueError("The action limit must be non-negative.")
             seat = None
@@ -575,8 +583,9 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         game = WebGame(
             game=session_game,
             mode=mode,
-            auto_progress=progress == "auto",
+            auto_progress=progress != "step",
             paused=progress == "step",
+            confirm_turns=mode == "play" or progress == "turn",
             selected_player=0,
             notebook_mode=notebook_mode,
         )
@@ -691,6 +700,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             return jsonify(error=str(exc)), 400
 
         with game.lock:
+            if game.waiting_for_turn:
+                return jsonify(error="Select Next turn before taking an action."), 409
             try:
                 game.game.submit(action)
             except IllegalActionError as exc:
@@ -720,6 +731,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             is_bot_turn = (
                 not snapshot.is_over
                 and not snapshot.limit_reached
+                and not game.waiting_for_turn
                 and snapshot.to_move != snapshot.human_player
             )
             allowed = (step and game.paused) or (
@@ -734,9 +746,35 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 return jsonify(error=f"Bot attempted an illegal action; game paused: {exc}"), 409
             except ValueError as exc:
                 return jsonify(error=str(exc)), 409
+            after = game.game.snapshot()
+            if (
+                game.confirm_turns and not after.is_over and not after.limit_reached
+                and any(
+                    event.kind is EventKind.END_TURN
+                    for event in after.events[len(snapshot.events):]
+                )
+            ):
+                game.waiting_for_turn = True
             try:
                 return jsonify(_serialize_state(game, request.args))
             except ValueError as exc:
+                return jsonify(error=str(exc)), 400
+
+    @app.post("/api/next-turn")
+    def next_turn():
+        game = _game_from_request(games, games_lock)
+        if game is None:
+            return jsonify(error="Start a game before continuing to the next turn."), 404
+        with game.lock:
+            if not game.waiting_for_turn:
+                return jsonify(error="No turn is waiting for confirmation."), 409
+            game.waiting_for_turn = False
+            selected_player = game.selected_player
+            try:
+                return jsonify(_serialize_state(game, request.args))
+            except ValueError as exc:
+                game.waiting_for_turn = True
+                game.selected_player = selected_player
                 return jsonify(error=str(exc)), 400
 
     @app.post("/api/pause")
@@ -749,6 +787,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             if snapshot.is_over or snapshot.limit_reached:
                 return jsonify(error="This game can no longer be paused or resumed."), 409
             game.paused = not game.paused
+            if not game.paused:
+                game.auto_progress = True
             return jsonify(_serialize_state(game, request.args))
 
     return app

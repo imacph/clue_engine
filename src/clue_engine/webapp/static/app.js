@@ -204,7 +204,11 @@ async function refreshState() {
 }
 
 function shouldAdvance(state) {
-  return !advancing && !submitting && !state.is_over && !state.limit_reached
+  return !advancing && !submitting && canAdvanceBot(state);
+}
+
+function canAdvanceBot(state) {
+  return !state.waiting_for_turn && !state.is_over && !state.limit_reached
     && (state.human_player === null || state.to_move !== state.human_player);
 }
 
@@ -256,11 +260,13 @@ function renderState(state) {
   $("game-meta").textContent =
     `Actions: ${state.steps} · Player 1 turns: ${state.player0_turns}`
     + (state.paused ? " · Paused" : "")
+    + (state.waiting_for_turn ? " · Waiting for next turn" : "")
     + (state.board_rules && Object.values(state.board_rules).some((value) => !value)
       ? " · House rules active" : "");
   $("pause-button").textContent = state.paused ? "Resume" : "Pause";
   $("pause-button").disabled = state.is_over || state.limit_reached;
-  $("next-button").hidden = !(state.paused && shouldAdvance(state));
+  $("next-turn-button").hidden = !state.waiting_for_turn;
+  $("next-button").hidden = !(state.paused && canAdvanceBot(state));
   $("viewer-select").value = String(state.selected_player);
   $("viewer-field").hidden = state.mode !== "spectate";
   renderBoard(state);
@@ -1192,7 +1198,7 @@ async function advanceBot(step) {
 }
 
 async function togglePause() {
-  if (!currentState) return;
+  if (!currentState || advancing || submitting) return;
   const version = ++requestVersion;
   try {
     const state = await requestJson(`/api/pause?${selectedFilters()}`, { method: "POST", body: {} });
@@ -1201,6 +1207,26 @@ async function togglePause() {
     renderState(state);
   } catch (error) {
     showError(error.message);
+  }
+}
+
+async function nextTurn() {
+  if (!currentState?.waiting_for_turn || advancing || submitting) return;
+  const version = ++requestVersion;
+  submitting = true;
+  $("next-turn-button").disabled = true;
+  try {
+    const state = await requestJson(`/api/next-turn?${selectedFilters()}`, {
+      method: "POST", body: {},
+    });
+    if (version !== requestVersion || !currentState) return;
+    acceptState(state);
+    renderState(state);
+  } catch (error) {
+    if (version === requestVersion) showError(error.message);
+  } finally {
+    submitting = false;
+    $("next-turn-button").disabled = false;
   }
 }
 
@@ -1532,6 +1558,7 @@ $("card-details-tabs").addEventListener("keydown", (event) => {
   $(`card-details-tab-${next}`).focus();
 });
 $("pause-button").addEventListener("click", togglePause);
+$("next-turn-button").addEventListener("click", nextTurn);
 $("next-button").addEventListener("click", () => advanceBot(true));
 $("new-game-button").addEventListener("click", newGame);
 for (const id of ["viewer-select", "clause-actor", "clause-kind"]) {

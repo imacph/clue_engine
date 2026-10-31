@@ -329,7 +329,8 @@ window.setupWizard = (() => {
         .map(([key]) => key.replaceAll("_", " "));
       add("Rules", changed.length ? `House rules: disabled ${changed.join(", ")}` : "Standard");
     }
-    add("Progression", `${data.progress} · action limit ${data.max_steps}`);
+    const progression = { auto: "Automatic", turn: "Turn-by-turn", step: "Step-by-step" };
+    add("Progression", `${progression[data.progress]} · action limit ${data.max_steps}`);
     if (data.debug) add("Warning", "Omniscient debug reveals hidden information.");
   }
 
@@ -384,7 +385,7 @@ window.setupWizard = (() => {
       || (data.game_type === "board" && (data.players < 3 || data.players > 6))
       || !Number.isInteger(data.seat) || data.seat < 0 || data.seat >= data.players
       || !Array.isArray(data.bots) || data.bots.length !== data.players
-      || !["auto", "step"].includes(data.progress)
+      || !["auto", "turn", "step"].includes(data.progress)
       || !Number.isSafeInteger(data.max_steps) || data.max_steps < 0
       || typeof data.debug !== "boolean"
       || (withSeed && (!Number.isInteger(data.seed) || data.seed < 0 || data.seed > 4294967295))) {

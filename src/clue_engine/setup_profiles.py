@@ -23,7 +23,7 @@ def validate_setup_profile(value: object) -> None:
         raise ValueError("Profile player count must be at least two.")
     if type(seat) is not int or not 0 <= seat < players:
         raise ValueError("Profile seat must identify an existing player.")
-    if value["mode"] not in {"play", "spectate"} or value["progress"] not in {"auto", "step"}:
+    if value["mode"] not in {"play", "spectate"} or value["progress"] not in {"auto", "turn", "step"}:
         raise ValueError("Invalid profile mode or progression.")
     if "notebook_mode" in value and value["notebook_mode"] not in ("manual", "automatic"):
         raise ValueError("Invalid profile notebook mode.")

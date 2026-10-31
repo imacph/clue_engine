@@ -1,5 +1,23 @@
 # Changelog
 
+## App 0.4.0 / Desktop 0.3.0 / API 0.5.0 - Unreleased
+
+### Added
+
+- Added turn-by-turn bot progression, the default in the browser and Windows
+  setup wizard, with a Next turn control for reviewing completed turns.
+- Added the `turn` progression option, `waiting_for_turn` state, and
+  `POST /api/next-turn` for local web clients.
+
+### Changed
+
+- Player games now wait for confirmation after each bot's completed turn;
+  ending your own turn starts the next seat without another confirmation.
+  Responses to a suggestion remain part of the same turn.
+- Spectators can still choose continuous automation or step through individual
+  actions. Resuming a step-by-step game enables automatic actions, while any
+  pending turn confirmation remains in effect.
+
 ## App 0.3.1 / Desktop 0.3.0 / API 0.4.0 - Unreleased
 
 ### Added

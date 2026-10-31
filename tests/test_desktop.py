@@ -87,6 +87,13 @@ def test_desktop_profiles_persist_validate_and_require_csrf(tmp_path):
         )
         assert response.status_code == 200
         assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": updated}}
+    for progress in ("auto", "turn", "step"):
+        updated = dict(profile, progress=progress)
+        response = client.put(
+            "/api/desktop/profiles", json={"profiles": {"Game": updated}}, headers=headers
+        )
+        assert response.status_code == 200
+        assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": updated}}
     invalid_mode = dict(profile, notebook_mode="unknown")
     assert client.put(
         "/api/desktop/profiles", json={"profiles": {"Bad": invalid_mode}}, headers=headers
