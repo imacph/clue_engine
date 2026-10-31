@@ -10,7 +10,10 @@ from typing import Any
 from flask import Flask, jsonify, render_template, request
 from flask import session as browser_session
 
-from ..cards import CARDS
+from ..board import Square
+from ..board_state import RoomPosition
+from ..board_turn import BoardTurn, Move, Roll, UsePassage
+from ..cards import CARDS, CARDS_BY_ID
 from ..engine import IllegalActionError
 from ..knowledge import Mark, knowledge_for
 from ..models import (
@@ -25,7 +28,7 @@ from ..models import (
 from ..observations import EventKind
 from ..policies import POLICY_NAMES, policies_for_players
 from ..presentation import format_clauses, format_event
-from ..session import GameSession, create_game
+from ..session import GameSession, create_board_game, create_game
 
 _SESSION_TTL_SECONDS = 60 * 60
 _MAX_ACTIVE_SESSIONS = 64
@@ -157,6 +160,73 @@ def _activity_payload(events: tuple[Any, ...]) -> dict[str, Any] | None:
     return None
 
 
+def _square_payload(square: Square) -> dict[str, int]:
+    return {"x": square.x, "y": square.y}
+
+
+def _location_payload(location: Square | RoomPosition) -> dict[str, Any]:
+    if isinstance(location, Square):
+        return {"kind": "hallway", **_square_payload(location)}
+    return {"kind": "room", "room_id": location.room_id}
+
+
+def _board_payload(turn: BoardTurn, turn_player: int | None) -> dict[str, Any]:
+    board = turn.board
+    layout = board.layout
+    return {
+        "layout": {
+            "id": layout.layout_id,
+            "width": layout.width,
+            "height": layout.height,
+            "rooms": [
+                {
+                    "id": room.card_id,
+                    "name": CARDS_BY_ID[room.card_id].name,
+                    "squares": [_square_payload(square) for square in sorted(room.squares)],
+                }
+                for room in layout.rooms
+            ],
+            "hallways": [_square_payload(square) for square in sorted(layout.hallways)],
+            "walls": [_square_payload(square) for square in sorted(layout.walls)],
+            "doors": [
+                {
+                    "room_id": door.room_id,
+                    "room_square": _square_payload(door.room_square),
+                    "hallway_square": _square_payload(door.hallway_square),
+                }
+                for door in layout.doors
+            ],
+            "passages": [list(pair) for pair in layout.passages],
+        },
+        "suspects": [
+            {
+                "id": token.suspect_id,
+                "name": CARDS_BY_ID[token.suspect_id].name,
+                "seat": (
+                    board.seat_suspects.index(token.suspect_id)
+                    if token.suspect_id in board.seat_suspects else None
+                ),
+                "location": _location_payload(token.location),
+            }
+            for token in board.suspects
+        ],
+        "weapons": [
+            {
+                "id": token.weapon_id,
+                "name": CARDS_BY_ID[token.weapon_id].name,
+                "room_id": token.room_id,
+            }
+            for token in board.weapons
+        ],
+        "phase": turn.phase.name.lower(),
+        "dice": list(turn.dice) if turn.dice is not None else None,
+        "remaining": turn.remaining,
+        "visited": [_square_payload(square) for square in sorted(turn.visited)],
+        "turn_player": turn_player,
+        "summoned_seats": sorted(turn.summoned_seats),
+    }
+
+
 def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
     snapshot = game.game.snapshot()
     selected_player = snapshot.human_player
@@ -226,6 +296,8 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         for action in legal
         if can_act and isinstance(action, Reveal)
     ]
+    suggestions = [action for action in legal if can_act and isinstance(action, Suggest)]
+    board = _board_payload(snapshot.board, snapshot.turn_player) if snapshot.board else None
     debug_info = None
     if snapshot.debug_info is not None:
         debug_info = {
@@ -252,6 +324,8 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
 
     return {
         "mode": game.mode,
+        "game_type": "board" if board is not None else "card_only",
+        "board": board,
         "auto_progress": game.auto_progress,
         "paused": game.paused,
         "num_players": snapshot.num_players,
@@ -273,11 +347,18 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         "clauses": clauses,
         "debug_info": debug_info,
         "legal": {
-            "suggest": can_act and any(isinstance(action, Suggest) for action in legal),
+            "suggest": bool(suggestions),
             "accuse": can_act and any(isinstance(action, Accuse) for action in legal),
             "end_turn": can_act and any(isinstance(action, EndTurn) for action in legal),
             "pass": can_act and any(isinstance(action, Pass) for action in legal),
             "reveals": reveals,
+            "roll": can_act and any(isinstance(action, Roll) for action in legal),
+            "passage": can_act and any(isinstance(action, UsePassage) for action in legal),
+            "moves": [
+                _location_payload(action.destination)
+                for action in legal if can_act and isinstance(action, Move)
+            ],
+            "suggest_room": suggestions[0].combination.room_id if board and suggestions else None,
         },
     }
 
@@ -322,6 +403,9 @@ def create_app() -> Flask:
             mode = body.get("mode", "play")
             if mode not in {"play", "spectate"}:
                 raise ValueError("Mode must be play or spectate.")
+            game_type = body.get("game_type", "card_only")
+            if not isinstance(game_type, str) or game_type not in {"card_only", "board"}:
+                raise ValueError("Game type must be card_only or board.")
             num_players = _integer(body, "players", 4)
             if num_players < 2:
                 raise ValueError("A game requires at least two players.")
@@ -347,10 +431,11 @@ def create_app() -> Flask:
             debug = body.get("debug", False)
             if type(debug) is not bool:
                 raise ValueError("Debug must be true or false.")
+            factory = create_board_game if game_type == "board" else create_game
+            engine, policies = factory(num_players, seed, policy_selection)
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
 
-        engine, policies = create_game(num_players, seed, policy_selection)
         session_game = GameSession(
             engine,
             policies,
@@ -418,6 +503,20 @@ def create_app() -> Flask:
                     action = Pass()
                 case "end_turn":
                     action = EndTurn()
+                case "roll":
+                    action = Roll()
+                case "passage":
+                    action = UsePassage()
+                case "move":
+                    destination = body.get("destination")
+                    if not isinstance(destination, dict):
+                        raise TypeError("Move destination must be an object.")
+                    if destination.get("kind") == "hallway":
+                        action = Move(Square(_integer(destination, "x"), _integer(destination, "y")))
+                    elif destination.get("kind") == "room":
+                        action = Move(RoomPosition(_integer(destination, "room_id")))
+                    else:
+                        raise ValueError("Move destination must be a hallway square or room.")
                 case _:
                     raise ValueError("Unknown action.")
         except (TypeError, ValueError) as exc:

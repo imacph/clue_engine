@@ -35,6 +35,7 @@
   </header>
 
   <main>
+    <p id="error-message" class="error-message" role="alert" hidden></p>
     <section id="setup-screen" class="setup-card">
       <div class="section-heading">
         <div>
@@ -43,6 +44,20 @@
         </div>
       </div>
       <form id="setup-form">
+        <fieldset class="game-style" aria-describedby="game-style-hint">
+          <legend>Choose your game</legend>
+          <div class="game-style-options">
+            <label class="game-style-option">
+              <input type="radio" name="game-type" value="card_only" checked>
+              <span><strong>Cards only</strong><small>Quick deduction, without the board.</small></span>
+            </label>
+            <label class="game-style-option">
+              <input type="radio" name="game-type" value="board">
+              <span><strong>Board game</strong><small>Roll, move through rooms, and make suggestions.</small></span>
+            </label>
+          </div>
+          <p id="game-style-hint" class="hint">Cards only supports two or more players.</p>
+        </fieldset>
         <div class="form-grid">
           <label>Mode
             <select id="mode">
@@ -50,7 +65,7 @@
               <option value="spectate">Spectate bots</option>
             </select>
           </label>
-          <label>Players <span class="hint">(at least 2)</span>
+          <label>Players <span id="players-hint" class="hint">(at least 2)</span>
             <input id="players" type="number" min="2" value="4" required>
           </label>
           <label id="seat-field">Your seat <span class="hint">(zero-based)</span>
@@ -101,11 +116,53 @@
           <button id="new-game-button" class="button button-quiet" type="button">New game</button>
         </div>
       </div>
-      <p id="error-message" class="error-message" role="alert" hidden></p>
       <div id="debug-panel" class="debug-panel" hidden></div>
 
       <div class="game-dashboard">
-        <section class="panel hand-panel">
+        <div id="board-workspace-tabs" class="board-workspace-tabs" role="tablist"
+             aria-label="Board game workspace" hidden>
+          <button id="board-tab-board" class="board-workspace-tab board-mobile-tab" type="button" role="tab"
+                  aria-controls="board-panel" aria-selected="false" tabindex="-1">Board</button>
+          <button id="board-tab-notebook" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="notebook-panel" aria-selected="false" tabindex="-1">Notebook</button>
+          <button id="board-tab-cards" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="cards-panel" aria-selected="true">Cards &amp; actions</button>
+          <button id="board-tab-insights" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="insights-panel" aria-selected="false" tabindex="-1">History &amp; clauses</button>
+          <button id="board-tab-locations" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="board-locations-panel" aria-selected="false" tabindex="-1">Locations</button>
+        </div>
+        <section id="board-panel" class="panel board-panel" aria-labelledby="board-title" hidden>
+          <div class="board-heading">
+            <div>
+              <p class="eyebrow">Explore the mansion</p>
+              <h3 id="board-title">Game board</h3>
+            </div>
+            <div class="board-heading-tools">
+              <button id="board-zoom-button" class="board-zoom-button" type="button" aria-pressed="false">Zoom board</button>
+              <span id="board-turn" class="board-turn-badge"></span>
+            </div>
+          </div>
+          <div class="board-controls">
+            <div id="board-dice" class="board-dice" aria-label="Dice not rolled">
+              <span class="die">–</span><span class="die">–</span>
+            </div>
+            <span id="board-remaining" class="board-remaining"></span>
+            <div class="board-turn-actions">
+              <button id="board-roll-button" class="button button-primary" type="button" hidden>Roll dice</button>
+              <button id="board-passage-button" class="button button-secondary" type="button" hidden>Take passage</button>
+              <button id="board-end-button" class="button button-secondary" type="button" hidden>End turn</button>
+            </div>
+          </div>
+          <p id="board-instruction" class="board-instruction" aria-live="polite"></p>
+          <div id="board-map-shell" class="board-map-shell" tabindex="0" aria-label="Board viewport; use arrow keys to move">
+            <svg id="board-map" class="board-map" role="group" aria-labelledby="board-title"
+                 aria-describedby="board-instruction"></svg>
+          </div>
+          <p class="board-map-key">P0–P5 players · initials unassigned · ↗ passage · ◆ weapons</p>
+        </section>
+
+        <section id="cards-panel" class="panel hand-panel">
           <div id="card-view-tabs" class="card-view-tabs" role="group" aria-label="Card view">
             <button class="card-view-button" type="button" data-card-view="hand" aria-pressed="true">Hand</button>
             <button class="card-view-button" type="button" data-card-view="suspect" aria-pressed="false">Suspects</button>
@@ -135,24 +192,27 @@
                 <button id="card-accuse-button" class="button button-danger" type="button" disabled>Accuse</button>
                 <button id="end-button" class="button button-secondary" type="button" hidden>End turn</button>
                 <button id="pass-button" class="button button-secondary" type="button" hidden>Pass</button>
+                <button id="use-room-button" class="button button-quiet" type="button" hidden>Use current room</button>
                 <button id="clear-cards-button" class="button button-quiet" type="button" hidden>Clear</button>
               </div>
             </aside>
           </div>
         </section>
 
-        <section class="panel notebook-panel">
+        <section id="notebook-panel" class="panel notebook-panel">
           <div class="panel-heading">
             <div>
               <p class="eyebrow">Deductions</p>
-              <h3>Detective notebook</h3>
+              <h3 id="notebook-title">Detective notebook</h3>
             </div>
-            <span class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown</span>
+            <div id="notebook-heading-tools" class="notebook-heading-tools">
+              <span class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown<span class="board-envelope-legend"> <b>E</b> envelope</span></span>
+            </div>
           </div>
           <div id="notebook" class="notebook-grid" aria-label="Knowledge matrix"></div>
         </section>
 
-        <div class="insights-column">
+        <div id="insights-panel" class="insights-column">
           <div id="insights-tabs" class="insights-tabs" role="tablist" aria-label="Game details">
             <button id="history-tab" class="insights-tab" type="button" role="tab"
                     aria-selected="true" aria-controls="history-panel" tabindex="0">History</button>
@@ -186,6 +246,15 @@
             <pre id="clauses" class="clauses"></pre>
           </section>
         </div>
+
+        <section id="board-locations-panel" class="panel board-locations-panel" hidden>
+          <h3>Suspect and weapon locations</h3>
+          <div id="board-legend" class="board-legend" aria-label="Suspect locations"></div>
+          <div class="board-room-details">
+            <h4>Room occupants and weapons</h4>
+            <ul id="board-room-list"></ul>
+          </div>
+        </section>
 
       </div>
     </section>

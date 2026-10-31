@@ -35,6 +35,7 @@ class SessionSnapshot:
     legal_actions: tuple[Action, ...]
     debug_info: DebugInfo | None
     board: BoardTurn | None = None
+    turn_player: int | None = None
 
 
 def create_game(num_players: int, seed: int, policy_name: str) -> tuple[Engine, tuple[Policy, ...]]:
@@ -126,6 +127,7 @@ class GameSession:
             legal_actions=legal,
             debug_info=debug_info,
             board=engine.state.board,
+            turn_player=engine.state.current_player,
         )
 
     def spectator_view(self, player: int) -> PlayerView:

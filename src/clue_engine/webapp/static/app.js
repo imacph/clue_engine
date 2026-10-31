@@ -18,9 +18,21 @@ const $ = (id) => document.getElementById(id);
 let currentState = null;
 let refreshTimer = null;
 let advancing = false;
+let submitting = false;
+let refreshing = false;
+let requestVersion = 0;
 let lastError = "";
 let cardView = "hand";
 let lastActivityKey = null;
+let lastRenderedState = null;
+let lastBoardState = null;
+let lastBoardLayout = null;
+let lastSuggestionRoom = null;
+let hadReveal = false;
+let hadBoardMovement = false;
+let hadBoardResponse = false;
+const boardTabs = ["board", "notebook", "cards", "insights", "locations"];
+const narrowBoardLayout = window.matchMedia("(max-width: 800px)");
 const selectedCardIds = { suspect: null, weapon: null, room: null };
 
 function option(value, label) {
@@ -49,15 +61,27 @@ async function requestJson(path, { method = "GET", body } = {}) {
   if (body !== undefined) options.body = JSON.stringify(body);
   const response = await fetch(path, options);
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
 async function startGame(event) {
   event.preventDefault();
+  const version = ++requestVersion;
+  showError("");
   clearSelectedCards();
   cardView = "hand";
   lastActivityKey = null;
+  lastRenderedState = null;
+  lastBoardState = null;
+  lastSuggestionRoom = null;
+  hadReveal = false;
+  hadBoardMovement = false;
+  hadBoardResponse = false;
   const mode = $("mode").value;
   const debug = $("debug").checked;
   if (debug && !window.confirm("Debug mode reveals every hand, the solution, and private events. Continue?")) {
@@ -69,6 +93,7 @@ async function startGame(event) {
       method: "POST",
       body: {
         mode,
+        game_type: document.querySelector('input[name="game-type"]:checked').value,
         players: Number($("players").value),
         seat: Number($("seat").value),
         seed: Number($("seed").value),
@@ -79,22 +104,26 @@ async function startGame(event) {
         debug,
       },
     });
+    if (version !== requestVersion) return;
     lastError = "";
     document.body.classList.add("game-active");
+    document.body.classList.toggle("board-game", Boolean(state.board));
+    configureBoardWorkspace(Boolean(state.board));
     $("setup-screen").hidden = true;
     $("game-screen").hidden = false;
     $("error-message").hidden = true;
-    buildPlayerFilters(state.num_players);
     currentState = state;
+    buildPlayerFilters(state);
     renderState(state);
     clearInterval(refreshTimer);
-    refreshTimer = setInterval(refreshState, 700);
+    refreshTimer = setInterval(refreshState, state.board ? 250 : 700);
   } catch (error) {
     showError(error.message);
   }
 }
 
-function buildPlayerFilters(numPlayers) {
+function buildPlayerFilters(state) {
+  const numPlayers = state.num_players;
   const selectors = ["viewer-select", "history-actor", "clause-actor"];
   for (const id of selectors) {
     const select = $(id);
@@ -109,6 +138,10 @@ function buildPlayerFilters(numPlayers) {
   for (const [value, label] of [
     ["suggest", "Suggestion"], ["pass", "Pass"], ["refute", "Refutation"],
     ["show", "Shown card"], ["accuse", "Accusation"], ["end_turn", "End turn"],
+    ...(state.board ? [
+      ["roll", "Dice roll"], ["move", "Movement"], ["passage", "Passage"],
+      ["suspect_moved", "Suspect moved"], ["weapon_moved", "Weapon moved"],
+    ] : []),
   ]) historyKind.append(option(value, label));
   $("viewer-select").value = String(currentState?.selected_player ?? 0);
 }
@@ -122,32 +155,75 @@ function selectedFilters() {
 }
 
 async function refreshState() {
+  if (refreshing || submitting) return;
+  refreshing = true;
+  const version = requestVersion;
   try {
     const state = await requestJson(`/api/state?${selectedFilters()}`);
+    if (version !== requestVersion || !currentState) return;
     currentState = state;
     renderState(state);
     if (state.auto_progress && !state.paused && shouldAdvance(state)) {
       await advanceBot(false);
     }
   } catch (error) {
+    if (error.status === 404) clearInterval(refreshTimer);
     showError(error.message);
+  } finally {
+    refreshing = false;
   }
 }
 
 function shouldAdvance(state) {
-  return !advancing && !state.is_over && !state.limit_reached
+  return !advancing && !submitting && !state.is_over && !state.limit_reached
     && (state.human_player === null || state.to_move !== state.human_player);
 }
 
 function renderState(state) {
+  const fingerprint = JSON.stringify(state);
+  if (fingerprint === lastRenderedState) return;
+  lastRenderedState = fingerprint;
+  const fixedRoom = state.board && state.legal.suggest ? state.legal.suggest_room : null;
+  const hasReveal = state.legal.reveals.length > 0;
+  const hasBoardMovement = state.board && (
+    state.legal.roll || state.legal.passage || state.legal.moves.length > 0
+  );
+  const hasBoardResponse = state.board && (hasReveal || state.legal.pass);
+  const moveHadFocus = state.board && (
+    document.activeElement === $("board-map-shell")
+    || ($("board-panel").contains(document.activeElement)
+      && document.activeElement?.hasAttribute("data-board-move"))
+  );
+  let focusCards = false;
+  if (state.board) {
+    if (hasBoardResponse && !hadBoardResponse) {
+      switchBoardTab("cards");
+    } else if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom
+      && (!narrowBoardLayout.matches || !hasBoardMovement)) {
+      switchBoardTab("cards");
+      focusCards = moveHadFocus;
+    } else if (hasBoardMovement && !hadBoardMovement && narrowBoardLayout.matches) {
+      switchBoardTab("board");
+    }
+  }
+  hadBoardMovement = Boolean(hasBoardMovement);
+  hadBoardResponse = Boolean(hasBoardResponse);
+  if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom) {
+    selectedCardIds.room = fixedRoom;
+    cardView = "suspect";
+  }
+  lastSuggestionRoom = fixedRoom;
+  if (hasReveal && !hadReveal) cardView = "hand";
+  hadReveal = hasReveal;
   const activityKey = state.activity
-    ? `${state.steps}:${state.activity.kind}:${state.activity.actor}:${state.activity.card_id ?? ""}`
+    ? `${state.activity.kind}:${state.activity.actor}:${state.activity.suggestion_actor ?? ""}`
+      + `:${state.activity.card_id ?? ""}:${state.activity.recipient ?? ""}`
     : null;
   if (state.activity?.kind === "reveal" && activityKey !== lastActivityKey) {
     clearSelectedCards();
   }
   lastActivityKey = activityKey;
-  $("game-status").textContent = state.status;
+  setText("game-status", state.status);
   $("game-meta").textContent =
     `Actions: ${state.steps} · Player 0 turns: ${state.player0_turns}`
     + (state.paused ? " · Paused" : "");
@@ -155,7 +231,8 @@ function renderState(state) {
   $("pause-button").disabled = state.is_over || state.limit_reached;
   $("next-button").hidden = !(state.paused && shouldAdvance(state));
   $("viewer-select").value = String(state.selected_player);
-  $("viewer-field").hidden = state.mode !== "spectate" || !state.debug_info;
+  $("viewer-field").hidden = state.mode !== "spectate";
+  renderBoard(state);
   renderHand(state);
   renderCardInteraction(state);
   renderNotebook(state);
@@ -166,11 +243,326 @@ function renderState(state) {
   renderActions(state);
   $("error-message").hidden = !lastError;
   $("error-message").textContent = lastError;
+  if (focusCards) document.querySelector('[data-card-view="suspect"]').focus({ preventScroll: true });
+}
+
+function setText(id, text) {
+  if ($(id).textContent !== text) $(id).textContent = text;
+}
+
+const pawnStyles = [
+  { label: "Sc", color: "#b72940", ink: "#fff" },
+  { label: "Mu", color: "#e5ba35", ink: "#222" },
+  { label: "Wh", color: "#f6f3e9", ink: "#263238" },
+  { label: "Gr", color: "#36885a", ink: "#fff" },
+  { label: "Pe", color: "#346cac", ink: "#fff" },
+  { label: "Pl", color: "#82559a", ink: "#fff" },
+];
+const svgNamespace = "http://www.w3.org/2000/svg";
+
+function svgElement(name, attributes = {}, text = null) {
+  const element = document.createElementNS(svgNamespace, name);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
+  if (text !== null) element.textContent = text;
+  return element;
+}
+
+function boardLocation(location) {
+  return location.kind === "room"
+    ? cardName(location.room_id)
+    : `hallway (${location.x}, ${location.y})`;
+}
+
+function pawnController(pawn, state) {
+  if (pawn.seat === null) return "Unassigned";
+  return `Player ${pawn.seat} (${pawn.seat === state.human_player ? "you" : "bot"})`;
+}
+
+function moveLabel(move, state) {
+  if (move.kind === "room") return `Enter ${cardName(move.room_id)}`;
+  const pawn = state.board.suspects.find((item) => item.seat === state.board.turn_player);
+  if (pawn?.location.kind === "hallway") {
+    const dx = move.x - pawn.location.x;
+    const dy = move.y - pawn.location.y;
+    const direction = dy < 0 ? "Up" : dy > 0 ? "Down" : dx < 0 ? "Left" : "Right";
+    return `${direction} (${move.x}, ${move.y})`;
+  }
+  return `Exit to hallway (${move.x}, ${move.y})`;
+}
+
+function directionalMoves(state, dx, dy) {
+  const board = state.board;
+  const pawn = board.suspects.find((item) => item.seat === board.turn_player);
+  if (!pawn) return [];
+  return state.legal.moves.filter((move) => {
+    if (pawn.location.kind === "hallway" && move.kind === "hallway") {
+      return move.x - pawn.location.x === dx && move.y - pawn.location.y === dy;
+    }
+    return board.layout.doors.some((door) => {
+      if (pawn.location.kind === "hallway" && move.kind === "room") {
+        return door.room_id === move.room_id
+          && door.hallway_square.x === pawn.location.x && door.hallway_square.y === pawn.location.y
+          && door.room_square.x - door.hallway_square.x === dx
+          && door.room_square.y - door.hallway_square.y === dy;
+      }
+      return pawn.location.kind === "room" && move.kind === "hallway"
+        && door.room_id === pawn.location.room_id
+        && door.hallway_square.x === move.x && door.hallway_square.y === move.y
+        && door.hallway_square.x - door.room_square.x === dx
+        && door.hallway_square.y - door.room_square.y === dy;
+    });
+  });
+}
+
+function boardInstruction(state) {
+  const board = state.board;
+  if (state.is_over || state.limit_reached) return state.status;
+  if (state.to_move !== board.turn_player) {
+    return state.to_move === state.human_player
+      ? "Respond to the suggestion in Cards & actions."
+      : `Player ${state.to_move} is responding to Player ${board.turn_player}'s suggestion.`;
+  }
+  if (state.to_move !== state.human_player) {
+    return `Following Player ${board.turn_player}. Watch the highlighted pawn move around the mansion.`;
+  }
+  const legal = state.legal;
+  if (legal.suggest && legal.roll) {
+    return `You were summoned to ${cardName(legal.suggest_room)}. Suggest there, roll to leave`
+      + (legal.passage ? ", or take the passage." : ".");
+  }
+  if (legal.suggest) {
+    return `In ${cardName(legal.suggest_room)}: choose a suspect and weapon in Cards & actions.`;
+  }
+  if (legal.moves.length) {
+    return "Select a square or use arrow keys.";
+  }
+  if (legal.roll) {
+    return legal.passage
+      ? "Roll to move, or take the secret passage to the opposite corner."
+      : "Roll both dice to begin moving.";
+  }
+  if (legal.end_turn) return "Movement or the suggestion is complete. End your turn when ready.";
+  return "Use the available actions below.";
+}
+
+function roomBounds(room) {
+  const xs = room.squares.map((square) => square.x);
+  const ys = room.squares.map((square) => square.y);
+  return {
+    minX: Math.min(...xs), maxX: Math.max(...xs),
+    minY: Math.min(...ys), maxY: Math.max(...ys),
+  };
+}
+
+function buildBoardBase(layout) {
+  const map = $("board-map");
+  map.replaceChildren();
+  map.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+  const base = svgElement("g", { "aria-hidden": "true" });
+  layout.rooms.forEach((room, index) => {
+    for (const square of room.squares) {
+      base.append(svgElement("rect", {
+        x: square.x, y: square.y, width: 1, height: 1, class: `board-room-${index}`,
+      }));
+    }
+  });
+  for (const square of layout.hallways) {
+    base.append(svgElement("rect", {
+      x: square.x, y: square.y, width: 1, height: 1, class: "board-hallway",
+    }));
+  }
+  for (const square of layout.walls) {
+    base.append(svgElement("rect", {
+      x: square.x, y: square.y, width: 1, height: 1, class: "board-wall",
+    }));
+  }
+  for (const room of layout.rooms) {
+    const bounds = roomBounds(room);
+    const center = (bounds.minX + bounds.maxX + 1) / 2;
+    const name = room.name.endsWith(" Room")
+      ? [room.name.slice(0, -5), "Room"] : [room.name];
+    const label = svgElement("text", { x: center, y: bounds.minY + .64, class: "board-room-name" });
+    name.forEach((part, index) => label.append(svgElement("tspan", {
+      x: center, dy: index ? .48 : 0,
+    }, part)));
+    base.append(label);
+    if (layout.passages.some((pair) => pair.includes(room.id))) {
+      base.append(svgElement("text", {
+        x: bounds.maxX + .65, y: bounds.minY + .65, class: "board-passage-mark",
+      }, "↗"));
+    }
+  }
+  map.append(base, svgElement("g", { id: "board-dynamic" }));
+}
+
+function appendPawn(group, pawn, state, x, y, active, radius) {
+  const style = pawnStyles[pawn.id];
+  const description = `${pawn.name}, ${pawnController(pawn, state)}, ${boardLocation(pawn.location)}`;
+  const marker = svgElement("g", { role: "img", "aria-label": description });
+  marker.append(svgElement("title", {}, description));
+  marker.append(svgElement("circle", {
+    cx: x, cy: y, r: radius, fill: style.color,
+    class: `board-pawn${active ? " board-pawn-active" : ""}${pawn.seat === null ? " board-pawn-unassigned" : ""}`,
+  }));
+  marker.append(svgElement("text", {
+    x, y: y + .09, fill: style.ink, class: "board-pawn-text", "aria-hidden": "true",
+  }, pawn.seat === null ? style.label : `P${pawn.seat}`));
+  group.append(marker);
+}
+
+function renderBoard(state) {
+  const panel = $("board-panel");
+  panel.hidden = !state.board;
+  if (!state.board) {
+    lastBoardState = null;
+    return;
+  }
+  const board = state.board;
+  const key = JSON.stringify([board, state.legal, state.to_move, state.human_player, state.is_over, state.limit_reached]);
+  if (key === lastBoardState) return;
+  lastBoardState = key;
+  const activeElement = document.activeElement;
+  const restoreMoveFocus = panel.contains(activeElement) && activeElement?.hasAttribute("data-board-move");
+  const actor = board.suspects.find((pawn) => pawn.seat === board.turn_player);
+  setText("board-turn", actor ? `P${board.turn_player} · ${actor.name}` : "Board");
+  setText("board-instruction", boardInstruction(state));
+  setText("board-remaining", board.phase === "move"
+    ? `${board.remaining} step${board.remaining === 1 ? "" : "s"} left`
+    : board.dice ? "Movement complete" : "Not rolled");
+  $("board-dice").setAttribute("aria-label", board.dice
+    ? `Dice: ${board.dice[0]} and ${board.dice[1]}` : "Dice not rolled");
+  $("board-dice").querySelectorAll(".die").forEach((die, index) => {
+    die.textContent = board.dice ? String(board.dice[index]) : "–";
+  });
+  $("board-roll-button").hidden = !state.legal.roll;
+  $("board-passage-button").hidden = !state.legal.passage;
+  $("board-end-button").hidden = !state.legal.end_turn;
+
+  const layoutKey = JSON.stringify(board.layout);
+  if (layoutKey !== lastBoardLayout) {
+    buildBoardBase(board.layout);
+    lastBoardLayout = layoutKey;
+  }
+  const dynamic = $("board-dynamic");
+  dynamic.replaceChildren();
+  for (const square of board.visited) {
+    dynamic.append(svgElement("rect", {
+      x: square.x, y: square.y, width: 1, height: 1, class: "board-visited",
+      "aria-hidden": "true",
+    }));
+  }
+  for (const door of board.layout.doors) {
+    const room = door.room_square;
+    const hall = door.hallway_square;
+    const x = (room.x + hall.x + 1) / 2;
+    const y = (room.y + hall.y + 1) / 2;
+    const horizontal = room.x === hall.x;
+    const blocked = board.suspects.some((pawn) => pawn.location.kind === "hallway"
+      && pawn.location.x === hall.x && pawn.location.y === hall.y);
+    dynamic.append(svgElement("line", {
+      x1: x - (horizontal ? .3 : 0), x2: x + (horizontal ? .3 : 0),
+      y1: y - (horizontal ? 0 : .3), y2: y + (horizontal ? 0 : .3),
+      class: `board-door${blocked ? " blocked" : ""}`, "aria-hidden": "true",
+    }));
+  }
+  for (const room of board.layout.rooms) {
+    const bounds = roomBounds(room);
+    const center = (bounds.minX + bounds.maxX + 1) / 2;
+    const pawns = board.suspects.filter((pawn) =>
+      pawn.location.kind === "room" && pawn.location.room_id === room.id);
+    const baseY = bounds.minY + Math.max(1.7, (bounds.maxY - bounds.minY + 1) / 2 + .35);
+    pawns.forEach((pawn, index) => appendPawn(
+      dynamic, pawn, state, center + (index % 3 - 1) * .75, baseY + Math.floor(index / 3) * .72,
+      pawn.seat === board.turn_player, .34,
+    ));
+    const weapons = board.weapons.filter((weapon) => weapon.room_id === room.id);
+    if (weapons.length) {
+      dynamic.append(svgElement("text", {
+        x: center, y: bounds.maxY + .78, class: "board-room-contents", "aria-hidden": "true",
+      }, `◆ ${weapons.length} weapon${weapons.length === 1 ? "" : "s"}`));
+    }
+  }
+  for (const pawn of board.suspects) {
+    if (pawn.location.kind === "hallway") {
+      appendPawn(dynamic, pawn, state, pawn.location.x + .5, pawn.location.y + .5,
+        pawn.seat === board.turn_player, .42);
+    }
+  }
+  for (const move of state.legal.moves) {
+    const label = moveLabel(move, state);
+    const encoded = JSON.stringify(move);
+    let target = move;
+    if (move.kind === "room") {
+      const door = board.layout.doors.find((item) => item.room_id === move.room_id
+        && actor?.location.kind === "hallway"
+        && item.hallway_square.x === actor.location.x && item.hallway_square.y === actor.location.y);
+      if (!door) continue;
+      target = door.room_square;
+    }
+    const square = svgElement("rect", {
+      x: target.x + .08, y: target.y + .08, width: .84, height: .84, rx: .12,
+      class: "board-target", role: "button", tabindex: "0", "aria-label": label,
+      "data-board-move": encoded,
+    });
+    square.append(svgElement("title", {}, label));
+    dynamic.append(square);
+  }
+  const legend = $("board-legend");
+  legend.replaceChildren();
+  for (const pawn of board.suspects) {
+    const item = document.createElement("span");
+    item.className = "board-legend-item";
+    const chip = document.createElement("span");
+    chip.className = `pawn-chip${pawn.seat === null ? " pawn-chip-unassigned" : ""}`;
+    chip.style.backgroundColor = pawnStyles[pawn.id].color;
+    chip.style.color = pawnStyles[pawn.id].ink;
+    chip.textContent = pawn.seat === null ? pawnStyles[pawn.id].label : `P${pawn.seat}`;
+    const label = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = pawn.name;
+    label.append(name, document.createTextNode(
+      ` · ${pawnController(pawn, state)} · ${boardLocation(pawn.location)}`
+    ));
+    item.append(chip, label);
+    legend.append(item);
+  }
+  const roomList = $("board-room-list");
+  roomList.replaceChildren();
+  for (const room of board.layout.rooms) {
+    const pawnNames = board.suspects.filter((pawn) =>
+      pawn.location.kind === "room" && pawn.location.room_id === room.id).map((pawn) => pawn.name);
+    const weaponNames = board.weapons.filter((weapon) => weapon.room_id === room.id).map((weapon) => weapon.name);
+    const passage = board.layout.passages.find((pair) => pair.includes(room.id));
+    const item = document.createElement("li");
+    const title = document.createElement("strong");
+    title.textContent = `${room.name}: `;
+    const contents = [
+      pawnNames.length ? pawnNames.join(", ") : "no suspects",
+      weaponNames.length ? weaponNames.join(", ") : "no weapons",
+      ...(passage ? [`passage to ${cardName(passage.find((id) => id !== room.id))}`] : []),
+    ];
+    item.append(title, document.createTextNode(contents.join(" · ")));
+    roomList.append(item);
+  }
+  if (restoreMoveFocus) {
+    const next = dynamic.querySelector("[data-board-move]");
+    if (next) next.focus({ preventScroll: true });
+    else if (state.legal.suggest) {
+      document.querySelector('[data-card-view="suspect"]').focus({ preventScroll: true });
+    } else if (state.legal.end_turn) {
+      $("board-end-button").focus({ preventScroll: true });
+    }
+  }
 }
 
 function renderHand(state) {
   const container = $("hand-cards");
   container.replaceChildren();
+  const viewLabels = {
+    hand: "Cards in hand", suspect: "Suspect cards", weapon: "Weapon cards",
+    room: "Room cards", all: "All cards",
+  };
+  container.setAttribute("aria-label", viewLabels[cardView]);
   const hand = new Set(state.hand);
   const allCards = [...cardsByName.values()];
   const visibleCards = allCards.filter((card) => {
@@ -208,6 +600,7 @@ function createCardFace(card, { button = false, mini = false, disabled = false, 
   if (button) {
     face.type = "button";
     face.disabled = disabled;
+    face.dataset.cardId = String(card.id);
     face.setAttribute("aria-pressed", String(pressed));
   }
   face.className = `playing-card ${card.type}${mini ? " mini-card" : ""}`;
@@ -245,9 +638,11 @@ function selectCard(cardId) {
     && currentState.to_move === currentState.human_player
     && (currentState.legal.suggest || currentState.legal.accuse);
   if (!card || !canCompose) return;
+  const restoreFocus = $("hand-cards").contains(document.activeElement);
   selectedCardIds[card.type] = card.id;
   renderHand(currentState);
   renderCardInteraction(currentState);
+  if (restoreFocus) $("hand-cards").querySelector(`[data-card-id="${card.id}"]`)?.focus({ preventScroll: true });
 }
 
 function selectedCombination() {
@@ -299,8 +694,9 @@ function renderCardInteraction(state) {
       if (activity?.kind === "refute" || activity?.kind === "reveal") {
         renderActivityMeta(activity);
       }
-      $("card-interaction-hint").textContent =
-        "Select one suspect, weapon, and room from any card view.";
+      $("card-interaction-hint").textContent = legal.suggest_room !== null
+        ? `Suggestions must name ${cardName(legal.suggest_room)}. Accusations may name any room.`
+        : "Select one suspect, weapon, and room from any card view.";
     }
     for (const type of ["suspect", "weapon", "room"]) {
       const card = cardsById.get(selectedCardIds[type]);
@@ -322,11 +718,13 @@ function renderCardInteraction(state) {
     }
     if (activity?.kind === "reveal") selectedCards.classList.add("reveal-selection");
     const hasCombination = Object.values(selectedCardIds).every((id) => id !== null);
+    const matchesRoom = legal.suggest_room === null || selectedCardIds.room === legal.suggest_room;
     const revealIsActive = activity?.kind === "reveal";
     $("card-suggest-button").hidden = !legal.suggest || (revealIsActive && !hasCombination);
     $("card-accuse-button").hidden = !legal.accuse || (revealIsActive && !hasCombination);
-    $("card-suggest-button").disabled = !hasCombination;
+    $("card-suggest-button").disabled = !hasCombination || !matchesRoom;
     $("card-accuse-button").disabled = !hasCombination;
+    $("use-room-button").hidden = !legal.suggest || legal.suggest_room === null || matchesRoom;
     $("clear-cards-button").hidden = !Object.values(selectedCardIds).some((id) => id !== null);
     return;
   } else {
@@ -360,6 +758,7 @@ function renderCardInteraction(state) {
   $("card-accuse-button").hidden = true;
   $("card-suggest-button").disabled = true;
   $("card-accuse-button").disabled = true;
+  $("use-room-button").hidden = true;
   $("clear-cards-button").hidden = true;
   if (!humanTurn && state.mode !== "spectate" && !state.is_over && !state.limit_reached) {
     $("card-interaction-hint").textContent += " Waiting for your turn.";
@@ -546,6 +945,9 @@ function renderNotebook(state) {
       heading.append(th);
     }
     const envelope = document.createElement("th");
+    envelope.className = "matrix-envelope";
+    envelope.setAttribute("aria-label", "Envelope");
+    envelope.title = "Envelope";
     envelope.textContent = "Env.";
     envelope.title = "Envelope";
     heading.append(envelope);
@@ -651,47 +1053,67 @@ function renderActions(state) {
     "card-accuse-button",
     "end-button",
     "pass-button",
+    "use-room-button",
     "clear-cards-button",
   ].every((id) => $(id).hidden);
 }
 
 async function submitAction(action) {
+  if (submitting || advancing || !currentState) return;
+  const focusBoardAfterRoll = action.action === "roll" && document.activeElement === $("board-roll-button");
+  const version = ++requestVersion;
+  submitting = true;
+  $("board-panel").setAttribute("aria-busy", "true");
   lastError = "";
   try {
     const state = await requestJson(`/api/action?${selectedFilters()}`, {
       method: "POST",
       body: action,
     });
+    if (version !== requestVersion || !currentState) return;
     currentState = state;
-    if (action.action !== "suggest") clearSelectedCards();
+    if (["reveal", "end_turn", "pass", "accuse"].includes(action.action)) clearSelectedCards();
     renderState(state);
+    if (focusBoardAfterRoll && state.legal.moves.length
+      && (document.activeElement === $("board-roll-button") || document.activeElement === document.body)) {
+      $("board-map-shell").focus({ preventScroll: true });
+    }
   } catch (error) {
-    showError(error.message);
+    if (version === requestVersion) showError(error.message);
+  } finally {
+    submitting = false;
+    $("board-panel").removeAttribute("aria-busy");
   }
 }
 
 async function advanceBot(step) {
-  if (advancing) return;
+  if (advancing || submitting || !currentState) return;
   advancing = true;
+  const version = ++requestVersion;
   try {
     const state = await requestJson(`/api/advance?${selectedFilters()}`, {
       method: "POST",
       body: { step },
     });
+    if (version !== requestVersion || !currentState) return;
     currentState = state;
     renderState(state);
   } catch (error) {
-    if (!step) showError(error.message);
-    else showError(error.message);
-    await refreshState();
+    if (version === requestVersion) {
+      showError(error.message);
+      await refreshState();
+    }
   } finally {
     advancing = false;
   }
 }
 
 async function togglePause() {
+  if (!currentState) return;
+  const version = ++requestVersion;
   try {
     const state = await requestJson(`/api/pause?${selectedFilters()}`, { method: "POST", body: {} });
+    if (version !== requestVersion || !currentState) return;
     currentState = state;
     renderState(state);
   } catch (error) {
@@ -700,21 +1122,94 @@ async function togglePause() {
 }
 
 function newGame() {
+  requestVersion++;
   clearInterval(refreshTimer);
   currentState = null;
   clearSelectedCards();
   cardView = "hand";
   lastActivityKey = null;
+  lastRenderedState = null;
+  lastBoardState = null;
+  lastBoardLayout = null;
+  lastSuggestionRoom = null;
+  hadReveal = false;
+  hadBoardMovement = false;
+  hadBoardResponse = false;
   lastError = "";
-  document.body.classList.remove("game-active");
+  document.body.classList.remove("game-active", "board-game");
+  $("board-map-shell").classList.remove("zoomed");
+  $("board-zoom-button").setAttribute("aria-pressed", "false");
+  showError("");
   $("game-screen").hidden = true;
   $("setup-screen").hidden = false;
+}
+
+function configureBoardWorkspace(isBoard) {
+  $("board-workspace-tabs").hidden = !isBoard;
+  (isBoard ? $("notebook-heading-tools") : $("card-view-tabs")).append($("viewer-field"));
+  if (isBoard) {
+    for (const name of ["notebook", "cards", "insights", "locations"]) {
+      const panel = $(name === "locations" ? "board-locations-panel" : `${name}-panel`);
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", `board-tab-${name}`);
+    }
+    switchBoardTab(narrowBoardLayout.matches ? "board" : "notebook");
+  } else {
+    for (const name of ["notebook", "cards", "insights", "locations"]) {
+      const panel = $(name === "locations" ? "board-locations-panel" : `${name}-panel`);
+      panel.removeAttribute("role");
+      panel.removeAttribute("aria-labelledby");
+      panel.hidden = name === "locations";
+    }
+    for (const name of ["board", "notebook"]) {
+      const panel = $(`${name}-panel`);
+      panel.removeAttribute("role");
+      panel.setAttribute("aria-labelledby", `${name}-title`);
+    }
+    delete document.body.dataset.boardTab;
+  }
+}
+
+function switchBoardTab(name) {
+  if (!narrowBoardLayout.matches && name === "board") name = "notebook";
+  document.body.dataset.boardTab = name;
+  for (const item of boardTabs) {
+    const tab = $(`board-tab-${item}`);
+    tab.setAttribute("aria-selected", String(item === name));
+    tab.tabIndex = item === name ? 0 : -1;
+  }
+  for (const item of ["notebook", "cards", "insights", "locations"]) {
+    const panel = $(item === "locations" ? "board-locations-panel" : `${item}-panel`);
+    panel.hidden = item !== name;
+  }
+  const boardPanel = $("board-panel");
+  if (narrowBoardLayout.matches) {
+    boardPanel.setAttribute("role", "tabpanel");
+    boardPanel.setAttribute("aria-labelledby", "board-tab-board");
+  } else {
+    boardPanel.removeAttribute("role");
+    boardPanel.setAttribute("aria-labelledby", "board-title");
+  }
 }
 
 function updateMode() {
   const spectating = $("mode").value === "spectate";
   $("seat-field").hidden = spectating;
   $("spectator-warning").hidden = !spectating;
+}
+
+function updateGameType() {
+  const board = document.querySelector('input[name="game-type"]:checked').value === "board";
+  $("players").min = board ? "3" : "2";
+  if (board) $("players").max = "6";
+  else $("players").removeAttribute("max");
+  const count = Number($("players").value);
+  if (Number.isInteger(count) && count >= 2) $("seat").max = String(count - 1);
+  else $("seat").removeAttribute("max");
+  $("players-hint").textContent = board ? "(3–6 players)" : "(at least 2)";
+  $("game-style-hint").textContent = board
+    ? "Board games use 3–6 players and an original layout inspired by Clue."
+    : "Cards only supports two or more players.";
 }
 
 function switchInsightsTab(name) {
@@ -743,6 +1238,10 @@ initializeChoices();
 setTheme(document.documentElement.dataset.theme);
 $("setup-form").addEventListener("submit", startGame);
 $("mode").addEventListener("change", updateMode);
+for (const choice of document.querySelectorAll('input[name="game-type"]')) {
+  choice.addEventListener("change", updateGameType);
+}
+$("players").addEventListener("input", updateGameType);
 $("theme-toggle").addEventListener("click", () => {
   setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
 });
@@ -757,8 +1256,80 @@ $("card-accuse-button").addEventListener("click", () => {
 $("clear-cards-button").addEventListener("click", () => {
   clearSelectedCards();
   if (currentState) {
+    if (currentState.legal.suggest_room !== null) {
+      selectedCardIds.room = currentState.legal.suggest_room;
+    }
     renderHand(currentState);
     renderCardInteraction(currentState);
+  }
+});
+$("use-room-button").addEventListener("click", () => {
+  if (!currentState || currentState.legal.suggest_room === null) return;
+  selectedCardIds.room = currentState.legal.suggest_room;
+  renderHand(currentState);
+  renderCardInteraction(currentState);
+});
+$("board-roll-button").addEventListener("click", () => submitAction({ action: "roll" }));
+$("board-passage-button").addEventListener("click", () => submitAction({ action: "passage" }));
+$("board-end-button").addEventListener("click", () => submitAction({ action: "end_turn" }));
+$("board-zoom-button").addEventListener("click", () => {
+  const zoomed = $("board-map-shell").classList.toggle("zoomed");
+  $("board-zoom-button").setAttribute("aria-pressed", String(zoomed));
+});
+$("board-panel").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-board-move]");
+  if (target) submitAction({ action: "move", destination: JSON.parse(target.dataset.boardMove) });
+});
+$("board-map").addEventListener("keydown", (event) => {
+  const target = event.target.closest("[data-board-move]");
+  if (target && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    submitAction({ action: "move", destination: JSON.parse(target.dataset.boardMove) });
+  }
+});
+$("board-map-shell").addEventListener("keydown", (event) => {
+  const directions = {
+    ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+  };
+  const direction = directions[event.key];
+  if (!direction || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+    || !currentState?.board || !currentState.legal.moves.length) return;
+  event.preventDefault();
+  if (event.repeat || submitting || advancing) return;
+  const moves = directionalMoves(currentState, ...direction);
+  if (moves.length === 1) {
+    submitAction({ action: "move", destination: moves[0] });
+  } else if (moves.length > 1) {
+    const targets = [...$("board-map").querySelectorAll("[data-board-move]")]
+      .filter((target) => moves.some((move) => target.dataset.boardMove === JSON.stringify(move)));
+    const next = (targets.indexOf(document.activeElement) + 1) % targets.length;
+    targets[next]?.focus({ preventScroll: true });
+    setText("board-instruction", "Multiple exits: use the arrow key to choose, then press Enter.");
+  }
+});
+$("board-workspace-tabs").addEventListener("click", (event) => {
+  const tab = event.target.closest("[role='tab']");
+  if (tab) switchBoardTab(tab.id.replace("board-tab-", ""));
+});
+$("board-workspace-tabs").addEventListener("keydown", (event) => {
+  const tab = event.target.closest("[role='tab']");
+  if (!tab) return;
+  const available = boardTabs.filter((name) => narrowBoardLayout.matches || name !== "board");
+  const index = available.indexOf(tab.id.replace("board-tab-", ""));
+  let next = null;
+  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    next = available[(index + offset + available.length) % available.length];
+  } else if (event.key === "Home") next = available[0];
+  else if (event.key === "End") next = available[available.length - 1];
+  if (next === null) return;
+  event.preventDefault();
+  switchBoardTab(next);
+  $(`board-tab-${next}`).focus();
+});
+narrowBoardLayout.addEventListener("change", () => {
+  if (document.body.classList.contains("board-game")) {
+    switchBoardTab(document.body.dataset.boardTab);
   }
 });
 $("end-button").addEventListener("click", () => submitAction({ action: "end_turn" }));
@@ -794,3 +1365,4 @@ $("insights-tabs").addEventListener("keydown", (event) => {
   $(`${next}-tab`).focus();
 });
 updateMode();
+updateGameType();

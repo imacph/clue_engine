@@ -13,10 +13,9 @@ in seat order as evenly as possible. The random generator is supplied by the
 caller for reproducibility.
 
 The [board rules contract](docs/board-rules.md) describes the board rules and
-documented interpretations. Board games are currently available through the
-Python API only; the web, desktop, console, and batch interfaces remain
-card-only. Board controls are planned for the web interface, not the other
-interfaces. The [card-only baseline](docs/card-only-baseline.md) records
+documented interpretations. Board games are available through the local web
+interface and the Python API; the desktop, console, and batch interfaces remain
+card-only. The [card-only baseline](docs/card-only-baseline.md) records
 reproducible pre-board measurements.
 
 ```python
@@ -190,6 +189,31 @@ omniscient debug mode is enabled. The
 existing Tkinter app remains available with
 `python -m clue_engine.gui`; its batch statistics and trace tools are not yet
 part of the browser interface.
+
+Choose **Board game** at setup to play or spectate a 3–6 player board game;
+**Cards only** remains the default. On larger screens the board and notebook
+share the game view; use the workspace tabs to switch the notebook area to
+cards and actions, history and clauses, or locations. On smaller screens the
+board is also a tab. The cards tab opens when a room suggestion or response
+needs your attention. Card choices appear above the combination and action
+controls; longer lists scroll within the card area. On your turn, roll the
+dice or take an available passage, then select highlighted board squares
+with the mouse, touch, or keyboard. When the board viewport or a highlighted
+square is focused, arrow keys move in that direction, including through doors.
+If multiple exits share a direction, use that arrow to choose an exit and press
+Enter. Entering a room ends movement. The board can be
+zoomed and scrolled; the locations tab
+describes suspect and weapon positions and identifies your piece, bots, and
+unassigned suspects. On the board, player pieces show their seat numbers;
+unassigned suspects show initials and a dashed outline. On small screens or when zoomed,
+individual panels may scroll without scrolling the game page.
+
+After entering a room, choose a suspect and weapon in the cards area; the
+current room is selected for your suggestion. Accusations may name a different
+room. If you select another room, **Use current room** restores the room for a
+suggestion. When summoned to a room, you can suggest there or move normally.
+Follow the card-area prompt to reveal a card or pass when responding. Board
+geometry is original rather than a reproduction of the printed C00045 board.
 
 Spectator mode exposes each player's private hand and notebook. Omniscient debug
 mode reveals all hands, the solution, and private events. Do not use either

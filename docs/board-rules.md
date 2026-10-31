@@ -1,7 +1,6 @@
 # Board-mode rules contract
 
-This is the contract for the programmatic board engine. Board play is not yet
-exposed in any interface; web controls are planned. The reference is the
+This is the contract for the board engine and the local web interface. The reference is the
 [Hasbro Clue C00045 instructions (2002)](https://www.hasbro.com/common/instruct/Clue%282002%29.pdf).
 The game rules are summarized here; the board artwork and instructions are not
 reproduced. Card-only mode keeps its current rules and remains the default.
@@ -89,8 +88,7 @@ distances and gameplay balance therefore need separate evaluation.
 Coordinates start at the upper left: `x` increases to the right and `y`
 increases downward. Room squares, hallway squares, and walls partition the
 grid. A door connects one room square to an adjacent hallway square; it is not
-a separate movement square. The same layout data can later drive both movement
-and rendering.
+a separate movement square. The same layout data drives both movement and web rendering.
 
 ```python
 from clue_engine.board_setup import BoardSetup
@@ -112,12 +110,13 @@ observations, enforces the rules above, and records rolls and relocation.
 Full private records can be written and verified with
 `clue_engine.board_record`; they contain the hands and solution and must not
 be shared with players. Existing card-only actions and trace formats remain
-unchanged. Board controls remain future web work.
+unchanged. The web interface supports board play and spectating; the desktop,
+console, and batch interfaces remain card-only.
 
 ## Acceptance checklist
 
-The engine and bot obligations below are implemented and covered by tests.
-The web-interface obligation remains for a later phase.
+The engine, bot, and web-interface obligations below are implemented and
+covered by tests.
 
 - [x] **BR-01–05:** Reject invalid player counts at every board setup entry
   point; verify assignments, starting tokens, weapon placement, deck partition,
@@ -136,5 +135,5 @@ The web-interface obligation remains for a later phase.
 - [x] Replay board games with recorded rolls and positions; ensure public
   snapshots never expose private cards or future random outcomes.
 - [x] Verify all bot profiles through complete board games.
-- [ ] Add and verify board play in the web interface without adding board-play
+- [x] Add and verify board play in the web interface without adding board-play
   controls to console or desktop interfaces.
