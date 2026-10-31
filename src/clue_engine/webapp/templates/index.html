@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Clue Engine</title>
+  <script>
+    const savedTheme = localStorage.getItem("clue-engine-theme");
+    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.dataset.theme =
+      savedTheme === "light" || savedTheme === "dark"
+        ? savedTheme
+        : systemPrefersDark ? "dark" : "light";
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    window.clueOptions = {{ {"cards": cards, "policies": policies}|tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">A deduction game simulator</p>
+      <h1>Clue Engine</h1>
+    </div>
+    <div class="header-tools">
+      <button id="theme-toggle" class="theme-toggle" type="button">
+        <span id="theme-icon" aria-hidden="true">☾</span>
+        <span id="theme-label">Dark mode</span>
+      </button>
+      <span class="local-badge">Local game</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="setup-screen" class="setup-card">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Get started</p>
+          <h2>New game</h2>
+        </div>
+      </div>
+      <form id="setup-form">
+        <div class="form-grid">
+          <label>Mode
+            <select id="mode">
+              <option value="play">Play against bots</option>
+              <option value="spectate">Spectate bots</option>
+            </select>
+          </label>
+          <label>Players <span class="hint">(at least 2)</span>
+            <input id="players" type="number" min="2" value="4" required>
+          </label>
+          <label id="seat-field">Your seat <span class="hint">(zero-based)</span>
+            <input id="seat" type="number" min="0" value="0">
+          </label>
+          <label>Random seed
+            <input id="seed" type="number" value="0">
+          </label>
+          <label>Bot policy
+            <select id="policy"></select>
+          </label>
+          <label>Per-seat policies <span class="hint">(optional)</span>
+            <input id="policies" type="text" placeholder="random,deductive,probing,strategic">
+          </label>
+          <label>Bot progression
+            <select id="progress">
+              <option value="auto">Automatic</option>
+              <option value="step">Step-by-step (paused)</option>
+            </select>
+          </label>
+          <label>Action limit
+            <input id="max-steps" type="number" min="0" value="10000">
+          </label>
+        </div>
+        <label class="check-row">
+          <input id="debug" type="checkbox">
+          <span><strong>Omniscient debug</strong><small>Reveals all hands, the solution, and private events.</small></span>
+        </label>
+        <p id="spectator-warning" class="notice" hidden>
+          Spectator mode lets you inspect each player's private hand and notebook. It is not suitable for preserving hidden information.
+        </p>
+        <div class="form-actions">
+          <button class="button button-primary" type="submit">Start game</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="game-screen" hidden>
+      <div class="game-topbar">
+        <div>
+          <p class="eyebrow">Current game</p>
+          <h2 id="game-status" aria-live="polite">Starting game…</h2>
+          <p id="game-meta" class="muted"></p>
+        </div>
+        <div class="toolbar">
+          <button id="pause-button" class="button button-secondary" type="button">Pause</button>
+          <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
+          <button id="new-game-button" class="button button-quiet" type="button">New game</button>
+        </div>
+      </div>
+      <p id="error-message" class="error-message" role="alert" hidden></p>
+      <div id="debug-panel" class="debug-panel" hidden></div>
+
+      <div class="game-dashboard">
+        <section class="panel hand-panel">
+          <div id="card-view-tabs" class="card-view-tabs" role="group" aria-label="Card view">
+            <button class="card-view-button" type="button" data-card-view="hand" aria-pressed="true">Hand</button>
+            <button class="card-view-button" type="button" data-card-view="suspect" aria-pressed="false">Suspects</button>
+            <button class="card-view-button" type="button" data-card-view="weapon" aria-pressed="false">Weapons</button>
+            <button class="card-view-button" type="button" data-card-view="room" aria-pressed="false">Rooms</button>
+            <button class="card-view-button" type="button" data-card-view="all" aria-pressed="false">All cards</button>
+            <label id="viewer-field" class="compact-label" hidden>
+              Notebook for
+              <select id="viewer-select"></select>
+            </label>
+          </div>
+          <div class="card-workspace">
+            <div id="hand-cards" class="hand-cards" aria-label="Cards in hand"></div>
+            <aside class="card-interaction" aria-live="polite">
+              <div>
+                <h4 id="card-interaction-title">Your combination</h4>
+                <p id="card-interaction-hint" class="hint"></p>
+                <div id="activity-meta" class="activity-meta" hidden>
+                  <span id="activity-kind" class="activity-kind"></span>
+                  <span id="activity-player"></span>
+                </div>
+              </div>
+              <div id="focus-cards" class="focus-cards"></div>
+              <div id="selected-cards" class="selected-cards"></div>
+              <div id="card-action-buttons" class="card-action-buttons">
+                <button id="card-suggest-button" class="button button-primary" type="button" disabled>Suggest</button>
+                <button id="card-accuse-button" class="button button-danger" type="button" disabled>Accuse</button>
+                <button id="end-button" class="button button-secondary" type="button" hidden>End turn</button>
+                <button id="pass-button" class="button button-secondary" type="button" hidden>Pass</button>
+                <button id="clear-cards-button" class="button button-quiet" type="button" hidden>Clear</button>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="panel notebook-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Deductions</p>
+              <h3>Detective notebook</h3>
+            </div>
+            <span class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown</span>
+          </div>
+          <div id="notebook" class="notebook-grid" aria-label="Knowledge matrix"></div>
+        </section>
+
+        <div class="insights-column">
+          <div id="insights-tabs" class="insights-tabs" role="tablist" aria-label="Game details">
+            <button id="history-tab" class="insights-tab" type="button" role="tab"
+                    aria-selected="true" aria-controls="history-panel" tabindex="0">History</button>
+            <button id="clauses-tab" class="insights-tab" type="button" role="tab"
+                    aria-selected="false" aria-controls="clauses-panel" tabindex="-1">Clauses</button>
+          </div>
+
+          <aside id="history-panel" class="panel history-panel" role="tabpanel"
+                 aria-labelledby="history-tab">
+            <div class="filter-row">
+              <label>Actor<select id="history-actor"></select></label>
+              <label>Type<select id="history-kind"></select></label>
+            </div>
+            <ol id="history-list" class="history-list"></ol>
+          </aside>
+
+          <section id="clauses-panel" class="panel clauses-panel" role="tabpanel"
+                   aria-labelledby="clauses-tab" hidden>
+            <div class="clause-heading">
+              <div class="filter-row">
+                <label>Actor<select id="clause-actor"></select></label>
+                <label>Type
+                  <select id="clause-kind">
+                    <option value="all">All types</option>
+                    <option value="refute">Refutation</option>
+                    <option value="accuse">Incorrect accusation</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <pre id="clauses" class="clauses"></pre>
+          </section>
+        </div>
+
+      </div>
+    </section>
+  </main>
+  <footer>Clue Engine runs on this computer. Do not enable debug mode during a fair game.</footer>
+</body>
+</html>

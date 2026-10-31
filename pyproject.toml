@@ -7,7 +7,9 @@ name = "clue-engine"
 version = "0.1.0"
 description = "A Clue game simulator for reinforcement learning"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "Flask>=3.0",
+]
 
 [project.optional-dependencies]
 dev = [

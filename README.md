@@ -103,6 +103,38 @@ paused, and **Resume** continues. Human actions are always submitted manually.
 **New game** returns to setup. The optional omniscient debug setting requires
 confirmation and exposes all hands, the solution, and private events.
 
+## Local browser interface
+
+Install the project, then start the local browser app with:
+
+```text
+python -m clue_engine.web
+```
+
+The app listens only on this computer at `http://127.0.0.1:8765` and opens
+your browser automatically. Use `--port` to choose another local port or
+`--no-browser` to keep it from opening a browser window. The interface supports
+play and spectator modes, pause/step controls, custom card faces, player
+notebooks, numbered history with the newest event at the top, and deduction
+clauses. The game screen uses a compact dashboard with turn controls inline
+alongside the card-based actions. History and deduction clauses share a tabbed
+panel beside the notebook and cards. The
+knowledge matrix groups suspects, weapons, and rooms with matching icons and
+colors. A theme toggle follows the system preference by default and remembers
+your selection. The card area switches between your hand, individual card
+categories, and the full deck. Click cards to build suggestions or accusations,
+or click a matching held card to reveal it; the adjacent card panel identifies
+the latest suggestion, accusation, refutation, or visible reveal and its player.
+Revealed card faces remain limited to the players who may see them unless
+omniscient debug mode is enabled. The
+existing Tkinter app remains available with
+`python -m clue_engine.gui`; its batch statistics and trace tools are not yet
+part of the browser interface.
+
+Spectator mode exposes each player's private hand and notebook. Omniscient debug
+mode reveals all hands, the solution, and private events. Do not use either
+mode if you need to preserve hidden information.
+
 The Player 0 turn counter starts at zero and increases when Player 0 completes
 their own turn, including by making an accusation. Refuting another player's
 suggestion does not increase it. Once Player 0 is eliminated, the counter
