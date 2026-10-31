@@ -1,5 +1,14 @@
 # Changelog
 
+## App 0.3.1 / Desktop 0.3.0 / API 0.4.0 - Unreleased
+
+### Added
+
+- Added notebook and history tabs beneath the board game's card actions, so
+  players can consult their notes and game details without leaving the cards.
+- Preserved notebook edits, history filters, and spectator selection across
+  workspaces, with keyboard navigation and scrolling on smaller screens.
+
 ## App 0.3.0 / Desktop 0.3.0 / API 0.4.0 - Unreleased
 
 ### Added

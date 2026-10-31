@@ -11,7 +11,7 @@ or when every player has made an incorrect accusation.
 ## Versions
 
 The game API and Python distribution are **0.4.0**, the shared browser/desktop
-frontend is **0.3.0**, and the Windows desktop wrapper is **0.3.0**. These are
+frontend is **0.3.1**, and the Windows desktop wrapper is **0.3.0**. These are
 pre-1.0 versions and do not yet promise a stable public API.
 
 The source of truth is `src/clue_engine/_version.py`. The Python package exposes
@@ -280,10 +280,13 @@ enabled techniques; it is not a predicted win rate. See the
 Choose **Board game** at setup to play or spectate a 3–6 player board game;
 **Cards only** remains the default. On larger screens the board and notebook
 share the game view; use the workspace tabs to switch the notebook area to
-cards and actions, history and clauses, or locations. On smaller screens the
-board is also a tab. The cards tab opens when a room suggestion or response
-needs your attention. Card choices appear above the combination and action
-controls; longer lists scroll within the card area. On your turn, roll the
+cards and actions, history and clauses, or locations. In cards and actions,
+use the Notebook and History tabs below the action controls to consult your
+notes or the game history without leaving your cards. Clauses remain available
+from the History view. On smaller screens the board is also a tab, and the
+cards workspace scrolls as needed. The cards tab opens when a room suggestion
+or response needs your attention. Card choices appear above the combination
+and action controls; longer lists scroll within the card area. On your turn, roll the
 dice or take an available passage, then select highlighted board squares
 with the mouse, touch, or keyboard. When the board viewport or a highlighted
 square is focused, arrow keys move in that direction, including through doors.

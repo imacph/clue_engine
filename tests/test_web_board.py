@@ -52,6 +52,20 @@ def test_setup_page_and_public_board_state(client):
         b"board-locations-panel",
     ):
         assert b'aria-controls="' + section + b'"' in page
+    details = page.index(b'id="card-details" class="card-details"')
+    assert page.index(b'id="card-action-buttons"') < details < page.index(b'id="notebook-panel"')
+    assert re.search(
+        rb'id="card-details-tab-notebook"[^>]+aria-controls="notebook-panel"'
+        rb'\s+aria-selected="true"',
+        page,
+    )
+    assert re.search(
+        rb'id="card-details-tab-history"[^>]+aria-controls="insights-panel"'
+        rb'\s+aria-selected="false" tabindex="-1"',
+        page,
+    )
+    assert page.count(b'id="notebook-panel"') == 1
+    assert page.count(b'id="insights-panel"') == 1
     assert b'id="board-map"' in page
     assert b"Board viewport; use arrow keys to move" in page
     assert b'id="board-moves"' not in page

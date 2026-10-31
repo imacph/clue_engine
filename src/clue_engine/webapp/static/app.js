@@ -25,6 +25,7 @@ let requestVersion = 0;
 let lastError = "";
 let desktopThemeWrite = Promise.resolve();
 let cardView = "hand";
+let cardDetailsTab = "notebook";
 let lastActivityKey = null;
 let lastRenderedState = null;
 let lastNotebookFingerprint = null;
@@ -112,6 +113,7 @@ async function startGame(event) {
 
 function activateGame(state) {
   lastError = "";
+  cardDetailsTab = "notebook";
   document.body.classList.add("game-active");
   document.body.classList.toggle("board-game", Boolean(state.board));
   document.body.classList.toggle("manual-notebook-active", state.notebook_mode === "manual");
@@ -1232,7 +1234,8 @@ function newGame() {
 
 function configureBoardWorkspace(isBoard) {
   $("board-workspace-tabs").hidden = !isBoard;
-  (isBoard ? $("notebook-heading-tools") : $("card-view-tabs")).append($("viewer-field"));
+  moveBoardDetails(false);
+  moveViewerField(isBoard ? "notebook-heading-tools" : "card-view-tabs");
   if (isBoard) {
     for (const name of ["notebook", "cards", "insights", "locations"]) {
       const panel = $(name === "locations" ? "board-locations-panel" : `${name}-panel`);
@@ -1256,9 +1259,45 @@ function configureBoardWorkspace(isBoard) {
   }
 }
 
+function moveViewerField(destinationId) {
+  const viewer = $("viewer-field");
+  const destination = $(destinationId);
+  if (viewer.parentElement !== destination) destination.append(viewer);
+}
+
+function moveBoardDetails(inCards) {
+  const notebook = $("notebook-panel");
+  const insights = $("insights-panel");
+  const details = $("card-details");
+  if (inCards) {
+    if (notebook.parentElement !== details) details.append(notebook, insights);
+  } else {
+    const locations = $("board-locations-panel");
+    const dashboard = locations.parentElement;
+    if (notebook.parentElement !== dashboard) dashboard.insertBefore(notebook, locations);
+    if (insights.parentElement !== dashboard) dashboard.insertBefore(insights, locations);
+  }
+  details.hidden = !inCards;
+  notebook.setAttribute("aria-labelledby", inCards ? "card-details-tab-notebook" : "board-tab-notebook");
+  insights.setAttribute("aria-labelledby", inCards ? "card-details-tab-history" : "board-tab-insights");
+}
+
+function switchCardDetailsTab(name) {
+  cardDetailsTab = name;
+  for (const item of ["notebook", "history"]) {
+    const selected = item === name;
+    const tab = $(`card-details-tab-${item}`);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    $(item === "history" ? "insights-panel" : "notebook-panel").hidden = !selected;
+  }
+}
+
 function switchBoardTab(name) {
   if (!narrowBoardLayout.matches && name === "board") name = "notebook";
   document.body.dataset.boardTab = name;
+  moveBoardDetails(name === "cards");
+  moveViewerField(name === "cards" ? "card-view-tabs" : "notebook-heading-tools");
   for (const item of boardTabs) {
     const tab = $(`board-tab-${item}`);
     tab.setAttribute("aria-selected", String(item === name));
@@ -1268,6 +1307,7 @@ function switchBoardTab(name) {
     const panel = $(item === "locations" ? "board-locations-panel" : `${item}-panel`);
     panel.hidden = item !== name;
   }
+  if (name === "cards") switchCardDetailsTab(cardDetailsTab);
   const boardPanel = $("board-panel");
   if (narrowBoardLayout.matches) {
     boardPanel.setAttribute("role", "tabpanel");
@@ -1470,6 +1510,26 @@ $("card-view-tabs").addEventListener("click", (event) => {
   if (!button || !currentState) return;
   cardView = button.dataset.cardView;
   renderHand(currentState);
+});
+$("card-details-tabs").addEventListener("click", (event) => {
+  const tab = event.target.closest("[role='tab']");
+  if (!tab) return;
+  const name = tab.id.replace("card-details-tab-", "");
+  if (name === "history") switchInsightsTab("history");
+  switchCardDetailsTab(name);
+});
+$("card-details-tabs").addEventListener("keydown", (event) => {
+  const tab = event.target.closest("[role='tab']");
+  if (!tab) return;
+  const next = event.key === "ArrowRight" || event.key === "ArrowLeft"
+    ? (tab.id === "card-details-tab-notebook" ? "history" : "notebook")
+    : event.key === "Home" ? "notebook"
+      : event.key === "End" ? "history" : null;
+  if (!next) return;
+  event.preventDefault();
+  if (next === "history") switchInsightsTab("history");
+  switchCardDetailsTab(next);
+  $(`card-details-tab-${next}`).focus();
 });
 $("pause-button").addEventListener("click", togglePause);
 $("next-button").addEventListener("click", () => advanceBot(true));
