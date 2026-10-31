@@ -1,7 +1,8 @@
 # Board-mode rules contract
 
 This is the contract for the **future** board mode, not a description of a
-currently playable feature. The reference is the
+currently playable feature. A board topology and initial token state are
+available independently of the engine. The reference is the
 [Hasbro Clue C00045 instructions (2002)](https://www.hasbro.com/common/instruct/Clue%282002%29.pdf).
 The game rules are summarized here; the board artwork and instructions are not
 reproduced. Card-only mode keeps its current rules and remains the default.
@@ -76,6 +77,38 @@ The reference edition uses different labels for some equivalent cards
 (`Mr. Green`/`Reverend Green`, `Knife`/`Dagger`, and `Pistol`/`Revolver`).
 Any edition-specific display aliases must not change card IDs or old traces.
 No optional rule variants are enabled by this phase.
+
+## Implemented board model
+
+`clue_engine.board.DEFAULT_BOARD` is an original 25-by-27 layout identified as
+`original-25x27-v1`. It has all nine card rooms, connected hallway squares,
+20 door openings, a blocked central area, six suspect starts, and the two
+opposite-corner passage pairs. Its room shapes, corridors, door positions, and
+starting squares are **not a reproduction of the C00045 board**; travel
+distances and gameplay balance therefore need separate evaluation.
+
+Coordinates start at the upper left: `x` increases to the right and `y`
+increases downward. Room squares, hallway squares, and walls partition the
+grid. A door connects one room square to an adjacent hallway square; it is not
+a separate movement square. The same layout data can later drive both movement
+and rendering.
+
+```python
+from clue_engine.board_setup import BoardSetup
+from clue_engine.board_state import create_board
+
+board = create_board(BoardSetup(4))
+print(board.layout.layout_id, board.seat_suspects)
+print(board.occupied_hallways(), board.blocked_doors())
+```
+
+Default seat assignments include Miss Scarlet and `first_player` identifies
+her seat. All six suspect tokens remain present, including unassigned tokens,
+and occupy distinct hallway starts. The six weapons initially occupy six
+different rooms; callers can supply different room and seat assignments.
+Positions and layout are immutable, and room occupancy may be shared.
+Creating this state does not create an `Engine`, add movement actions, or
+enable board mode in any interface.
 
 ## Acceptance checklist for later phases
 

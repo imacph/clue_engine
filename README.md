@@ -2,7 +2,8 @@
 
 A card-deduction simulator with player-specific observations and configurable bot policies.
 It models suggestions, mandatory refutations, accusations, elimination, and turns;
-it does not model a board, movement, room restrictions, or character relocation.
+the playable game does not yet apply board movement, room restrictions, or
+character relocation.
 Players may suggest any combination once per turn and may end a turn without
 suggesting. Eliminated players still respond to suggestions. The game ends after
 a correct accusation or when every player has made an incorrect accusation.
@@ -12,7 +13,8 @@ in seat order as evenly as possible. The random generator is supplied by the
 caller for reproducibility.
 
 The future board mode is specified in the [board rules contract](docs/board-rules.md).
-It is not playable yet. The [card-only baseline](docs/card-only-baseline.md)
+An independent full-board model is available for future engine and web work,
+but board mode is not playable yet. The [card-only baseline](docs/card-only-baseline.md)
 records reproducible pre-board measurements.
 
 ```python
