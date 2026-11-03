@@ -11,7 +11,7 @@ or when every player has made an incorrect accusation.
 ## Versions
 
 The game API and Python distribution are **0.5.0**, the shared browser/desktop
-frontend is **0.4.0**, and the Windows desktop wrapper is **0.3.0**. These are
+frontend is **0.4.1**, and the Windows desktop wrapper is **0.3.1**. These are
 pre-1.0 versions and do not yet promise a stable public API.
 
 The source of truth is `src/clue_engine/_version.py`. The Python package exposes
@@ -143,9 +143,11 @@ including during play. Do not enable it for a fair game.
 ## Desktop interface
 
 The Windows desktop app uses the same interface as the browser, including both
-board and cards-only games. Download or build the portable `ClueEngine` folder
-and run `ClueEngine.exe`; the folder must stay together, but Python does not
-need to be installed. The app requires the
+board and cards-only games. Extract and run the portable `ClueEngine.exe`;
+it does not require Python or a separate folder of supporting files. It extracts
+its bundled files to a temporary directory on startup, which may take a little
+longer than a folder-based build. Windows may show a security warning for a
+downloaded executable. The app requires the
 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 It also requires .NET Framework 4.6.2 or newer. Install any missing runtime if
 the app reports it; once installed, the game runs locally without an internet
@@ -165,7 +167,7 @@ python -m pip install -e ".[desktop-build]"
 python -m PyInstaller ClueEngine.spec
 ```
 
-Distribute the whole `dist\ClueEngine` folder, or zip it for transfer. Build
+Distribute `dist\ClueEngine.exe`, or zip it for transfer. Build
 on the Windows architecture you intend to support. The desktop app uses an
 automatically assigned loopback port and stops its local server when the
 window closes. Its theme and explicitly saved setup profiles are stored in
@@ -468,3 +470,6 @@ python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check .
 ```
+
+Frontend JavaScript regression tests run with pytest when Node.js 18 or newer is
+available; if Node.js is not installed, they are skipped.

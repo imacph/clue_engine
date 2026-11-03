@@ -144,6 +144,27 @@ def test_missing_local_app_data_is_reported(monkeypatch):
         desktop.run_desktop()
 
 
+@pytest.mark.parametrize("reason", [
+    "Failed to resolve Python.Runtime.Loader.Initialize",
+    "Microsoft Edge WebView2 Runtime was not found.",
+])
+def test_startup_error_reports_the_actual_cause(monkeypatch, reason):
+    messages = []
+
+    def fail():
+        raise RuntimeError(reason)
+
+    monkeypatch.setattr(desktop, "run_desktop", fail)
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(desktop.ctypes, "windll", SimpleNamespace(
+        user32=SimpleNamespace(MessageBoxW=lambda _owner, message, *_args: messages.append(message)),
+    ), raising=False)
+    with pytest.raises(SystemExit) as exc:
+        desktop.main()
+    assert exc.value.code == 1
+    assert messages == [f"Could not start Clue Engine:\n\n{reason}"]
+
+
 @pytest.mark.parametrize(
     ("release", "runtime", "error"),
     [(533509, "156.0.0.0", None), (394801, "156.0.0.0", ".NET Framework"),

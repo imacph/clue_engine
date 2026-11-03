@@ -241,13 +241,6 @@ function renderState(state) {
   }
   hadBoardMovement = Boolean(hasBoardMovement);
   hadBoardResponse = Boolean(hasBoardResponse);
-  if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom) {
-    selectedCardIds.room = fixedRoom;
-    cardView = "suspect";
-  }
-  lastSuggestionRoom = fixedRoom;
-  if (hasReveal && !hadReveal) cardView = "hand";
-  hadReveal = hasReveal;
   const activityKey = state.activity
     ? `${state.activity.kind}:${state.activity.actor}:${state.activity.suggestion_actor ?? ""}`
       + `:${state.activity.card_id ?? ""}:${state.activity.recipient ?? ""}`
@@ -256,6 +249,13 @@ function renderState(state) {
     clearSelectedCards();
   }
   lastActivityKey = activityKey;
+  if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom) {
+    selectedCardIds.room = fixedRoom;
+    cardView = "suspect";
+  }
+  lastSuggestionRoom = fixedRoom;
+  if (hasReveal && !hadReveal) cardView = "hand";
+  hadReveal = hasReveal;
   setText("game-status", displayPlayerText(state.status));
   $("game-meta").textContent =
     `Actions: ${state.steps} · Player 1 turns: ${state.player0_turns}`
@@ -720,7 +720,9 @@ function renderCardInteraction(state) {
     renderMiniCards(focusCards, state.activity?.cards || []);
   } else if (humanTurn && (legal.suggest || legal.accuse)) {
     const activity = state.activity;
-    if (activity?.kind === "reveal") {
+    const revealIsActive = activity?.kind === "reveal"
+      && state.events.find((event) => event.kind === "show" || event.kind === "end_turn")?.kind === "show";
+    if (revealIsActive) {
       $("card-interaction-title").textContent = "Latest reveal";
       renderActivityMeta(activity);
       $("card-interaction-hint").textContent = `Shown to Player ${activity.recipient + 1}.`;
@@ -729,7 +731,7 @@ function renderCardInteraction(state) {
       $("card-interaction-title").textContent = legal.suggest
         ? "Build a suggestion"
         : "Build an accusation";
-      if (activity?.kind === "refute" || activity?.kind === "reveal") {
+      if (activity?.kind === "refute") {
         renderActivityMeta(activity);
       }
       $("card-interaction-hint").textContent = legal.suggest_room !== null
@@ -739,7 +741,7 @@ function renderCardInteraction(state) {
     for (const type of ["suspect", "weapon", "room"]) {
       const card = cardsById.get(selectedCardIds[type]);
       if (card) {
-        if (activity?.kind === "reveal") {
+        if (revealIsActive) {
           const chip = document.createElement("span");
           chip.className = `card-reference ${type}`;
           chip.textContent = card.name;
@@ -747,17 +749,16 @@ function renderCardInteraction(state) {
         } else {
           selectedCards.append(createCardFace(card, { mini: true }));
         }
-      } else if (activity?.kind !== "reveal") {
+      } else if (!revealIsActive) {
         const slot = document.createElement("div");
         slot.className = `selection-slot ${type}`;
         slot.textContent = type[0].toUpperCase() + type.slice(1);
         selectedCards.append(slot);
       }
     }
-    if (activity?.kind === "reveal") selectedCards.classList.add("reveal-selection");
+    if (revealIsActive) selectedCards.classList.add("reveal-selection");
     const hasCombination = Object.values(selectedCardIds).every((id) => id !== null);
     const matchesRoom = legal.suggest_room === null || selectedCardIds.room === legal.suggest_room;
-    const revealIsActive = activity?.kind === "reveal";
     $("card-suggest-button").hidden = !legal.suggest || (revealIsActive && !hasCombination);
     $("card-accuse-button").hidden = !legal.accuse || (revealIsActive && !hasCombination);
     $("card-suggest-button").disabled = !hasCombination || !matchesRoom;

@@ -1,5 +1,22 @@
 # Changelog
 
+## Desktop 0.3.1 / App 0.4.1 / API 0.5.0 - Unreleased
+
+### Changed
+
+- Package the Windows portable app as a single executable that extracts its
+  bundled runtime on startup, instead of requiring a folder of DLLs.
+- Report the actual startup error without implying every failure is caused by
+  a missing WebView2 runtime.
+
+## App 0.4.1 / Desktop 0.3.0 / API 0.5.0 - Unreleased
+
+### Fixed
+
+- Show the suggestion builder when entering a room after an earlier turn's
+  reveal, while keeping current-turn reveals visible for review.
+- Preserve the required room selection when restoring a game in a room.
+
 ## App 0.4.0 / Desktop 0.3.0 / API 0.5.0 - Unreleased
 
 ### Added

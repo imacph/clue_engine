@@ -81,10 +81,7 @@ def main() -> None:
     try:
         run_desktop()
     except Exception as exc:
-        message = (
-            f"Could not start Clue Engine:\n\n{exc}\n\n"
-            "The Windows desktop app requires the Microsoft Edge WebView2 Runtime."
-        )
+        message = f"Could not start Clue Engine:\n\n{exc}"
         if sys.platform == "win32":
             ctypes.windll.user32.MessageBoxW(None, message, "Clue Engine", 0x10)
         else:

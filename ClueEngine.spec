@@ -21,14 +21,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    [],
-    exclude_binaries=True,
-    name="ClueEngine",
-    console=False,
-)
-coll = COLLECT(
-    exe,
     a.binaries,
     a.datas,
+    [],
     name="ClueEngine",
+    console=False,
 )
