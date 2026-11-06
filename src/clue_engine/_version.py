@@ -2,4 +2,4 @@
 
 __version__ = "0.5.0"
 FRONTEND_VERSION = "0.4.1"
-DESKTOP_VERSION = "0.3.1"
+DESKTOP_VERSION = "0.3.2"

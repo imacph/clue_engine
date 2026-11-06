@@ -1,0 +1,54 @@
+name: Windows portable release
+
+on:
+  push:
+    tags:
+      - 'desktop-*-app-*-api-*'
+
+permissions:
+  contents: write
+
+jobs:
+  portable:
+    runs-on: windows-2022
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.3'
+          architecture: x64
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+      - name: Install release dependencies
+        run: python -m pip install -r tools/release-requirements.txt
+      - name: Build and verify portable release
+        run: python -m tools.release --tag "$env:GITHUB_REF_NAME"
+      - name: Retain build outputs for recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'portable-${{ github.ref_name }}'
+          path: 'dist/releases/${{ github.ref_name }}/'
+          if-no-files-found: error
+          retention-days: 30
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $directory = Join-Path "dist\releases" $env:GITHUB_REF_NAME
+          $zip = Get-ChildItem -LiteralPath $directory -Filter "*.zip"
+          $checksum = Get-ChildItem -LiteralPath $directory -Filter "*.sha256"
+          if (@($zip).Count -ne 1 -or @($checksum).Count -ne 1) {
+            throw "Expected exactly one archive and one checksum."
+          }
+          gh release create $env:GITHUB_REF_NAME `
+            $zip.FullName $checksum.FullName (Join-Path $directory "release-manifest.json") `
+            --verify-tag --draft --title "Clue Engine $env:GITHUB_REF_NAME" `
+            --notes-file (Join-Path $directory "release-notes.md")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

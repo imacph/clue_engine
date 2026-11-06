@@ -135,6 +135,21 @@ def test_desktop_server_is_local_and_stops_after_window(tmp_path, monkeypatch, f
         assert connection.connect_ex(("127.0.0.1", port)) != 0
 
 
+def test_release_self_check_exercises_packaged_application():
+    result = desktop._release_self_check()
+    assert result["status"] == "ok"
+    versions = result["versions"]
+    assert isinstance(versions, dict)
+    assert set(versions) == {"api", "app", "desktop"}
+
+
+def test_release_self_check_requires_packaged_window_backend(monkeypatch):
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(create_window=None))
+    with pytest.raises(RuntimeError, match="window backend"):
+        desktop._release_self_check()
+
+
 def test_missing_local_app_data_is_reported(monkeypatch):
     monkeypatch.setattr(desktop.sys, "platform", "win32")
     monkeypatch.setattr(desktop, "_require_webview2", lambda: None)

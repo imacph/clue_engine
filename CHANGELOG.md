@@ -1,6 +1,15 @@
 # Changelog
 
-## Desktop 0.3.1 / App 0.4.1 / API 0.5.0 - Unreleased
+## Desktop 0.3.2 / App 0.4.1 / API 0.5.0 - 2026-11-06
+
+### Added
+
+- Add version-update and release tooling, with versioned Windows archives,
+  checksums, build manifests, and a GitHub draft release workflow.
+- Check the packaged desktop app's assets, versions, window backend, and
+  basic game actions before creating release artifacts.
+- Include board play, manual detective notebooks, setup profiles, and
+  turn-by-turn bot progression in this first tagged release.
 
 ### Changed
 
@@ -8,6 +17,11 @@
   bundled runtime on startup, instead of requiring a folder of DLLs.
 - Report the actual startup error without implying every failure is caused by
   a missing WebView2 runtime.
+
+### Fixed
+
+- Show the suggestion builder when entering a room after an earlier turn's
+  reveal, and preserve the required room selection when restoring a game.
 
 ## App 0.4.1 / Desktop 0.3.0 / API 0.5.0 - Unreleased
 

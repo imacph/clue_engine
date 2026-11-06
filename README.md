@@ -10,16 +10,20 @@ or when every player has made an incorrect accusation.
 
 ## Versions
 
+<!-- component-versions:start -->
 The game API and Python distribution are **0.5.0**, the shared browser/desktop
-frontend is **0.4.1**, and the Windows desktop wrapper is **0.3.1**. These are
-pre-1.0 versions and do not yet promise a stable public API.
+frontend is **0.4.1**, and the Windows desktop wrapper is **0.3.2**.
+<!-- component-versions:end -->
+
+These are pre-1.0 versions and do not yet promise a stable public API.
 
 The source of truth is `src/clue_engine/_version.py`. The Python package exposes
 its API version as `clue_engine.__version__`. The browser shows the App and Game
 API versions; the Windows app also shows the Desktop version. Update each
 version independently when its component changes. These numbers do not version
 individual HTTP routes or saved game formats. See the [changelog](CHANGELOG.md)
-for the changes in each version.
+for the changes in each version and the [release process](docs/releasing.md)
+for updating versions and producing a portable build.
 
 `deal` supports two or more players and distributes the 18 non-solution cards
 in seat order as evenly as possible. The random generator is supplied by the
