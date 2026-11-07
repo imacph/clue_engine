@@ -48,22 +48,18 @@ def test_setup_page_and_public_board_state(client):
     assert b'id="board-panel"' in page
     assert b'id="board-workspace-tabs"' in page
     for section in (
-        b"board-panel", b"cards-panel", b"notebook-panel", b"insights-panel",
-        b"board-locations-panel",
+        b"cards-panel", b"history-panel", b"clauses-panel", b"board-locations-panel", b"help-panel",
     ):
         assert b'aria-controls="' + section + b'"' in page
-    details = page.index(b'id="card-details" class="card-details"')
-    assert page.index(b'id="card-action-buttons"') < details < page.index(b'id="notebook-panel"')
-    assert re.search(
-        rb'id="card-details-tab-notebook"[^>]+aria-controls="notebook-panel"'
-        rb'\s+aria-selected="true"',
-        page,
-    )
-    assert re.search(
-        rb'id="card-details-tab-history"[^>]+aria-controls="insights-panel"'
-        rb'\s+aria-selected="false" tabindex="-1"',
-        page,
-    )
+    assert b'id="board-tab-notebook"' not in page
+    assert b'id="card-details-tabs"' not in page
+    assert b'id="notebook-workspace"' in page
+    assert b'id="clause-entry"' in page
+    assert b'id="notebook-instructions"' not in page
+    assert b'aria-label="Detective notebook"' in page
+    assert b'id="clause-form"' not in page
+    assert b'aria-orientation="vertical"' in page
+    assert b'id="action-history-list"' in page
     assert page.count(b'id="notebook-panel"') == 1
     assert page.count(b'id="insights-panel"') == 1
     assert b'id="board-map"' in page

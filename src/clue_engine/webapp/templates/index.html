@@ -21,16 +21,18 @@
   <script src="{{ url_for('static', filename='setup.js') }}" defer></script>
 </head>
 <body>
-  <header class="site-header">
+  <header id="site-header" class="site-header">
     <div>
       <p class="eyebrow">A deduction game simulator</p>
       <h1>Clue Engine</h1>
     </div>
-    <div class="header-tools">
+    <div id="header-tools" class="header-tools">
       <button id="theme-toggle" class="theme-toggle" type="button">
         <span id="theme-icon" aria-hidden="true">☾</span>
         <span id="theme-label">Dark mode</span>
       </button>
+      <button id="fullscreen-toggle" class="theme-toggle" type="button" disabled
+              aria-pressed="false" {% if not desktop_mode %}hidden{% endif %}>Full screen</button>
       <span class="local-badge">Local game</span>
     </div>
   </header>
@@ -44,7 +46,7 @@
           <h2>New game</h2>
         </div>
       </div>
-      <form id="setup-form">
+      <form id="setup-form" novalidate>
         <nav class="wizard-progress" aria-label="New game steps">
           <button type="button" data-setup-step="0">1. Game</button>
           <button type="button" data-setup-step="1">2. Seats</button>
@@ -52,6 +54,12 @@
           <button type="button" data-setup-step="3">4. Rules</button>
           <button type="button" data-setup-step="4">5. Review</button>
         </nav>
+        <div class="form-actions setup-navigation">
+          <button class="button button-quiet" id="setup-back" type="button">Back</button>
+          <button class="button button-secondary" id="setup-quick-play" type="submit">Quick play</button>
+          <button class="button button-primary" id="setup-next" type="button">Next</button>
+          <button class="button button-primary" id="setup-start" type="submit" hidden>Start game</button>
+        </div>
         <section class="setup-step" data-step="0" aria-labelledby="setup-game-title">
           <h3 id="setup-game-title" tabindex="-1">Choose your game</h3>
           <div class="setup-game-layout">
@@ -200,11 +208,6 @@
           <h3 id="setup-review-title" tabindex="-1">Review your game</h3>
           <div id="setup-review"></div>
         </section>
-        <div class="form-actions setup-navigation">
-          <button class="button button-quiet" id="setup-back" type="button" hidden>Back</button>
-          <button class="button button-primary" id="setup-next" type="button">Next</button>
-          <button class="button button-primary" id="setup-start" type="submit" hidden>Start game</button>
-        </div>
       </form>
     </section>
 
@@ -215,7 +218,7 @@
           <h2 id="game-status" aria-live="polite">Starting game…</h2>
           <p id="game-meta" class="muted"></p>
         </div>
-        <div class="toolbar">
+        <div id="game-toolbar" class="toolbar">
           <button id="pause-button" class="button button-secondary" type="button">Pause</button>
           <button id="next-turn-button" class="button button-primary" type="button" hidden>Next turn</button>
           <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
@@ -225,20 +228,21 @@
       <div id="debug-panel" class="debug-panel" hidden></div>
 
       <div class="game-dashboard">
-        <div id="board-workspace-tabs" class="board-workspace-tabs" role="tablist"
+        <div id="board-workspace-tabs" class="board-workspace-tabs" role="tablist" aria-orientation="vertical"
              aria-label="Board game workspace" hidden>
-          <button id="board-tab-board" class="board-workspace-tab board-mobile-tab" type="button" role="tab"
-                  aria-controls="board-panel" aria-selected="false" tabindex="-1">Board</button>
-          <button id="board-tab-notebook" class="board-workspace-tab" type="button" role="tab"
-                  aria-controls="notebook-panel" aria-selected="false" tabindex="-1">Notebook</button>
           <button id="board-tab-cards" class="board-workspace-tab" type="button" role="tab"
                   aria-controls="cards-panel" aria-selected="true">Cards &amp; actions</button>
-          <button id="board-tab-insights" class="board-workspace-tab" type="button" role="tab"
-                  aria-controls="insights-panel" aria-selected="false" tabindex="-1">History &amp; clauses</button>
+          <button id="board-tab-history" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="history-panel" aria-selected="false" tabindex="-1">History</button>
+          <button id="board-tab-clauses" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="clauses-panel" aria-selected="false" tabindex="-1">Clauses</button>
           <button id="board-tab-locations" class="board-workspace-tab" type="button" role="tab"
                   aria-controls="board-locations-panel" aria-selected="false" tabindex="-1">Locations</button>
+          <button id="board-tab-help" class="board-workspace-tab" type="button" role="tab"
+                  aria-controls="help-panel" aria-selected="false" tabindex="-1">Help</button>
         </div>
         <section id="board-panel" class="panel board-panel" aria-labelledby="board-title" hidden>
+          <div class="board-toolbar">
           <div class="board-heading">
             <div>
               <p class="eyebrow">Explore the mansion</p>
@@ -250,8 +254,11 @@
             </div>
           </div>
           <div class="board-controls">
-            <div id="board-dice" class="board-dice" aria-label="Dice not rolled">
-              <span class="die">–</span><span class="die">–</span>
+            <div id="board-dice" class="board-dice" role="group" aria-label="Dice not rolled">
+              <span class="board-dice-label" aria-hidden="true">Roll</span>
+              <span class="die" aria-hidden="true">–</span><span class="die" aria-hidden="true">–</span>
+              <span id="board-dice-total" class="board-dice-total" aria-hidden="true" hidden></span>
+            </div>
             </div>
             <span id="board-remaining" class="board-remaining"></span>
             <div class="board-turn-actions">
@@ -302,38 +309,36 @@
                 <button id="clear-cards-button" class="button button-quiet" type="button" hidden>Clear</button>
               </div>
             </aside>
-            <section id="card-details" class="card-details" aria-label="Cards workspace details" hidden>
-              <div id="card-details-tabs" class="insights-tabs" role="tablist" aria-label="Cards workspace details">
-                <button id="card-details-tab-notebook" class="insights-tab" type="button" role="tab"
-                        aria-controls="notebook-panel" aria-selected="true">Notebook</button>
-                <button id="card-details-tab-history" class="insights-tab" type="button" role="tab"
-                        aria-controls="insights-panel" aria-selected="false" tabindex="-1">History</button>
-              </div>
+            <section id="action-history" class="action-history" aria-labelledby="action-history-title" hidden>
+              <h4 id="action-history-title">Recent history</h4>
+              <ol id="action-history-list" class="history-list"></ol>
             </section>
           </div>
         </section>
 
-        <section id="notebook-panel" class="panel notebook-panel">
+        <div id="notebook-workspace" class="notebook-workspace">
+        <section id="notebook-panel" class="panel notebook-panel" aria-label="Detective notebook">
           <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Deductions</p>
-              <h3 id="notebook-title">Detective notebook</h3>
-              <p id="notebook-instructions" class="hint" hidden>Manual: use arrows to move; activate a cell to cycle ? / + / −. Hand facts are fixed.</p>
-            </div>
             <div id="notebook-heading-tools" class="notebook-heading-tools">
-              <span class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown<span class="board-envelope-legend"> <b>E</b> envelope</span></span>
-              <button id="add-clause" class="button button-quiet" type="button" hidden>Add clause</button>
+              <span id="notebook-legend" class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown<span class="board-envelope-legend"> <b>E</b> envelope</span></span>
+              <span id="clause-entry-hint" class="hint" role="status" tabindex="-1" hidden></span>
+              <button id="clause-entry" class="button button-quiet" type="button"
+                      aria-pressed="false" hidden>Clause</button>
+              <button id="cancel-clause" class="button button-quiet" type="button" hidden>Cancel</button>
             </div>
           </div>
           <div id="notebook" class="notebook-grid" aria-label="Knowledge matrix"></div>
         </section>
+        </div>
 
         <div id="insights-panel" class="insights-column">
-          <div id="insights-tabs" class="insights-tabs" role="tablist" aria-label="Game details">
+          <div id="insights-tabs" class="insights-tabs" role="tablist" aria-label="Game details" aria-orientation="vertical">
             <button id="history-tab" class="insights-tab" type="button" role="tab"
                     aria-selected="true" aria-controls="history-panel" tabindex="0">History</button>
             <button id="clauses-tab" class="insights-tab" type="button" role="tab"
                     aria-selected="false" aria-controls="clauses-panel" tabindex="-1">Clauses</button>
+            <button id="help-tab" class="insights-tab" type="button" role="tab"
+                    aria-selected="false" aria-controls="help-panel" tabindex="-1">Help</button>
           </div>
 
           <aside id="history-panel" class="panel history-panel" role="tabpanel"
@@ -360,26 +365,17 @@
               </div>
             </div>
             <div class="clauses-content">
-              <form id="clause-form" class="clause-form" hidden>
-                <h4 id="clause-form-title">Add a clause</h4>
-                <p class="hint">These are your notes. Changing marks will not change a clause.</p>
-                <label>Type
-                  <select id="clause-form-kind">
-                    <option value="refute">Player holds at least one</option>
-                    <option value="accuse">At least one is not in the envelope</option>
-                  </select>
-                </label>
-                <label id="clause-form-holder-field">Player
-                  <select id="clause-form-holder"></select>
-                </label>
-                <fieldset><legend>Linked cards</legend><div id="clause-form-cards" class="clause-card-options"></div></fieldset>
-                <div class="clause-actions">
-                  <button class="button button-secondary" type="submit">Save clause</button>
-                  <button id="cancel-clause" class="button button-quiet" type="button">Cancel</button>
-                </div>
-              </form>
               <div id="clauses" class="clauses" aria-label="Notebook clauses" tabindex="-1"></div>
             </div>
+          </section>
+          <section id="help-panel" class="panel help-panel" role="tabpanel"
+                   aria-labelledby="help-tab" tabindex="0" hidden>
+            <h3>Notebook help</h3>
+            <p>Columns show what each player may hold; E is the envelope. A plus means held, a minus means not held, and a question mark means unknown.</p>
+            <p>In a manual notebook, activate a cell to cycle its mark. Your own hand facts are fixed. Use arrow keys to move between cells.</p>
+            <p>To add a clause, select Clause above the notebook, then choose one suspect, weapon, and room in a player column. Choose the envelope column for an incorrect accusation. Select Confirm to save or Cancel to discard.</p>
+            <p>Numbered cell references link to the Clauses tab. Select a reference or Highlight to highlight its links; select it again to clear the highlight. Manual clauses can also be edited, resolved, reopened, deleted, or have individual links excluded or restored.</p>
+            <p>Automatic notebooks update deductions and links for you. Manual notes are independent of marks and do not affect bots.</p>
           </section>
         </div>
 

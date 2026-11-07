@@ -94,12 +94,14 @@ def _automatic_clauses(view: PlayerView, knowledge: Knowledge) -> list[dict[str,
 
 
 def _manual_clause(body: dict[str, Any], num_players: int) -> dict[str, Any]:
-    if set(body) != {"kind", "holder", "cards", "resolved"}:
-        raise ValueError("Supply kind, holder, cards, and resolved.")
+    required = {"kind", "holder", "cards", "resolved"}
+    if not required <= set(body) or set(body) - required - {"excluded_cards"}:
+        raise ValueError("Supply kind, holder, cards, resolved, and optionally excluded_cards.")
     kind = body["kind"]
     holder = _integer(body, "holder")
     cards = body["cards"]
     resolved = body["resolved"]
+    excluded = body.get("excluded_cards", [])
     if kind not in ("refute", "accuse"):
         raise ValueError("Clause type must be refute or accuse.")
     if (kind == "refute" and not 0 <= holder < num_players) or (
@@ -107,17 +109,25 @@ def _manual_clause(body: dict[str, Any], num_players: int) -> dict[str, Any]:
     ):
         raise ValueError("Clause holder must identify a player, or the envelope for an accusation.")
     if (
-        not isinstance(cards, list) or not cards
+        not isinstance(cards, list) or len(cards) != len(CARDS)
         or any(type(card) is not int or card not in CARDS_BY_ID for card in cards)
         or len(set(cards)) != len(cards)
+        or {CARDS_BY_ID[card].type for card in cards} != set(CARDS)
     ):
-        raise ValueError("Choose one or more distinct cards.")
+        raise ValueError("Choose exactly one suspect, one weapon, and one room.")
+    if (
+        not isinstance(excluded, list)
+        or any(type(card) is not int or card not in cards for card in excluded)
+        or len(set(excluded)) != len(excluded)
+    ):
+        raise ValueError("Excluded cards must be distinct cards from the clause.")
     if type(resolved) is not bool:
         raise ValueError("resolved must be a boolean.")
     return {
         "kind": kind, "holder": holder, "actor": holder if kind == "refute" else None,
         "cards": sorted(cards), "status": "resolved" if resolved else "unresolved",
-        "active_cards": [] if resolved else sorted(cards),
+        "excluded_cards": sorted(excluded),
+        "active_cards": [] if resolved else sorted(card for card in cards if card not in excluded),
     }
 
 

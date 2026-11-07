@@ -100,6 +100,34 @@ def test_desktop_profiles_persist_validate_and_require_csrf(tmp_path):
     ).status_code == 400
 
 
+def test_desktop_fullscreen_api_tracks_window_state_and_reports_errors():
+    api = desktop._DesktopWindowApi()
+    assert api.fullscreen_state() is False
+    with pytest.raises(RuntimeError, match="not available"):
+        api.toggle_fullscreen()
+
+    calls = []
+
+    class Window:
+        def toggle_fullscreen(self):
+            calls.append("toggle")
+
+    api._bind_window(Window())
+    assert api.toggle_fullscreen() is True
+    assert api.fullscreen_state() is True
+    assert api.toggle_fullscreen() is False
+    assert calls == ["toggle", "toggle"]
+
+    class BrokenWindow:
+        def toggle_fullscreen(self):
+            raise RuntimeError("native failure")
+
+    api._bind_window(BrokenWindow())
+    with pytest.raises(RuntimeError, match="native failure"):
+        api.toggle_fullscreen()
+    assert api.fullscreen_state() is False
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_desktop_server_is_local_and_stops_after_window(tmp_path, monkeypatch, fail):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
@@ -112,6 +140,8 @@ def test_desktop_server_is_local_and_stops_after_window(tmp_path, monkeypatch, f
         assert title == "Clue Engine"
         assert url.startswith("http://127.0.0.1:")
         assert kwargs["min_size"] == (320, 568)
+        result["api"] = kwargs["js_api"]
+        return SimpleNamespace(toggle_fullscreen=lambda: result.update(toggled=True))
 
     def start(**kwargs):
         assert kwargs["gui"] == "edgechromium"
@@ -119,6 +149,8 @@ def test_desktop_server_is_local_and_stops_after_window(tmp_path, monkeypatch, f
             assert b"New game" in response.read()
         with urlopen(result["url"] + "static/app.js", timeout=5) as response:
             assert b"renderBoard" in response.read()
+        assert result["api"].toggle_fullscreen() is True
+        assert result["toggled"] is True
         if fail:
             raise RuntimeError("window failed")
 

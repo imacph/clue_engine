@@ -157,6 +157,10 @@ It also requires .NET Framework 4.6.2 or newer. Install any missing runtime if
 the app reports it; once installed, the game runs locally without an internet
 connection.
 
+Use **Full screen** in the Windows app (or press **F11**) to fill the display.
+Select **Exit full screen**, press **F11** again, or press **Escape** to restore
+the window. The standard window maximize button remains available separately.
+
 To run the desktop app from source on Windows:
 
 ```powershell
@@ -226,8 +230,8 @@ your browser automatically. Use `--port` to choose another local port or
 play and spectator modes, pause/step controls, custom card faces, player
 notebooks, numbered history with the newest event at the top, and deduction
 clauses. The game screen uses a compact dashboard with turn controls inline
-alongside the card-based actions. History and deduction clauses share a tabbed
-panel beside the notebook and cards. The
+alongside the card-based actions. History and deduction clauses are available
+in the right-side tabbed panel. The
 knowledge matrix groups suspects, weapons, and rooms with matching icons and
 colors. A theme toggle follows the system preference by default and remembers
 your selection. The card area switches between your hand, individual card
@@ -241,7 +245,10 @@ existing Tkinter app remains available with
 part of the browser interface.
 
 The browser and Windows app use a five-step new-game wizard for game type,
-seats, bots, rules, and review. Board character selection includes a preview of
+seats, bots, rules, and review. Use **Quick play** to start with the currently
+selected settings and defaults without visiting the remaining steps, or use
+**Next** to customize and review them. Wizard navigation stays at the bottom of
+the window as you move between steps. Board character selection includes a preview of
 all six starting positions before cards are dealt. Miss Scarlet must be
 assigned and starts; turns then proceed in seat order. The browser and Windows
 interface labels players starting at 1; the Python API, console, and Tkinter
@@ -282,13 +289,24 @@ other cell begins unknown. Activate a cell with the mouse, touch, Enter, or
 Space to cycle through unknown (`?`), held (`+`), and not held (`-`). Record
 shown cards and other deductions yourself; arrow keys move between editable
 cells. Your notes do not affect the bots.
-Use **Add clause** to link one or more cards for a player who holds at least
-one, or for an incorrect accusation where at least one card is not in the
-envelope. A numbered reference appears in each linked cell; select it to inspect
-the clause, or use **Highlight** in the Clauses tab. References are notebook
+The right-side **Help** tab summarizes notebook and clause controls.
+To add a clause, select **Clause** above the notebook, then select one suspect,
+one weapon, and one room in the appropriate player's column. Select the envelope
+column instead for an incorrect accusation, where at least one card is not in
+the envelope. Selecting a different column moves the whole clause to that
+holder; selecting a different card of the same type replaces the previous card.
+Select **Confirm** to save, or **Cancel** to discard the draft. Cell
+marks do not change while entering a clause, and even fixed hand cells can be
+selected. A numbered reference appears in each linked cell; select it to inspect
+the clause in the right-side **Clauses** tab, or use **Highlight** in the list.
+Select the reference or **Clear highlight** again to remove the highlight.
+References are notebook
 clause numbers, not history event numbers. Multiple clauses can share a cell.
-You can edit, resolve, reopen, or delete your clauses. Changing a mark does not
-change your clauses, and resolving a clause does not change marks. Your notes
+You can edit clauses using the same notebook interaction, resolve, reopen, or
+delete them, and independently exclude
+or restore individual card links as you reason through them. Resolving and
+reopening a clause preserves those exclusions. Changing a mark does not change
+your clauses, and changing a clause does not change marks. Your notes
 may therefore disagree; they are not checked against the deal. Manual clauses
 are authored by you, not automatically generated from game events.
 
@@ -312,8 +330,9 @@ and a `mark` of `?`, `+`, or `-`.
 Manual clause notes are created with `POST /api/notebook/clauses` and edited or
 deleted at `/api/notebook/clauses/<id>` using `PUT` or `DELETE`. Create and edit
 requests contain `kind` (`refute` or `accuse`), a zero-based `holder` (the
-envelope is the number of players), a nonempty `cards` array of distinct card
-IDs, and a boolean `resolved`. These operations use the same session and CSRF
+envelope is the number of players), a `cards` array containing exactly one ID
+of each card type, and a boolean `resolved`. Optional `excluded_cards` contains
+distinct IDs from `cards` and defaults to empty. These operations use the same session and CSRF
 protection as notebook mark edits. State responses include unfiltered
 `notebook_clauses` with their original cards, active links, and status; the
 existing textual `clauses` field remains available.
@@ -324,16 +343,17 @@ enabled techniques; it is not a predicted win rate. See the
 [board rules contract](docs/board-rules.md) for rule defaults and effects.
 
 Choose **Board game** at setup to play or spectate a 3–6 player board game;
-**Cards only** remains the default. On larger screens the board and notebook
-share the game view; use the workspace tabs to switch the notebook area to
-cards and actions, history and clauses, or locations. In cards and actions,
-use the Notebook and History tabs below the action controls to consult your
-notes or the game history without leaving your cards. Clauses remain available
-from the History view. On smaller screens the board is also a tab, and the
-cards workspace scrolls as needed. The cards tab opens when a room suggestion
+**Cards only** remains the default. On larger screens, the notebook is on the
+left, the board in the center, and cards and actions on the right. The notebook
+has one set of player columns and stacked card categories. The right workspace
+has vertically arranged cards and actions, full history, clauses, locations, and help
+tabs. Cards and actions also
+show the latest eight unfiltered history events. On smaller screens these areas
+stack vertically and the page scrolls as needed. The cards tab opens when a room suggestion
 or response needs your attention. Card choices appear above the combination
 and action controls; longer lists scroll within the card area. On your turn, roll the
-dice or take an available passage, then select highlighted board squares
+dice or take an available passage. The dice display shows both results and their
+total; the movement indicator separately shows steps remaining. Select highlighted board squares
 with the mouse, touch, or keyboard. When the board viewport or a highlighted
 square is focused, arrow keys move in that direction, including through doors.
 If multiple exits share a direction, use that arrow to choose an exit and press

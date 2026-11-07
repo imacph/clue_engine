@@ -9,12 +9,38 @@ import tempfile
 import threading
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from werkzeug.serving import make_server
 
 from ._version import DESKTOP_VERSION, FRONTEND_VERSION, __version__
 from .desktop_preferences import DesktopPreferences
 from .webapp import create_app
+
+if TYPE_CHECKING:
+    from webview.window import Window
+
+
+class _DesktopWindowApi:
+    def __init__(self) -> None:
+        self._window: Window | None = None
+        self._fullscreen = False
+        self._lock = threading.Lock()
+
+    def _bind_window(self, window: "Window") -> None:
+        self._window = window
+
+    def fullscreen_state(self) -> bool:
+        with self._lock:
+            return self._fullscreen
+
+    def toggle_fullscreen(self) -> bool:
+        with self._lock:
+            if self._window is None:
+                raise RuntimeError("The desktop window is not available.")
+            self._window.toggle_fullscreen()
+            self._fullscreen = not self._fullscreen
+            return self._fullscreen
 
 
 def _require_webview2() -> None:
@@ -67,13 +93,18 @@ def run_desktop() -> None:
     thread = threading.Thread(target=server.serve_forever, name="clue-desktop-server", daemon=True)
     try:
         thread.start()
-        webview.create_window(
+        window_api = _DesktopWindowApi()
+        window = webview.create_window(
             "Clue Engine",
             f"http://127.0.0.1:{server.server_port}/",
             width=1440,
             height=900,
             min_size=(320, 568),
+            js_api=window_api,
         )
+        if window is None:
+            raise RuntimeError("Could not create the desktop window.")
+        window_api._bind_window(window)
         webview.start(gui="edgechromium")
     finally:
         if thread.is_alive():

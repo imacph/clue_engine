@@ -86,6 +86,9 @@ def test_optional_setup_controls_are_disclosed_on_demand(client):
         assert details is not None
         assert not re.search(r"\bopen(?:\s|=|$)", details.group(1))
     assert '<nav class="wizard-progress" aria-label="New game steps">' in page
+    assert 'id="setup-form" novalidate' in page
+    assert 'id="setup-quick-play" type="submit"' in page
+    assert page.index('id="setup-next"') < page.index('data-step="0"')
 
 
 def test_start_game_and_submit_actions_without_exposing_solution(client):
@@ -264,14 +267,19 @@ def test_manual_clause_lifecycle_is_independent_of_marks(client, game_type, play
         "seed": 42, "progress": "step", "notebook_mode": "manual",
     }
     initial = post(client, token, "/api/game", config).get_json()
-    free = [row["id"] for row in initial["matrix"] if row["id"] not in initial["hand"]]
-    refute = {"kind": "refute", "holder": 1, "cards": free[:3], "resolved": False}
-    accusation = {"kind": "accuse", "holder": players, "cards": free[:3], "resolved": False}
+    free = [
+        next(row["id"] for row in initial["matrix"]
+             if row["type"] == kind and row["id"] not in initial["hand"])
+        for kind in ("suspect", "weapon", "room")
+    ]
+    refute = {"kind": "refute", "holder": 1, "cards": free, "resolved": False}
+    accusation = {"kind": "accuse", "holder": players, "cards": free, "resolved": False}
     state = post(client, token, "/api/notebook/clauses", refute).get_json()
     assert state["notebook_revision"] == 1
     assert state["notebook_clauses"] == [{
         "id": 1, "kind": "refute", "holder": 1, "actor": 1,
-        "cards": sorted(free[:3]), "active_cards": sorted(free[:3]), "status": "unresolved",
+        "cards": sorted(free), "active_cards": sorted(free), "excluded_cards": [],
+        "status": "unresolved",
     }]
     state = post(client, token, "/api/notebook/clauses", accusation).get_json()
     assert [clause["id"] for clause in state["notebook_clauses"]] == [1, 2]
@@ -279,17 +287,23 @@ def test_manual_clause_lifecycle_is_independent_of_marks(client, game_type, play
     state = client.put(
         "/api/notebook", json={"card_id": free[0], "holder": 1, "mark": "+"}, headers=headers,
     ).get_json()
-    assert state["notebook_clauses"][0]["active_cards"] == sorted(free[:3])
-    refute["cards"] = free[1:3]
+    assert state["notebook_clauses"][0]["active_cards"] == sorted(free)
+    refute["excluded_cards"] = [free[0]]
+    state = client.put("/api/notebook/clauses/1", json=refute, headers=headers).get_json()
+    assert state["notebook_clauses"][0]["active_cards"] == sorted(free[1:])
     refute["resolved"] = True
     state = client.put("/api/notebook/clauses/1", json=refute, headers=headers).get_json()
     assert state["notebook_clauses"][0]["status"] == "resolved"
     assert state["notebook_clauses"][0]["active_cards"] == []
-    assert state["notebook_clauses"][0]["cards"] == sorted(free[1:3])
+    assert state["notebook_clauses"][0]["cards"] == sorted(free)
+    assert state["notebook_clauses"][0]["excluded_cards"] == [free[0]]
     revision = state["notebook_revision"]
     assert client.put(
         "/api/notebook/clauses/1", json=refute, headers=headers,
     ).get_json()["notebook_revision"] == revision
+    refute["resolved"] = False
+    state = client.put("/api/notebook/clauses/1", json=refute, headers=headers).get_json()
+    assert state["notebook_clauses"][0]["active_cards"] == sorted(free[1:])
     assert client.get("/api/state?clause_kind=accuse").get_json()["notebook_clauses"] == (
         state["notebook_clauses"]
     )
@@ -313,11 +327,22 @@ def test_manual_clause_validation_and_session_isolation():
         {**clause, "kind": "accuse"}, {**clause, "cards": []},
         {**clause, "cards": [0, 0]}, {**clause, "cards": [True]},
         {**clause, "cards": [999]}, {**clause, "resolved": 1},
+        {**clause, "cards": [0, 7]}, {**clause, "cards": [0, 1, 13]},
+        {**clause, "cards": [0, 1, 7, 13]},
+        {**clause, "excluded_cards": [1]}, {**clause, "excluded_cards": [0, 0]},
         {**clause, "extra": 1},
     ):
         assert post(first, first_token, "/api/notebook/clauses", bad).status_code == 400
     assert first.post("/api/notebook/clauses", json=clause).status_code == 403
-    assert post(first, first_token, "/api/notebook/clauses", clause).status_code == 200
+    initial = post(first, first_token, "/api/notebook/clauses", clause).get_json()
+    invalid_edit = {**clause, "cards": [0, 1, 13]}
+    response = first.put(
+        "/api/notebook/clauses/1", json=invalid_edit, headers={"X-CSRF-Token": first_token},
+    )
+    assert response.status_code == 400
+    unchanged = first.get("/api/state").get_json()
+    assert unchanged["notebook_clauses"] == initial["notebook_clauses"]
+    assert unchanged["notebook_revision"] == initial["notebook_revision"]
     assert second.get("/api/state").get_json()["notebook_clauses"] == []
     assert second.delete(
         "/api/notebook/clauses/1", headers={"X-CSRF-Token": second_token},

@@ -24,24 +24,24 @@ let refreshing = false;
 let requestVersion = 0;
 let lastError = "";
 let desktopThemeWrite = Promise.resolve();
+let desktopFullscreen = false;
+let fullscreenBusy = false;
 let cardView = "hand";
-let cardDetailsTab = "notebook";
 let lastActivityKey = null;
 let lastRenderedState = null;
 let lastNotebookFingerprint = null;
 let lastClauseFingerprint = null;
 let selectedClause = null;
-let editingClause = null;
+let clauseDraft = null;
 let notebookGeneration = 0;
 let notebookQueue = Promise.resolve();
 let lastBoardState = null;
 let lastBoardLayout = null;
 let lastSuggestionRoom = null;
 let hadReveal = false;
-let hadBoardMovement = false;
 let hadBoardResponse = false;
-const boardTabs = ["board", "notebook", "cards", "insights", "locations"];
-const narrowBoardLayout = window.matchMedia("(max-width: 800px)");
+const boardTabs = ["cards", "history", "clauses", "locations", "help"];
+const insightsTabs = ["history", "clauses", "help"];
 const selectedCardIds = { suspect: null, weapon: null, room: null };
 
 function option(value, label) {
@@ -91,11 +91,10 @@ async function startGame(event) {
   lastNotebookFingerprint = null;
   lastClauseFingerprint = null;
   selectedClause = null;
-  editingClause = null;
+  clauseDraft = null;
   lastBoardState = null;
   lastSuggestionRoom = null;
   hadReveal = false;
-  hadBoardMovement = false;
   hadBoardResponse = false;
   const debug = $("debug").checked;
   if (debug && !window.confirm("Debug mode reveals every hand, the solution, and private events. Continue?")) {
@@ -119,11 +118,11 @@ async function startGame(event) {
 
 function activateGame(state) {
   lastError = "";
-  $("clause-form").hidden = true;
-  cardDetailsTab = "notebook";
+  clauseDraft = null;
   document.body.classList.add("game-active");
   document.body.classList.toggle("board-game", Boolean(state.board));
   document.body.classList.toggle("manual-notebook-active", state.notebook_mode === "manual");
+  $("game-toolbar").append($("header-tools"));
   configureBoardWorkspace(Boolean(state.board));
   $("setup-screen").hidden = true;
   $("game-screen").hidden = false;
@@ -160,21 +159,6 @@ function buildPlayerFilters(state) {
     }
   }
   const historyKind = $("history-kind");
-  const clauseHolder = $("clause-form-holder");
-  clauseHolder.replaceChildren();
-  for (let seat = 0; seat < numPlayers; seat++) {
-    clauseHolder.append(option(seat, `Player ${seat + 1}`));
-  }
-  const clauseCards = $("clause-form-cards");
-  clauseCards.replaceChildren();
-  for (const card of cardsById.values()) {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = String(card.id);
-    label.append(input, document.createTextNode(card.name));
-    clauseCards.append(label);
-  }
   historyKind.replaceChildren(option("all", "All types"));
   for (const [value, label] of [
     ["suggest", "Suggestion"], ["pass", "Pass"], ["refute", "Refutation"],
@@ -241,9 +225,6 @@ function renderState(state) {
   lastRenderedState = fingerprint;
   const fixedRoom = state.board && state.legal.suggest ? state.legal.suggest_room : null;
   const hasReveal = state.legal.reveals.length > 0;
-  const hasBoardMovement = state.board && (
-    state.legal.roll || state.legal.passage || state.legal.moves.length > 0
-  );
   const hasBoardResponse = state.board && (hasReveal || state.legal.pass);
   const moveHadFocus = state.board && (
     document.activeElement === $("board-map-shell")
@@ -254,15 +235,11 @@ function renderState(state) {
   if (state.board) {
     if (hasBoardResponse && !hadBoardResponse) {
       switchBoardTab("cards");
-    } else if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom
-      && (!narrowBoardLayout.matches || !hasBoardMovement)) {
+    } else if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom) {
       switchBoardTab("cards");
       focusCards = moveHadFocus;
-    } else if (hasBoardMovement && !hadBoardMovement && narrowBoardLayout.matches) {
-      switchBoardTab("board");
     }
   }
-  hadBoardMovement = Boolean(hasBoardMovement);
   hadBoardResponse = Boolean(hasBoardResponse);
   const activityKey = state.activity
     ? `${state.activity.kind}:${state.activity.actor}:${state.activity.suggestion_actor ?? ""}`
@@ -468,6 +445,17 @@ function appendPawn(group, pawn, state, x, y, active, radius) {
   group.append(marker);
 }
 
+function renderDice(dice) {
+  const total = dice ? dice[0] + dice[1] : null;
+  $("board-dice").setAttribute("aria-label", dice
+    ? `Dice: ${dice[0]} and ${dice[1]}, total ${total}` : "Dice not rolled");
+  $("board-dice").querySelectorAll(".die").forEach((die, index) => {
+    die.textContent = dice ? String(dice[index]) : "–";
+  });
+  $("board-dice-total").hidden = total === null;
+  setText("board-dice-total", total === null ? "" : `Total ${total}`);
+}
+
 function renderBoard(state) {
   const panel = $("board-panel");
   panel.hidden = !state.board;
@@ -487,11 +475,7 @@ function renderBoard(state) {
   setText("board-remaining", board.phase === "move"
     ? `${board.remaining} step${board.remaining === 1 ? "" : "s"} left`
     : board.dice ? "Movement complete" : "Not rolled");
-  $("board-dice").setAttribute("aria-label", board.dice
-    ? `Dice: ${board.dice[0]} and ${board.dice[1]}` : "Dice not rolled");
-  $("board-dice").querySelectorAll(".die").forEach((die, index) => {
-    die.textContent = board.dice ? String(board.dice[index]) : "–";
-  });
+  renderDice(board.dice);
   $("board-roll-button").hidden = !state.legal.roll;
   $("board-passage-button").hidden = !state.legal.passage;
   $("board-end-button").hidden = !state.legal.end_turn;
@@ -986,10 +970,9 @@ function cardIllustration(cardId) {
 
 function renderNotebook(state) {
   const notebook = $("notebook");
-  $("notebook-instructions").hidden = state.notebook_mode !== "manual";
-  $("add-clause").hidden = state.notebook_mode !== "manual";
+  updateClauseEntryControls(state);
   const fingerprint = JSON.stringify([
-    state.notebook_mode, state.num_players, state.matrix, state.notebook_clauses, selectedClause,
+    state.notebook_mode, state.num_players, state.matrix, state.notebook_clauses, selectedClause, clauseDraft,
   ]);
   if (fingerprint === lastNotebookFingerprint) return;
   lastNotebookFingerprint = fingerprint;
@@ -998,33 +981,40 @@ function renderNotebook(state) {
   const focusHolder = focused?.dataset.notebookHolder;
   notebook.classList.toggle("manual-notebook", state.notebook_mode === "manual");
   notebook.replaceChildren();
+  const table = document.createElement("table");
+  table.className = "category-table notebook-table";
+  const head = document.createElement("thead");
+  const heading = document.createElement("tr");
+  const cardHeading = document.createElement("th");
+  cardHeading.textContent = "Card";
+  cardHeading.scope = "col";
+  heading.append(cardHeading);
+  for (let seat = 0; seat < state.num_players; seat++) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = `P${seat + 1}`;
+    heading.append(th);
+  }
+  const envelope = document.createElement("th");
+  envelope.className = "matrix-envelope";
+  envelope.scope = "col";
+  envelope.setAttribute("aria-label", "Envelope");
+  envelope.title = "Envelope";
+  envelope.textContent = "E";
+  heading.append(envelope);
+  head.append(heading);
+  table.append(head);
   for (const type of ["suspect", "weapon", "room"]) {
-    const category = document.createElement("section");
-    category.className = `category-table ${type}`;
-    const title = document.createElement("h4");
+    const body = document.createElement("tbody");
+    body.className = type;
+    const category = document.createElement("tr");
+    const title = document.createElement("th");
+    title.scope = "rowgroup";
+    title.colSpan = state.num_players + 2;
+    title.className = "category-heading";
     title.textContent = type;
     category.append(title);
-    const table = document.createElement("table");
-    table.style.minWidth = `${Math.ceil(32 * (state.num_players + 1) / 0.52)}px`;
-    const head = document.createElement("thead");
-    const body = document.createElement("tbody");
-    const heading = document.createElement("tr");
-    const cardHeading = document.createElement("th");
-    cardHeading.textContent = "Card";
-    heading.append(cardHeading);
-    for (let seat = 0; seat < state.num_players; seat++) {
-      const th = document.createElement("th");
-      th.textContent = `P${seat + 1}`;
-      heading.append(th);
-    }
-    const envelope = document.createElement("th");
-    envelope.className = "matrix-envelope";
-    envelope.setAttribute("aria-label", "Envelope");
-    envelope.title = "Envelope";
-    envelope.textContent = "Env.";
-    envelope.title = "Envelope";
-    heading.append(envelope);
-    head.append(heading);
+    body.append(category);
     for (const card of state.matrix.filter((item) => item.type === type)) {
       const row = document.createElement("tr");
       const name = document.createElement("td");
@@ -1045,16 +1035,21 @@ function renderNotebook(state) {
         const links = (state.notebook_clauses || []).filter((clause) =>
           clause.holder === holder && clause.active_cards.includes(card.id));
         if (links.some((clause) => clause.id === selectedClause)) cell.classList.add("clause-selected");
+        const draftSelected = clauseDraft?.holder === holder && clauseDraft.cards[type] === card.id;
+        if (draftSelected) cell.classList.add("clause-draft-selected");
         const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
         const owner = holder === state.num_players ? "Envelope" : `Player ${holder + 1}`;
-        if (card.editable[holder]) {
+        if (card.editable[holder] || clauseDraft) {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "notebook-mark";
+          button.className = card.editable[holder] ? "notebook-mark" : "notebook-mark notebook-fixed-mark";
           button.dataset.notebookCard = String(card.id);
           button.dataset.notebookHolder = String(holder);
-          button.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}. Activate to change.`);
-          button.title = `${card.name}, ${owner}: ${meaning}. Activate to change.`;
+          const action = clauseDraft ? `${draftSelected ? "Selected" : "Not selected"} for clause. Activate to select.`
+            : "Activate to change.";
+          button.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}. ${action}`);
+          if (clauseDraft) button.setAttribute("aria-pressed", String(draftSelected));
+          button.title = `${card.name}, ${owner}: ${meaning}. ${action}`;
           button.textContent = mark;
           cell.append(button);
         } else {
@@ -1081,10 +1076,9 @@ function renderNotebook(state) {
       }
       body.append(row);
     }
-    table.append(head, body);
-    category.append(table);
-    notebook.append(category);
+    table.append(body);
   }
+  notebook.append(table);
   if (focusCard !== undefined) {
     notebook.querySelector(`[data-notebook-card="${focusCard}"][data-notebook-holder="${focusHolder}"]`)
       ?.focus({ preventScroll: true });
@@ -1114,22 +1108,106 @@ function changeNotebook(cardId, holder) {
   });
 }
 
-function showClauseForm(clause = null) {
-  editingClause = clause?.id ?? null;
-  $("clause-form-title").textContent = clause ? `Edit clause #${clause.id}` : "Add a clause";
-  $("clause-form-kind").value = clause?.kind ?? "refute";
-  $("clause-form-holder").value = String(clause?.kind === "refute" ? clause.holder : 0);
-  for (const input of $("clause-form-cards").querySelectorAll("input")) {
-    input.checked = Boolean(clause?.cards.includes(Number(input.value)));
+function updateClauseEntryControls(state) {
+  const button = $("clause-entry");
+  button.hidden = state.notebook_mode !== "manual";
+  button.textContent = clauseDraft ? "Confirm" : "Clause";
+  button.setAttribute("aria-label", clauseDraft ? "Confirm clause" : "Add clause");
+  button.setAttribute("aria-pressed", String(Boolean(clauseDraft)));
+  const missing = ["suspect", "weapon", "room"].filter((type) => clauseDraft?.cards[type] == null);
+  button.disabled = Boolean(clauseDraft && (clauseDraft.saving || missing.length));
+  $("cancel-clause").hidden = !clauseDraft;
+  $("cancel-clause").disabled = Boolean(clauseDraft?.saving);
+  const hint = $("clause-entry-hint");
+  hint.hidden = !clauseDraft;
+  $("notebook-legend").hidden = Boolean(clauseDraft);
+  if (clauseDraft) {
+    const owner = clauseDraft.holder === null ? "Choose player or E"
+      : clauseDraft.holder === state.num_players ? "Envelope" : `Player ${clauseDraft.holder + 1}`;
+    hint.textContent = `${owner} · ${missing.length ? `Select ${missing.join(", ")}` : "Ready to confirm"}`;
+    const description = `${clauseDraft.id === null ? "New clause" : `Editing clause ${clauseDraft.id}`}. ${owner}. `
+      + (missing.length ? `Select: ${missing.join(", ")}.` : "Ready to confirm.")
+      + " Click a different column to change the holder.";
+    hint.title = description;
+    hint.setAttribute("aria-label", description);
   }
-  $("clause-form-holder-field").hidden = $("clause-form-kind").value === "accuse";
-  $("clause-form").hidden = false;
-  $("clause-form-kind").focus();
+}
+
+function startClauseEntry(clause = null) {
+  if (!currentState || currentState.notebook_mode !== "manual") return;
+  if (clauseDraft) {
+    showError("Finish or cancel the current clause before editing another.");
+    return;
+  }
+  const cards = {};
+  for (const id of clause?.cards || []) cards[cardsById.get(id).type] = id;
+  clauseDraft = { id: clause?.id ?? null, holder: clause?.holder ?? null, cards, saving: false };
+  renderNotebook(currentState);
+  $("clause-entry-hint").focus();
+}
+
+function selectClauseCell(cardId, holder) {
+  if (!clauseDraft || clauseDraft.saving || !currentState) return;
+  const card = cardsById.get(cardId);
+  if (!card || holder < 0 || holder > currentState.num_players) return;
+  if (clauseDraft.holder === holder && clauseDraft.cards[card.type] === cardId) {
+    delete clauseDraft.cards[card.type];
+  } else {
+    clauseDraft.holder = holder;
+    clauseDraft.cards[card.type] = cardId;
+  }
+  renderNotebook(currentState);
+}
+
+function cancelClauseEntry() {
+  if (!clauseDraft || clauseDraft.saving) return;
+  clauseDraft = null;
+  if (currentState) renderNotebook(currentState);
+  $("clause-entry").focus({ preventScroll: true });
+}
+
+function confirmClauseEntry() {
+  if (!clauseDraft || clauseDraft.saving || !currentState) return;
+  const draft = clauseDraft;
+  const types = ["suspect", "weapon", "room"];
+  const cards = types.map((type) => draft.cards[type]);
+  if (draft.holder === null || cards.some((id, index) => cardsById.get(id)?.type !== types[index])) {
+    showError("Could not save notebook: Choose one suspect, one weapon, and one room.");
+    return;
+  }
+  const holder = draft.holder;
+  const kind = holder === currentState.num_players ? "accuse" : "refute";
+  const clauseId = draft.id;
+  draft.saving = true;
+  renderNotebook(currentState);
+  saveClause(clauseId === null ? "POST" : "PUT", clauseId, () => {
+    const original = currentState.notebook_clauses.find((clause) => clause.id === clauseId);
+    if (clauseId !== null && !original) throw new Error(`Clause #${clauseId} no longer exists.`);
+    const preserveExclusions = original?.kind === kind && original?.holder === holder;
+    return {
+      kind, holder, cards, resolved: original?.status === "resolved",
+      excluded_cards: preserveExclusions
+        ? original.excluded_cards.filter((id) => cards.includes(id)) : [],
+    };
+  }, () => {
+    if (clauseDraft !== draft) return;
+    clauseDraft = null;
+    renderNotebook(currentState);
+    $("clause-entry").focus({ preventScroll: true });
+  }, () => {
+    if (clauseDraft !== draft) return;
+    draft.saving = false;
+    renderNotebook(currentState);
+  });
 }
 
 function openClauses() {
-  if (currentState?.board) switchBoardTab("insights");
-  switchInsightsTab("clauses");
+  if (currentState?.board) switchBoardTab("clauses");
+  else switchInsightsTab("clauses");
+}
+
+function toggleClauseHighlight(id) {
+  selectedClause = selectedClause === id ? null : id;
 }
 
 function renderClauses(state) {
@@ -1168,13 +1246,14 @@ function renderClauses(state) {
     description.textContent = clause.cards.map((id) => cardsById.get(id).name).join(", ");
     const status = document.createElement("p");
     status.textContent = state.notebook_mode === "manual"
-      ? `Your note: ${clause.status}`
+      ? `Your note: ${clause.status}${clause.status === "unresolved" && !clause.active_cards.length
+        ? "; no linked cards remain, check your notes." : ""}`
       : clause.status === "satisfied" ? "Satisfied"
         : `Unresolved; remaining: ${clause.active_cards.map((id) => cardsById.get(id).name).join(", ")}`;
     const actions = document.createElement("div");
     actions.className = "clause-actions";
     for (const [action, label] of [
-      ["highlight", "Highlight"],
+      ["highlight", clause.id === selectedClause ? "Clear highlight" : "Highlight"],
       ...(state.notebook_mode === "manual" ? [
         ["edit", "Edit"], ["resolve", clause.status === "resolved" ? "Reopen" : "Resolve"],
         ["delete", "Delete"],
@@ -1186,25 +1265,48 @@ function renderClauses(state) {
       button.dataset.clauseAction = action;
       button.dataset.clauseId = String(clause.id);
       button.textContent = label;
-      if (action === "highlight" && !clause.active_cards.length) button.disabled = true;
+      if (action === "highlight") {
+        button.disabled = !clause.active_cards.length && clause.id !== selectedClause;
+        button.setAttribute("aria-pressed", String(clause.id === selectedClause));
+      }
       button.setAttribute("aria-label", `${label} clause ${clause.id}`);
       actions.append(button);
     }
-    item.append(heading, description, status, actions);
+    item.append(heading, description, status);
+    if (state.notebook_mode === "manual") {
+      const candidates = document.createElement("div");
+      candidates.className = "clause-actions";
+      for (const id of clause.cards) {
+        const excluded = clause.excluded_cards.includes(id);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button button-quiet";
+        button.dataset.clauseAction = "toggle-card";
+        button.dataset.clauseId = String(clause.id);
+        button.dataset.cardId = String(id);
+        button.textContent = `${excluded ? "Restore" : "Exclude"} ${cardsById.get(id).name}`;
+        button.setAttribute("aria-label", `${button.textContent} in clause ${clause.id}`);
+        candidates.append(button);
+      }
+      item.append(candidates);
+    }
+    item.append(actions);
     list.append(item);
   }
   if (focusAction && focusId) {
-    list.querySelector(`[data-clause-action="${focusAction}"][data-clause-id="${focusId}"]`)
+    const cardSelector = focused.dataset.cardId ? `[data-card-id="${focused.dataset.cardId}"]` : "";
+    list.querySelector(`[data-clause-action="${focusAction}"][data-clause-id="${focusId}"]${cardSelector}`)
       ?.focus({ preventScroll: true });
   }
 }
 
-function saveClause(method, clauseId, body, closeForm = false) {
+function saveClause(method, clauseId, body, onSuccess = null, onFailure = null) {
   const generation = notebookGeneration;
   notebookQueue = notebookQueue.then(async () => {
     if (generation !== notebookGeneration || !currentState) return;
     const path = `/api/notebook/clauses${clauseId === null ? "" : `/${clauseId}`}`;
-    const result = await requestJson(path, { method, body });
+    const requestBody = typeof body === "function" ? body() : body;
+    const result = await requestJson(path, { method, body: requestBody });
     if (generation !== notebookGeneration || !currentState) return;
     if (result.notebook_revision >= currentState.notebook_revision) {
       currentState.matrix = result.matrix;
@@ -1212,29 +1314,44 @@ function saveClause(method, clauseId, body, closeForm = false) {
       currentState.notebook_revision = result.notebook_revision;
       renderState(currentState);
     }
-    if (closeForm) {
-      $("clause-form").hidden = true;
-      editingClause = null;
-      $("clauses").focus({ preventScroll: true });
-    }
+    if (onSuccess) onSuccess();
     if (lastError.startsWith("Could not save notebook:")) showError("");
   }).catch((error) => {
-    if (generation === notebookGeneration) showError(`Could not save notebook: ${error.message}`);
+    if (generation === notebookGeneration) {
+      if (onFailure) onFailure();
+      showError(`Could not save notebook: ${error.message}`);
+    }
+  });
+}
+
+function changeClause(clauseId, change) {
+  saveClause("PUT", clauseId, () => {
+    const clause = currentState.notebook_clauses.find((item) => item.id === clauseId);
+    if (!clause) throw new Error(`Clause #${clauseId} no longer exists.`);
+    return {
+      kind: clause.kind, holder: clause.holder, cards: clause.cards,
+      resolved: clause.status === "resolved", excluded_cards: clause.excluded_cards,
+      ...change(clause),
+    };
   });
 }
 
 function renderHistory(events) {
-  const list = $("history-list");
-  list.replaceChildren();
   const actor = $("history-actor").value;
   const kind = $("history-kind").value;
   const visible = events.filter((event) =>
     (actor === "all" || Number(actor) === event.actor)
     && (kind === "all" || kind === event.kind));
+  renderHistoryList($("history-list"), visible, events.length);
+  renderHistoryList($("action-history-list"), events.slice(0, 8), events.length);
+}
+
+function renderHistoryList(list, visible, total) {
+  list.replaceChildren();
   if (!visible.length) {
     const empty = document.createElement("li");
     empty.className = "empty-history";
-    empty.textContent = events.length ? "No events match these filters." : "No events yet.";
+    empty.textContent = total ? "No events match these filters." : "No events yet.";
     list.append(empty);
     return;
   }
@@ -1397,15 +1514,15 @@ function newGame() {
   lastNotebookFingerprint = null;
   lastClauseFingerprint = null;
   selectedClause = null;
-  editingClause = null;
+  clauseDraft = null;
   lastBoardState = null;
   lastBoardLayout = null;
   lastSuggestionRoom = null;
   hadReveal = false;
-  hadBoardMovement = false;
   hadBoardResponse = false;
   lastError = "";
   document.body.classList.remove("game-active", "board-game", "manual-notebook-active");
+  $("site-header").append($("header-tools"));
   $("board-map-shell").classList.remove("zoomed");
   $("board-zoom-button").setAttribute("aria-pressed", "false");
   showError("");
@@ -1416,28 +1533,35 @@ function newGame() {
 
 function configureBoardWorkspace(isBoard) {
   $("board-workspace-tabs").hidden = !isBoard;
-  moveBoardDetails(false);
+  $("insights-tabs").hidden = isBoard;
+  $("action-history").hidden = !isBoard;
   moveViewerField(isBoard ? "notebook-heading-tools" : "card-view-tabs");
+  const clauses = $("clauses-panel");
   if (isBoard) {
-    for (const name of ["notebook", "cards", "insights", "locations"]) {
+    for (const name of ["cards", "locations"]) {
       const panel = $(name === "locations" ? "board-locations-panel" : `${name}-panel`);
       panel.setAttribute("role", "tabpanel");
       panel.setAttribute("aria-labelledby", `board-tab-${name}`);
     }
-    switchBoardTab(narrowBoardLayout.matches ? "board" : "notebook");
+    $("notebook-panel").hidden = false;
+    $("board-panel").hidden = false;
+    $("board-panel").setAttribute("aria-labelledby", "board-title");
+    $("insights-panel").removeAttribute("role");
+    $("insights-panel").removeAttribute("aria-labelledby");
+    switchBoardTab("cards");
   } else {
-    for (const name of ["notebook", "cards", "insights", "locations"]) {
+    for (const name of ["cards", "insights", "locations"]) {
       const panel = $(name === "locations" ? "board-locations-panel" : `${name}-panel`);
       panel.removeAttribute("role");
       panel.removeAttribute("aria-labelledby");
       panel.hidden = name === "locations";
     }
-    for (const name of ["board", "notebook"]) {
-      const panel = $(`${name}-panel`);
-      panel.removeAttribute("role");
-      panel.setAttribute("aria-labelledby", `${name}-title`);
-    }
+    $("notebook-panel").hidden = false;
+    clauses.setAttribute("role", "tabpanel");
+    $("board-panel").removeAttribute("role");
+    $("board-panel").setAttribute("aria-labelledby", "board-title");
     delete document.body.dataset.boardTab;
+    switchInsightsTab("history");
   }
 }
 
@@ -1447,57 +1571,19 @@ function moveViewerField(destinationId) {
   if (viewer.parentElement !== destination) destination.append(viewer);
 }
 
-function moveBoardDetails(inCards) {
-  const notebook = $("notebook-panel");
-  const insights = $("insights-panel");
-  const details = $("card-details");
-  if (inCards) {
-    if (notebook.parentElement !== details) details.append(notebook, insights);
-  } else {
-    const locations = $("board-locations-panel");
-    const dashboard = locations.parentElement;
-    if (notebook.parentElement !== dashboard) dashboard.insertBefore(notebook, locations);
-    if (insights.parentElement !== dashboard) dashboard.insertBefore(insights, locations);
-  }
-  details.hidden = !inCards;
-  notebook.setAttribute("aria-labelledby", inCards ? "card-details-tab-notebook" : "board-tab-notebook");
-  insights.setAttribute("aria-labelledby", inCards ? "card-details-tab-history" : "board-tab-insights");
-}
-
-function switchCardDetailsTab(name) {
-  cardDetailsTab = name;
-  for (const item of ["notebook", "history"]) {
-    const selected = item === name;
-    const tab = $(`card-details-tab-${item}`);
-    tab.setAttribute("aria-selected", String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-    $(item === "history" ? "insights-panel" : "notebook-panel").hidden = !selected;
-  }
-}
-
 function switchBoardTab(name) {
-  if (!narrowBoardLayout.matches && name === "board") name = "notebook";
   document.body.dataset.boardTab = name;
-  moveBoardDetails(name === "cards");
-  moveViewerField(name === "cards" ? "card-view-tabs" : "notebook-heading-tools");
   for (const item of boardTabs) {
     const tab = $(`board-tab-${item}`);
     tab.setAttribute("aria-selected", String(item === name));
     tab.tabIndex = item === name ? 0 : -1;
   }
-  for (const item of ["notebook", "cards", "insights", "locations"]) {
+  for (const item of ["cards", "locations"]) {
     const panel = $(item === "locations" ? "board-locations-panel" : `${item}-panel`);
     panel.hidden = item !== name;
   }
-  if (name === "cards") switchCardDetailsTab(cardDetailsTab);
-  const boardPanel = $("board-panel");
-  if (narrowBoardLayout.matches) {
-    boardPanel.setAttribute("role", "tabpanel");
-    boardPanel.setAttribute("aria-labelledby", "board-tab-board");
-  } else {
-    boardPanel.removeAttribute("role");
-    boardPanel.setAttribute("aria-labelledby", "board-title");
-  }
+  $("insights-panel").hidden = !insightsTabs.includes(name);
+  if (insightsTabs.includes(name)) switchInsightsTab(name);
 }
 
 function updateMode(restoreNotebook = true) {
@@ -1529,13 +1615,14 @@ function updateGameType() {
 }
 
 function switchInsightsTab(name) {
-  const isHistory = name === "history";
-  $("history-tab").setAttribute("aria-selected", String(isHistory));
-  $("history-tab").tabIndex = isHistory ? 0 : -1;
-  $("history-panel").hidden = !isHistory;
-  $("clauses-tab").setAttribute("aria-selected", String(!isHistory));
-  $("clauses-tab").tabIndex = isHistory ? -1 : 0;
-  $("clauses-panel").hidden = isHistory;
+  const board = document.body.classList.contains("board-game");
+  for (const item of insightsTabs) {
+    const active = item === name;
+    $(`${item}-tab`).setAttribute("aria-selected", String(active));
+    $(`${item}-tab`).tabIndex = active ? 0 : -1;
+    $(`${item}-panel`).hidden = !active;
+    $(`${item}-panel`).setAttribute("aria-labelledby", board ? `board-tab-${item}` : `${item}-tab`);
+  }
 }
 
 function setTheme(theme, persist = false) {
@@ -1560,7 +1647,50 @@ function setTheme(theme, persist = false) {
   }
 }
 
+function showFullscreenState(fullscreen) {
+  desktopFullscreen = fullscreen;
+  const button = $("fullscreen-toggle");
+  button.textContent = fullscreen ? "Exit full screen" : "Full screen";
+  button.setAttribute("aria-pressed", String(fullscreen));
+}
+
+async function initializeFullscreen() {
+  if (!window.clueOptions.desktop) return;
+  try {
+    showFullscreenState(await window.pywebview.api.fullscreen_state());
+    $("fullscreen-toggle").disabled = false;
+  } catch (error) {
+    showError(`Could not initialize full screen: ${error.message}`);
+  }
+}
+
+async function toggleDesktopFullscreen() {
+  if (fullscreenBusy || $("fullscreen-toggle").disabled) return;
+  fullscreenBusy = true;
+  $("fullscreen-toggle").disabled = true;
+  try {
+    showFullscreenState(await window.pywebview.api.toggle_fullscreen());
+    if (lastError.startsWith("Could not change full screen:")) showError("");
+  } catch (error) {
+    showError(`Could not change full screen: ${error.message}`);
+  } finally {
+    fullscreenBusy = false;
+    $("fullscreen-toggle").disabled = false;
+  }
+}
+
 setTheme(document.documentElement.dataset.theme);
+window.addEventListener("pywebviewready", initializeFullscreen);
+if (window.clueOptions.desktop && window.pywebview?.api) initializeFullscreen();
+$("fullscreen-toggle").addEventListener("click", toggleDesktopFullscreen);
+document.addEventListener("keydown", (event) => {
+  if (!window.clueOptions.desktop || event.repeat || event.altKey || event.ctrlKey || event.metaKey
+    || event.shiftKey || $("fullscreen-toggle").disabled) return;
+  if (event.key === "F11" || (event.key === "Escape" && desktopFullscreen)) {
+    event.preventDefault();
+    toggleDesktopFullscreen();
+  }
+});
 $("setup-form").addEventListener("submit", startGame);
 $("mode").addEventListener("change", updateMode);
 for (const choice of document.querySelectorAll('input[name="game-type"]')) {
@@ -1573,7 +1703,13 @@ $("theme-toggle").addEventListener("click", () => {
 $("notebook").addEventListener("click", (event) => {
   const reference = event.target.closest("[data-clause-id]");
   if (reference) {
-    selectedClause = Number(reference.dataset.clauseId);
+    const id = Number(reference.dataset.clauseId);
+    toggleClauseHighlight(id);
+    if (selectedClause === null) {
+      renderNotebook(currentState);
+      renderClauses(currentState);
+      return;
+    }
     $("clause-actor").value = "all";
     $("clause-kind").value = "all";
     lastRenderedState = null;
@@ -1585,37 +1721,18 @@ $("notebook").addEventListener("click", (event) => {
     return;
   }
   const button = event.target.closest("[data-notebook-card]");
-  if (button) changeNotebook(Number(button.dataset.notebookCard), Number(button.dataset.notebookHolder));
-});
-$("add-clause").addEventListener("click", () => {
-  openClauses();
-  showClauseForm();
-});
-$("cancel-clause").addEventListener("click", () => {
-  $("clause-form").hidden = true;
-  editingClause = null;
-});
-$("clause-form-kind").addEventListener("change", () => {
-  $("clause-form-holder-field").hidden = $("clause-form-kind").value === "accuse";
-});
-$("clause-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  if (!currentState) return;
-  const kind = $("clause-form-kind").value;
-  const cards = [...$("clause-form-cards").querySelectorAll("input:checked")]
-    .map((input) => Number(input.value));
-  if (!cards.length) {
-    showError("Could not save notebook: Choose at least one linked card.");
-    return;
+  if (button) {
+    const card = Number(button.dataset.notebookCard);
+    const holder = Number(button.dataset.notebookHolder);
+    if (clauseDraft) selectClauseCell(card, holder);
+    else changeNotebook(card, holder);
   }
-  const original = currentState.notebook_clauses.find((clause) => clause.id === editingClause);
-  saveClause(editingClause === null ? "POST" : "PUT", editingClause, {
-    kind,
-    holder: kind === "accuse" ? currentState.num_players : Number($("clause-form-holder").value),
-    cards,
-    resolved: original?.status === "resolved",
-  }, true);
 });
+$("clause-entry").addEventListener("click", () => {
+  if (clauseDraft) confirmClauseEntry();
+  else startClauseEntry();
+});
+$("cancel-clause").addEventListener("click", cancelClauseEntry);
 $("clauses").addEventListener("click", (event) => {
   const button = event.target.closest("[data-clause-action]");
   if (!button || !currentState) return;
@@ -1623,24 +1740,33 @@ $("clauses").addEventListener("click", (event) => {
   if (!clause) return;
   const action = button.dataset.clauseAction;
   if (action === "highlight") {
-    selectedClause = clause.id;
+    toggleClauseHighlight(clause.id);
     lastRenderedState = null;
     renderState(currentState);
-    if (currentState.board) switchBoardTab("notebook");
-    $("notebook").querySelector(`[data-clause-id="${clause.id}"]`)?.focus({ preventScroll: true });
-  } else if (action === "edit") {
-    showClauseForm(clause);
-  } else if (action === "resolve") {
-    saveClause("PUT", clause.id, {
-      kind: clause.kind, holder: clause.holder, cards: clause.cards,
-      resolved: clause.status !== "resolved",
-    });
-  } else if (action === "delete" && window.confirm(`Delete clause #${clause.id}?`)) {
-    if (editingClause === clause.id) {
-      $("clause-form").hidden = true;
-      editingClause = null;
+    if (selectedClause !== null) {
+      $("notebook").querySelector(`[data-clause-id="${clause.id}"]`)?.focus({ preventScroll: true });
     }
-    saveClause("DELETE", clause.id);
+  } else if (action === "edit") {
+    startClauseEntry(clause);
+  } else if (action === "resolve") {
+    changeClause(clause.id, (latest) => ({ resolved: latest.status !== "resolved" }));
+  } else if (action === "toggle-card") {
+    const card = Number(button.dataset.cardId);
+    changeClause(clause.id, (latest) => ({
+      excluded_cards: latest.excluded_cards.includes(card)
+        ? latest.excluded_cards.filter((id) => id !== card)
+        : [...latest.excluded_cards, card],
+    }));
+  } else if (action === "delete" && window.confirm(`Delete clause #${clause.id}?`)) {
+    if (clauseDraft?.id === clause.id) {
+      showError("Finish or cancel editing this clause before deleting it.");
+      return;
+    }
+    saveClause("DELETE", clause.id, undefined, () => {
+      if (selectedClause === clause.id) selectedClause = null;
+      renderNotebook(currentState);
+      renderClauses(currentState);
+    });
   }
 });
 $("notebook").addEventListener("keydown", (event) => {
@@ -1736,11 +1862,11 @@ $("board-workspace-tabs").addEventListener("click", (event) => {
 $("board-workspace-tabs").addEventListener("keydown", (event) => {
   const tab = event.target.closest("[role='tab']");
   if (!tab) return;
-  const available = boardTabs.filter((name) => narrowBoardLayout.matches || name !== "board");
+  const available = boardTabs;
   const index = available.indexOf(tab.id.replace("board-tab-", ""));
   let next = null;
-  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-    const offset = event.key === "ArrowRight" ? 1 : -1;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const offset = event.key === "ArrowDown" ? 1 : -1;
     next = available[(index + offset + available.length) % available.length];
   } else if (event.key === "Home") next = available[0];
   else if (event.key === "End") next = available[available.length - 1];
@@ -1749,11 +1875,6 @@ $("board-workspace-tabs").addEventListener("keydown", (event) => {
   switchBoardTab(next);
   $(`board-tab-${next}`).focus();
 });
-narrowBoardLayout.addEventListener("change", () => {
-  if (document.body.classList.contains("board-game")) {
-    switchBoardTab(document.body.dataset.boardTab);
-  }
-});
 $("end-button").addEventListener("click", () => submitAction({ action: "end_turn" }));
 $("pass-button").addEventListener("click", () => submitAction({ action: "pass" }));
 $("card-view-tabs").addEventListener("click", (event) => {
@@ -1761,26 +1882,6 @@ $("card-view-tabs").addEventListener("click", (event) => {
   if (!button || !currentState) return;
   cardView = button.dataset.cardView;
   renderHand(currentState);
-});
-$("card-details-tabs").addEventListener("click", (event) => {
-  const tab = event.target.closest("[role='tab']");
-  if (!tab) return;
-  const name = tab.id.replace("card-details-tab-", "");
-  if (name === "history") switchInsightsTab("history");
-  switchCardDetailsTab(name);
-});
-$("card-details-tabs").addEventListener("keydown", (event) => {
-  const tab = event.target.closest("[role='tab']");
-  if (!tab) return;
-  const next = event.key === "ArrowRight" || event.key === "ArrowLeft"
-    ? (tab.id === "card-details-tab-notebook" ? "history" : "notebook")
-    : event.key === "Home" ? "notebook"
-      : event.key === "End" ? "history" : null;
-  if (!next) return;
-  event.preventDefault();
-  if (next === "history") switchInsightsTab("history");
-  switchCardDetailsTab(next);
-  $(`card-details-tab-${next}`).focus();
 });
 $("pause-button").addEventListener("click", togglePause);
 $("next-turn-button").addEventListener("click", nextTurn);
@@ -1795,16 +1896,19 @@ for (const id of ["viewer-select", "clause-actor", "clause-kind"]) {
 for (const id of ["history-actor", "history-kind"]) {
   $(id).addEventListener("change", () => currentState && renderHistory(currentState.events));
 }
-for (const name of ["history", "clauses"]) {
+for (const name of insightsTabs) {
   $(`${name}-tab`).addEventListener("click", () => switchInsightsTab(name));
 }
 $("insights-tabs").addEventListener("keydown", (event) => {
   const tab = event.target.closest("[role='tab']");
   if (!tab) return;
-  const next = event.key === "ArrowRight" || event.key === "ArrowLeft"
-    ? (tab.id === "history-tab" ? "clauses" : "history")
-    : event.key === "Home" ? "history"
-      : event.key === "End" ? "clauses" : null;
+  const index = insightsTabs.indexOf(tab.id.replace("-tab", ""));
+  let next = null;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const offset = event.key === "ArrowDown" ? 1 : -1;
+    next = insightsTabs[(index + offset + insightsTabs.length) % insightsTabs.length];
+  } else if (event.key === "Home") next = insightsTabs[0];
+  else if (event.key === "End") next = insightsTabs[insightsTabs.length - 1];
   if (!next) return;
   event.preventDefault();
   switchInsightsTab(next);

@@ -36,6 +36,7 @@ window.setupWizard = (() => {
     summoned_suggestion: "rule-summoned", secret_passages: "rule-passages",
   };
   const storageKey = "clue-engine-setup-profiles";
+  const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
   let step = 0;
   let characters = [0, 1, 2, 3, 4, 5];
   let bots = [];
@@ -92,7 +93,7 @@ window.setupWizard = (() => {
       }
     }
     if (isBoard() && !metadata) {
-      showError("Board starting positions are unavailable. Reload the page and try again.");
+      showError(missingBoardSetup);
       return false;
     }
     return true;
@@ -288,7 +289,10 @@ window.setupWizard = (() => {
   }
 
   function payload() {
-    if (!validBasics()) throw new Error("Correct the game settings before continuing.");
+    if (!validBasics()) {
+      throw new Error(lastError === missingBoardSetup ? missingBoardSetup : "Correct the game settings before continuing.");
+    }
+    syncSeats();
     const count = Number($("players").value);
     const value = {
       mode: $("mode").value, game_type: isBoard() ? "board" : "card_only",
@@ -343,7 +347,8 @@ window.setupWizard = (() => {
       if (Number(button.dataset.setupStep) === step) button.setAttribute("aria-current", "step");
       else button.removeAttribute("aria-current");
     }
-    $("setup-back").hidden = step === 0;
+    $("setup-back").classList.toggle("navigation-placeholder", step === 0);
+    $("setup-quick-play").classList.toggle("navigation-placeholder", step === 4);
     $("setup-next").hidden = step === 4;
     $("setup-next").textContent = `Next: ${["Seats", "Bots", "Rules", "Review"][step] || "Review"}`;
     $("setup-start").hidden = step !== 4;
