@@ -97,6 +97,27 @@ def test_desktop_profiles_persist_validate_and_require_csrf(tmp_path):
         )
         assert response.status_code == 200
         assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": updated}}
+    shuffled = dict(profile, shuffle_bots=True)
+    assert client.put(
+        "/api/desktop/profiles", json={"profiles": {"Game": shuffled}}, headers=headers
+    ).status_code == 200
+    assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": shuffled}}
+    randomized = dict(profile, board_rules={
+        **profile["board_rules"], "randomize_rooms": True, "randomize_doors": True,
+        "randomize_passages": True, "passage_count": 4,
+    })
+    assert client.put(
+        "/api/desktop/profiles", json={"profiles": {"Game": randomized}}, headers=headers
+    ).status_code == 200
+    assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": randomized}}
+    invalid_count = dict(randomized, board_rules={**randomized["board_rules"], "passage_count": 5})
+    assert client.put(
+        "/api/desktop/profiles", json={"profiles": {"Bad": invalid_count}}, headers=headers
+    ).status_code == 400
+    assert client.put(
+        "/api/desktop/profiles", json={"profiles": {"Bad": dict(profile, shuffle_bots="yes")}},
+        headers=headers,
+    ).status_code == 400
     invalid_mode = dict(profile, notebook_mode="unknown")
     assert client.put(
         "/api/desktop/profiles", json={"profiles": {"Bad": invalid_mode}}, headers=headers
@@ -129,6 +150,23 @@ def test_desktop_fullscreen_api_tracks_window_state_and_reports_errors():
     with pytest.raises(RuntimeError, match="native failure"):
         api.toggle_fullscreen()
     assert api.fullscreen_state() is False
+
+
+def test_desktop_quit_closes_window_and_reports_errors():
+    api = desktop._DesktopWindowApi()
+    with pytest.raises(RuntimeError, match="not available"):
+        api.quit()
+    calls = []
+    api._bind_window(SimpleNamespace(destroy=lambda: calls.append("destroy")))
+    api.quit()
+    assert calls == ["destroy"]
+
+    def fail():
+        raise RuntimeError("native failure")
+
+    api._bind_window(SimpleNamespace(destroy=fail))
+    with pytest.raises(RuntimeError, match="native failure"):
+        api.quit()
 
 
 @pytest.mark.parametrize("fail", [False, True])

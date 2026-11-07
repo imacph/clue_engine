@@ -39,7 +39,8 @@ window.setupWizard = (() => {
     summoned_suggestion: "rule-summoned", secret_passages: "rule-passages",
     early_end: "rule-early-end", revisit_hallways: "rule-revisit",
     optional_suggestion: "rule-optional-suggestion", accuse_in_room: "rule-accuse-room",
-    stay_to_suggest: "rule-stay-suggest",
+    stay_to_suggest: "rule-stay-suggest", randomize_rooms: "rule-randomize-rooms",
+    randomize_doors: "rule-randomize-doors", randomize_passages: "rule-randomize-passages",
   };
   const gameRuleIds = {
     reverse_refutation: "rule-reverse-refutation", public_refutations: "rule-public-refutations",
@@ -48,9 +49,11 @@ window.setupWizard = (() => {
   const standardRules = {
     move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true,
     early_end: true, revisit_hallways: false, optional_suggestion: false, accuse_in_room: false,
-    stay_to_suggest: false,
+    stay_to_suggest: false, randomize_rooms: false, randomize_doors: false,
+    randomize_passages: false, passage_count: 2,
   };
   const storageKey = "clue-engine-setup-profiles";
+  const quickplayProfile = "__clue_engine_quickplay__";
   const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
   let step = 0;
   let characters = [0, 1, 2, 3, 4, 5];
@@ -285,11 +288,15 @@ window.setupWizard = (() => {
   }
 
   function rules() {
-    return Object.fromEntries(Object.entries(ruleIds).map(([key, id]) => [key, $(id).checked]));
+    return {
+      ...Object.fromEntries(Object.entries(ruleIds).map(([key, id]) => [key, $(id).checked])),
+      passage_count: Number($("rule-passage-count").value),
+    };
   }
 
   function setRules(value) {
     for (const [key, id] of Object.entries(ruleIds)) $(id).checked = value[key] ?? standardRules[key];
+    $("rule-passage-count").value = String(value.passage_count ?? standardRules.passage_count);
     renderRules();
   }
 
@@ -297,8 +304,9 @@ window.setupWizard = (() => {
     $("board-rules-fields").disabled = !isBoard();
     $("card-rules-note").hidden = isBoard();
     $("rule-summoned").disabled = !isBoard() || !$("rule-move-suspect").checked;
+    $("rule-passage-count").disabled = !isBoard() || !$("rule-randomize-passages").checked;
     const value = rules();
-    const matches = (preset) => Object.keys(ruleIds).every((key) => value[key] === preset[key]);
+    const matches = (preset) => Object.keys(standardRules).every((key) => value[key] === preset[key]);
     $("rule-preset").value = matches(standardRules) ? "standard"
       : matches({ ...standardRules, move_suspect: false, move_weapon: false, summoned_suggestion: false })
         ? "no-relocation" : "custom";
@@ -315,6 +323,7 @@ window.setupWizard = (() => {
       notebook_mode: $("mode").value === "spectate" ? "automatic" : $("notebook-mode").value,
       players: count, seat: Number($("seat").value), seed: Number($("seed").value),
       bots: copy(bots.slice(0, count)), progress: $("progress").value,
+      shuffle_bots: $("shuffle-bots").checked,
       max_steps: Number($("max-steps").value), debug: $("debug").checked,
       game_rules: Object.fromEntries(
         Object.entries(gameRuleIds).map(([key, id]) => [key, $(id).checked])
@@ -327,9 +336,24 @@ window.setupWizard = (() => {
     return value;
   }
 
-  function renderReview() {
+  function resolveBotSeats(data) {
+    const result = copy(data);
+    if (result.shuffle_bots) {
+      const seats = Array.from({ length: result.players }, (_, i) => i)
+        .filter((i) => result.mode !== "play" || i !== result.seat);
+      let state = (result.seed ^ 0x9e3779b9) >>> 0;
+      for (let i = seats.length - 1; i > 0; i--) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        const j = Math.floor(state / 4294967296 * (i + 1));
+        [result.bots[seats[i]], result.bots[seats[j]]] = [result.bots[seats[j]], result.bots[seats[i]]];
+      }
+    }
+    delete result.shuffle_bots;
+    return result;
+  }
+
+  function renderReview(review = $("setup-review"), includeSeed = true) {
     const data = payload();
-    const review = $("setup-review");
     review.replaceChildren();
     const add = (title, text) => {
       const paragraph = document.createElement("p");
@@ -340,17 +364,25 @@ window.setupWizard = (() => {
     };
     add("Game", `${data.game_type === "board" ? "Board" : "Cards only"} · ${data.mode} · ${data.players} players`);
     add("Notebook", data.notebook_mode === "manual" ? "Manual" : "Automatic");
-    add("Seed", String(data.seed));
+    if (includeSeed) add("Seed", String(data.seed));
+    if (data.shuffle_bots) {
+      const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
+        .map((bot) => typeof bot === "string" ? bot : "custom");
+      add("Bot styles", `${styles.join(", ")} · randomly assigned to bot seats`);
+    }
     for (let i = 0; i < data.players; i++) {
       const human = data.mode === "play" && i === data.seat;
       const character = data.seat_suspects ? ` · ${cardName(data.seat_suspects[i])}` : "";
-      const bot = human ? "You" : `Bot: ${typeof data.bots[i] === "string" ? data.bots[i] : "custom"} (${score(data.bots[i])}/100)`;
+      const bot = human ? "You" : data.shuffle_bots ? "Bot (random style)"
+        : `Bot: ${typeof data.bots[i] === "string" ? data.bots[i] : "custom"} (${score(data.bots[i])}/100)`;
       add(`Player ${i + 1}`, `${bot}${character}${data.seat_suspects && data.seat_suspects[i] === 0 ? " · starts" : ""}`);
     }
     if (data.board_rules) {
       const changed = Object.entries(data.board_rules)
-        .filter(([key, value]) => value !== standardRules[key])
-        .map(([key, value]) => `${key.replaceAll("_", " ")} ${value ? "on" : "off"}`);
+        .filter(([key, value]) => key === "passage_count"
+          ? data.board_rules.randomize_passages : value !== standardRules[key])
+        .map(([key, value]) => key === "passage_count" ? `passages ${value}`
+          : `${key.replaceAll("_", " ")} ${value ? "on" : "off"}`);
       add("Board rules", changed.length ? changed.join(", ") : "Standard");
     }
     const gameChanges = Object.entries(data.game_rules).filter(([, value]) => value)
@@ -370,7 +402,8 @@ window.setupWizard = (() => {
       if (Number(button.dataset.setupStep) === step) button.setAttribute("aria-current", "step");
       else button.removeAttribute("aria-current");
     }
-    $("setup-back").classList.toggle("navigation-placeholder", step === 0);
+    $("setup-back").textContent = step === 0 ? "Main menu" : "Back";
+    document.querySelector(".setup-navigation").classList.toggle("review-step", step === 4);
     $("setup-quick-play").classList.toggle("navigation-placeholder", step === 4);
     $("setup-next").hidden = step === 4;
     $("setup-next").textContent = `Next: ${["Seats", "Bots", "Rules", "Review"][step] || "Review"}`;
@@ -388,6 +421,7 @@ window.setupWizard = (() => {
     $("progress").value = data.progress;
     $("max-steps").value = String(data.max_steps);
     $("debug").checked = data.debug;
+    $("shuffle-bots").checked = data.shuffle_bots === true;
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
     bots = copy(data.bots);
     for (const [key, id] of Object.entries(gameRuleIds)) {
@@ -407,7 +441,7 @@ window.setupWizard = (() => {
   function validateProfile(data, withSeed = false) {
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid setup profile.");
     const allowed = ["mode", "game_type", "notebook_mode", "players", "seat", "bots", "seat_suspects",
-      "board_rules", "game_rules", "progress", "max_steps", "debug", ...(withSeed ? ["seed"] : [])];
+      "board_rules", "game_rules", "progress", "max_steps", "debug", "shuffle_bots", ...(withSeed ? ["seed"] : [])];
     if (Object.keys(data).some((key) => !allowed.includes(key))
       || !["play", "spectate"].includes(data.mode)
       || !["board", "card_only"].includes(data.game_type)
@@ -419,6 +453,7 @@ window.setupWizard = (() => {
       || !["auto", "turn", "step"].includes(data.progress)
       || !Number.isSafeInteger(data.max_steps) || data.max_steps < 0
       || typeof data.debug !== "boolean"
+      || (data.shuffle_bots !== undefined && typeof data.shuffle_bots !== "boolean")
       || (withSeed && (!Number.isInteger(data.seed) || data.seed < 0 || data.seed > 4294967295))) {
       throw new Error("Invalid setup profile.");
     }
@@ -435,7 +470,9 @@ window.setupWizard = (() => {
         || new Set(data.seat_suspects).size !== data.players || !data.seat_suspects.includes(0)
         || data.seat_suspects.some((id) => !Number.isInteger(id) || id < 0 || id > 5)
         || !data.board_rules || !["move_suspect", "move_weapon", "summoned_suggestion", "secret_passages"].every((key) => Object.hasOwn(data.board_rules, key))
-        || Object.keys(data.board_rules).some((key) => !Object.hasOwn(ruleIds, key) || typeof data.board_rules[key] !== "boolean")
+        || Object.keys(data.board_rules).some((key) => key === "passage_count"
+          ? !Number.isInteger(data.board_rules[key]) || data.board_rules[key] < 0 || data.board_rules[key] > 4
+          : !Object.hasOwn(ruleIds, key) || typeof data.board_rules[key] !== "boolean")
         || (!data.board_rules.move_suspect && data.board_rules.summoned_suggestion)) {
         throw new Error("Invalid board settings in setup profile.");
       }
@@ -452,7 +489,9 @@ window.setupWizard = (() => {
     const select = $("profile-select");
     const selected = select.value;
     select.replaceChildren(option("", "Choose a profile"));
-    for (const name of Object.keys(profiles).sort()) select.append(option(name, name));
+    for (const name of Object.keys(profiles).sort()) {
+      if (name !== quickplayProfile) select.append(option(name, name));
+    }
     select.value = Object.hasOwn(profiles, selected) ? selected : "";
   }
 
@@ -502,6 +541,23 @@ window.setupWizard = (() => {
     $("replay-setup").disabled = false;
   }
 
+  function defaultQuickplay() {
+    return {
+      mode: "play", game_type: "board", notebook_mode: "manual", players: 4, seat: 0,
+      bots: ["random", "deductive", "probing", "strategic"], shuffle_bots: true,
+      seat_suspects: [0, 1, 2, 3], board_rules: { ...standardRules },
+      game_rules: Object.fromEntries(Object.keys(gameRuleIds).map((key) => [key, false])),
+      progress: "turn", max_steps: 10000, debug: false,
+    };
+  }
+
+  async function loadQuickplay() {
+    await profilesLoad;
+    const data = profiles[quickplayProfile] ?? defaultQuickplay();
+    if (data.game_type === "board") await metadataReady;
+    loadSetup(data, false);
+  }
+
   for (const name of Object.keys(presets)) {
     $("all-bots").append(option(name, name[0].toUpperCase() + name.slice(1)));
   }
@@ -523,7 +579,10 @@ window.setupWizard = (() => {
       try { loadSetup(lastSetup, true); } catch (error) { showError(error.message); }
     }
   });
-  $("setup-back").addEventListener("click", () => showStep(step - 1));
+  $("setup-back").addEventListener("click", () => {
+    if (step === 0) showMainMenu();
+    else showStep(step - 1);
+  });
   $("setup-next").addEventListener("click", () => {
     if (validBasics()) { showError(""); syncSeats(); showStep(step + 1); }
   });
@@ -597,11 +656,13 @@ window.setupWizard = (() => {
       renderRules();
     });
   }
+  $("rule-passage-count").addEventListener("change", renderRules);
   $("profile-save").addEventListener("click", async () => {
     try {
       if (!profilesReady) throw new Error("Setup profiles were not loaded; reload before saving.");
       const name = $("profile-name").value.trim();
       if (!name || name.length > 80) throw new Error("Enter a profile name of up to 80 characters.");
+      if (name === quickplayProfile) throw new Error("This profile name is reserved.");
       if (Object.hasOwn(profiles, name) && !await confirmAction(`Replace profile "${name}"?`, {
         title: "Replace profile", confirmLabel: "Replace profile",
       })) return;
@@ -635,6 +696,7 @@ window.setupWizard = (() => {
       const name = $("profile-name").value.trim();
       if (!Object.hasOwn(profiles, oldName)) throw new Error("Choose a saved profile to rename.");
       if (!name || name.length > 80) throw new Error("Enter a new profile name of up to 80 characters.");
+      if (name === quickplayProfile) throw new Error("This profile name is reserved.");
       if (name === oldName) throw new Error("Enter a different profile name.");
       if (Object.hasOwn(profiles, name) && !await confirmAction(`Replace profile "${name}"?`, {
         title: "Replace profile", confirmLabel: "Replace profile",
@@ -663,10 +725,25 @@ window.setupWizard = (() => {
       showError("");
     } catch (error) { showError(error.message); }
   });
-  requestJson("/api/setup").then((data) => { metadata = data; renderPreview(); })
-    .catch((error) => showError(`Could not load board setup: ${error.message}`));
-  loadProfiles().catch((error) => showError(`Could not load setup profiles: ${error.message}`));
+  $("save-quickplay-default").addEventListener("click", async () => {
+    try {
+      if (!profilesReady) throw new Error("Setup profiles were not loaded; reload before saving.");
+      const data = payload();
+      delete data.seed;
+      validateProfile(data);
+      if (!Object.hasOwn(profiles, quickplayProfile) && Object.keys(profiles).length >= 100) {
+        throw new Error("A maximum of 100 profiles can be saved. Delete a profile first.");
+      }
+      await persistProfiles(Object.assign(Object.create(null), profiles, { [quickplayProfile]: data }));
+      $("quickplay-status").textContent = "Quickplay defaults saved.";
+      showError("");
+    } catch (error) { showError(error.message); }
+  });
+  const metadataReady = requestJson("/api/setup").then((data) => { metadata = data; renderPreview(); });
+  metadataReady.catch((error) => showError(`Could not load board setup: ${error.message}`));
+  const profilesLoad = loadProfiles();
+  profilesLoad.catch((error) => showError(`Could not load setup profiles: ${error.message}`));
   syncSeats();
   beginFresh();
-  return { payload, beginFresh, rememberStarted };
+  return { payload, resolveBotSeats, beginFresh, rememberStarted, loadQuickplay, renderReview };
 })();

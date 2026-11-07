@@ -33,27 +33,38 @@
       <p class="eyebrow">A deduction game simulator</p>
       <h1>Clue Engine</h1>
     </div>
-    <div id="header-tools" class="header-tools">
-      <button id="theme-toggle" class="theme-toggle" type="button">
-        <span id="theme-icon" aria-hidden="true">☾</span>
-        <span id="theme-label">Dark mode</span>
-      </button>
-      <button id="fullscreen-toggle" class="theme-toggle" type="button" disabled
-              aria-pressed="false" {% if not desktop_mode %}hidden{% endif %}>Full screen</button>
-      <span class="local-badge">Local game</span>
-    </div>
+    <div id="header-tools" class="header-tools"></div>
   </header>
 
   <main>
     <p id="error-message" class="error-message" role="alert" hidden></p>
-    <section id="setup-screen" class="setup-card">
+    <section id="main-menu" class="setup-card main-menu" aria-labelledby="main-menu-title">
+      <div class="main-menu-intro">
+        <p class="eyebrow">A game of deduction</p>
+        <h2 id="main-menu-title" tabindex="-1">Your next case awaits.</h2>
+        <p>Gather the evidence, follow the clues, and solve the mystery.</p>
+      </div>
+      <div class="main-menu-panel">
+        <div class="main-menu-actions">
+          <button id="main-quick-play" class="button button-primary main-menu-primary" type="button">Quick play <span>Review your defaults and start</span></button>
+          <button id="main-setup" class="button button-secondary" type="button">Game setup</button>
+          <button id="replay-import-button" class="button button-secondary" type="button">Load replay</button>
+        </div>
+        <div class="main-menu-settings" aria-label="Display and application options">
+          <button id="fullscreen-toggle" class="button button-quiet" type="button" disabled>Full screen</button>
+          <button id="theme-toggle" class="button button-quiet" type="button">Dark mode</button>
+          <button id="main-quit" class="button button-quiet" type="button" {% if not desktop_mode %}hidden{% endif %}>Quit game</button>
+        </div>
+      </div>
+      <input id="replay-import" type="file" accept=".json,application/json" hidden>
+    </section>
+    <section id="setup-screen" class="setup-card" hidden>
       <div class="section-heading">
         <div>
           <p class="eyebrow">Get started</p>
           <h2>New game</h2>
         </div>
-        <button id="replay-import-button" class="button button-quiet" type="button">Import replay</button>
-        <input id="replay-import" type="file" accept=".json,application/json" hidden>
+        <button id="setup-menu" class="button button-quiet" type="button">Main menu</button>
       </div>
       <form id="setup-form" novalidate>
         <nav class="wizard-progress" aria-label="New game steps">
@@ -65,7 +76,9 @@
         </nav>
         <div class="form-actions setup-navigation">
           <button class="button button-quiet" id="setup-back" type="button">Back</button>
-          <button class="button button-secondary" id="setup-quick-play" type="submit">Quick play</button>
+          <span id="quickplay-status" class="hint" role="status"></span>
+          <button id="save-quickplay-default" class="button button-secondary" type="button">Save as quickplay defaults</button>
+          <button class="button button-secondary" id="setup-quick-play" type="submit">Start game</button>
           <button class="button button-primary" id="setup-next" type="button">Next</button>
           <button class="button button-primary" id="setup-start" type="submit" hidden>Start game</button>
         </div>
@@ -181,6 +194,10 @@
             <label>Apply preset to all bots <select id="all-bots"></select></label>
             <button type="button" class="button button-secondary" id="apply-bots">Apply to all</button>
           </div>
+          <label class="check-row">
+            <input id="shuffle-bots" type="checkbox">
+            <span><strong>Randomly assign bot styles to seats</strong><small>Shuffle the configured bots among bot seats when the game starts.</small></span>
+          </label>
           <div class="setup-bots-intro">
             <p class="hint">Toolkit scores describe enabled techniques, not win probability.</p>
             <details>
@@ -218,6 +235,17 @@
             <div class="setup-rules-grid">
               <label class="check-row"><input type="checkbox" id="rule-passages" checked><span><strong>Allow secret passages</strong><small>Disabling passages may leave players blocked and reach the action limit.</small></span></label>
             </div>
+            <h4>Board layout</h4>
+            <div class="setup-rules-grid">
+              <label class="check-row"><input type="checkbox" id="rule-randomize-rooms"><span><strong>Scramble rooms</strong><small>Shuffle room identities among board locations.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-randomize-doors"><span><strong>Randomize doors</strong><small>Keep each room's door count, with at most one per side and away from corners.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-randomize-passages"><span><strong>Randomize passages</strong><small>Pair random rooms; each room can have at most one passage.</small></span></label>
+              <label>Number of passages
+                <select id="rule-passage-count" disabled>
+                  <option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
+                </select>
+              </label>
+            </div>
             <h4>Suggestions and relocation</h4>
             <div class="setup-rules-grid">
               <label class="check-row"><input type="checkbox" id="rule-stay-suggest"><span><strong>Suggest without moving</strong><small>Start a turn in a room and suggest there instead of rolling or taking a passage.</small></span></label>
@@ -251,7 +279,7 @@
         <div>
           <p class="eyebrow">Current game</p>
           <h2 id="game-status" aria-live="polite">Starting game…</h2>
-          <p id="game-meta" class="muted"></p>
+          <p id="game-meta" class="muted"><span id="knowledge-conflicts" role="status"></span><span id="game-progress-meta"></span></p>
         </div>
         <div id="game-toolbar" class="toolbar">
           <button id="pause-button" class="button button-secondary" type="button">Pause</button>
@@ -260,32 +288,16 @@
             <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
           </div>
           <button id="replay-open" class="button button-secondary" type="button" hidden>Replay</button>
-          <details class="game-options">
-            <summary class="button button-quiet">Game options</summary>
-            <div class="game-options-menu">
-              <button id="new-game-button" class="button button-quiet" type="button">New game</button>
-              <button id="replay-end" class="button button-danger" type="button">End and reveal</button>
-            </div>
-          </details>
+          <button id="game-options-open" class="button button-quiet" type="button">Game options</button>
         </div>
       </div>
       <div id="replay-controls" class="replay-controls" hidden>
           <strong>Replay</strong>
-          <button id="replay-previous-turn" type="button">Previous turn</button>
-          <button id="replay-previous" type="button">Previous</button>
-          <input id="replay-position" type="range" min="0" value="0" aria-label="Replay position">
-          <button id="replay-next" type="button">Next</button>
-          <button id="replay-next-turn" type="button">Next turn</button>
           <label>Player <select id="replay-player"></select></label>
-          <label><input id="replay-manual" type="checkbox"> Original notes</label>
-          <label><input id="replay-omniscient" type="checkbox"> Reveal all</label>
+          <label class="replay-checkbox"><input id="replay-manual" type="checkbox"> Original notes</label>
+          <label class="replay-checkbox"><input id="replay-omniscient" type="checkbox"> Reveal all</label>
           <button id="replay-export" type="button">Save private replay</button>
           <button id="replay-close" type="button">Close replay</button>
-          <details class="replay-deductions">
-            <summary>Inferred envelope discoveries so far</summary>
-            <p class="hint">Automatic deductions from the selected player's observations, not necessarily what they noticed. Reveal all shows every player.</p>
-            <div id="replay-deductions"></div>
-          </details>
       </div>
       <details id="debug-panel" class="debug-panel" hidden>
         <summary id="debug-summary">Omniscient information</summary>
@@ -296,7 +308,7 @@
         <div id="board-workspace-tabs" class="board-workspace-tabs" role="tablist" aria-orientation="vertical"
              aria-label="Board game workspace" hidden>
           <button id="board-tab-cards" class="board-workspace-tab" type="button" role="tab"
-                  aria-controls="cards-panel" aria-selected="true">Cards &amp; actions</button>
+                  aria-controls="cards-panel" aria-selected="true">Actions</button>
           <button id="board-tab-history" class="board-workspace-tab" type="button" role="tab"
                   aria-controls="history-panel" aria-selected="false" tabindex="-1">History</button>
           <button id="board-tab-clauses" class="board-workspace-tab" type="button" role="tab"
@@ -307,36 +319,39 @@
                   aria-controls="help-panel" aria-selected="false" tabindex="-1">Help</button>
         </div>
         <section id="board-panel" class="panel board-panel" aria-labelledby="board-title" hidden>
-          <div class="board-toolbar">
-          <div class="board-heading">
-            <div>
-              <p class="eyebrow">Explore the mansion</p>
+          <div class="board-command">
+            <div class="board-toolbar">
               <h3 id="board-title">Game board</h3>
-            </div>
-            <div class="board-heading-tools">
+              <div class="board-turn-info">
+                <span id="board-turn-marker" class="board-turn-marker" aria-hidden="true"></span>
+                <span class="board-turn-copy"><span id="board-turn-label">Current turn</span><strong id="board-turn"></strong></span>
+              </div>
               <button id="board-zoom-button" class="board-zoom-button" type="button" aria-pressed="false">Zoom board</button>
-              <span id="board-turn" class="board-turn-badge"></span>
             </div>
+            <div class="board-actions-row">
+              <div id="board-dice" class="board-dice" role="group" aria-label="Dice not rolled">
+                <span class="die" data-value="0" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="die" data-value="0" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="board-dice-result" aria-hidden="true"><span>Total</span><strong id="board-dice-total">–</strong></span>
+              </div>
+              <div class="board-movement">
+                <span class="board-movement-copy">
+                  <span class="board-movement-label">Movement</span>
+                  <strong id="board-remaining" class="board-remaining"></strong>
+                </span>
+                <div class="board-turn-actions">
+                  <button id="board-roll-button" class="button button-primary" type="button" hidden>Roll dice</button>
+                  <button id="board-passage-button" class="button button-secondary" type="button" hidden>Take passage</button>
+                </div>
+              </div>
+            </div>
+            <p id="board-instruction" class="board-instruction" aria-live="polite"></p>
           </div>
-          <div class="board-controls">
-            <div id="board-dice" class="board-dice" role="group" aria-label="Dice not rolled">
-              <span class="board-dice-label" aria-hidden="true">Roll</span>
-              <span class="die" aria-hidden="true">–</span><span class="die" aria-hidden="true">–</span>
-              <span id="board-dice-total" class="board-dice-total" aria-hidden="true" hidden></span>
-            </div>
-            </div>
-            <span id="board-remaining" class="board-remaining"></span>
-            <div class="board-turn-actions">
-              <button id="board-roll-button" class="button button-primary" type="button" hidden>Roll dice</button>
-              <button id="board-passage-button" class="button button-secondary" type="button" hidden>Take passage</button>
-            </div>
-          </div>
-          <p id="board-instruction" class="board-instruction" aria-live="polite"></p>
           <div id="board-map-shell" class="board-map-shell" tabindex="0" aria-label="Board viewport; use arrow keys to move">
             <svg id="board-map" class="board-map" role="group" aria-labelledby="board-title"
                  aria-describedby="board-instruction"></svg>
           </div>
-          <p class="board-map-key">P1–P6 players · initials unassigned · ↗ passage · ◆ weapons</p>
+          <p class="board-map-key">P1–P6 players · initials unassigned · matching letters: passages · ◆ weapons</p>
         </section>
 
         <section id="cards-panel" class="panel hand-panel">
@@ -353,17 +368,43 @@
           </div>
           <div class="card-workspace">
             <div id="hand-cards" class="hand-cards" aria-label="Cards in hand"></div>
+            <section id="replay-knowledge" class="replay-knowledge" aria-labelledby="replay-knowledge-title" hidden>
+              <h3 id="replay-knowledge-title">Player knowledge</h3>
+              <div id="replay-knowledge-columns" class="replay-filters" role="group" aria-label="Knowledge columns">
+                <span class="replay-filter-label">Columns</span>
+                <label><input type="checkbox" data-knowledge-column="total" checked> Total</label>
+                <label><input type="checkbox" data-knowledge-column="suspect" checked> Suspects</label>
+                <label><input type="checkbox" data-knowledge-column="weapon" checked> Weapons</label>
+                <label><input type="checkbox" data-knowledge-column="room" checked> Rooms</label>
+                <label><input type="checkbox" data-knowledge-column="envelope" checked> Envelope</label>
+              </div>
+              <div class="replay-knowledge-scroll">
+                <table id="replay-knowledge-table" class="replay-knowledge-table">
+                  <thead><tr>
+                    <th id="replay-knowledge-head-player" scope="col"><button type="button" data-knowledge-sort="player">Player</button></th>
+                    <th id="replay-knowledge-head-total" scope="col"><button type="button" data-knowledge-sort="total">Total</button></th>
+                    <th id="replay-knowledge-head-suspect" scope="col"><button type="button" data-knowledge-sort="suspect">Suspects</button></th>
+                    <th id="replay-knowledge-head-weapon" scope="col"><button type="button" data-knowledge-sort="weapon">Weapons</button></th>
+                    <th id="replay-knowledge-head-room" scope="col"><button type="button" data-knowledge-sort="room">Rooms</button></th>
+                    <th id="replay-knowledge-head-envelope" scope="col"><button type="button" data-knowledge-sort="envelope">Envelope</button></th>
+                  </tr></thead>
+                  <tbody id="replay-knowledge-body"></tbody>
+                </table>
+              </div>
+            </section>
             <aside class="card-interaction" aria-live="polite">
-              <div>
+              <div class="card-interaction-heading">
                 <h4 id="card-interaction-title">Your combination</h4>
-                <p id="card-interaction-hint" class="hint"></p>
                 <div id="activity-meta" class="activity-meta" hidden>
                   <span id="activity-kind" class="activity-kind"></span>
                   <span id="activity-player"></span>
                 </div>
+                <div id="activity-passes" class="activity-passes"></div>
               </div>
-              <div id="focus-cards" class="focus-cards"></div>
-              <div id="selected-cards" class="selected-cards"></div>
+              <div id="card-interaction-stage" class="card-interaction-stage">
+                <div id="focus-cards" class="focus-cards"></div>
+                <div id="selected-cards" class="selected-cards"></div>
+              </div>
               <div id="card-action-buttons" class="card-action-buttons">
                 <button id="card-suggest-button" class="button button-primary" type="button" disabled>Suggest</button>
                 <button id="card-accuse-button" class="button button-danger" type="button" disabled>Accuse</button>
@@ -433,6 +474,10 @@
           </section>
           <section id="help-panel" class="panel help-panel" role="tabpanel"
                    aria-labelledby="help-tab" tabindex="0" hidden>
+            <h3>Actions help</h3>
+            <p>Choose one suspect, weapon, and room from the card views, then select Suggest or Accuse. Board suggestions must name the room you occupy; accusations may name any room. Use current room restores it for a suggestion.</p>
+            <p>When responding to a suggestion, select a matching card from your hand to reveal it. If you have no matching card, select Pass.</p>
+            <p>Cards and board rooms can show the viewed player's hand and a positive notebook mark. If a card has multiple positive marks, correct the conflicting notebook entries. Toggle these indicators in Game options.</p>
             <h3>Notebook help</h3>
             <p>Columns show what each player may hold; E is the envelope. A plus means held, a minus means not held, and a question mark means unknown.</p>
             <p>In a manual notebook, activate any cell to cycle its mark. Hand facts are filled in initially, but you can change them. Use arrow keys to move between cells.</p>
@@ -452,8 +497,41 @@
             <ul id="board-room-list"></ul>
           </div>
         </section>
-
       </div>
+
+      <section id="replay-timeline" class="replay-footer" aria-label="Replay timeline" hidden>
+            <div class="replay-timeline">
+              <input id="replay-position" type="range" min="0" value="0" aria-label="Replay position">
+              <div class="replay-marker-track"><div id="replay-markers" aria-label="Replay discovery markers"></div></div>
+            </div>
+            <div class="replay-navigation">
+              <button id="replay-previous-turn" type="button">Previous turn</button>
+              <button id="replay-previous" type="button">Previous</button>
+              <button id="replay-play" type="button">Play</button>
+              <button id="replay-next" type="button">Next</button>
+              <button id="replay-next-turn" type="button">Next turn</button>
+              <label>Speed <select id="replay-speed" aria-label="Replay speed"><option value="2000">0.5×</option><option value="1000" selected>1×</option><option value="500">2×</option></select></label>
+            </div>
+            <div class="replay-discovery-controls">
+              <div class="replay-filters" role="group" aria-label="Flag types">
+                <span class="replay-filter-label">Flags</span>
+                <div id="replay-marker-types" class="replay-filter-buttons">
+                  <button type="button" data-marker-type="envelope" aria-pressed="true">Envelope</button>
+                  <button type="button" data-marker-type="holder" aria-pressed="false">Other players' cards</button>
+                  <button type="button" data-marker-type="all" aria-pressed="false">All</button>
+                  <button type="button" data-marker-type="none" aria-pressed="false">None</button>
+                </div>
+              </div>
+              <div class="replay-filters" role="group" aria-label="Players">
+                <span class="replay-filter-label">Players</span>
+                <div id="replay-marker-players" class="replay-filter-buttons"></div>
+              </div>
+              <button id="replay-previous-marker" type="button">Previous flag</button>
+              <button id="replay-next-marker" type="button">Next flag</button>
+              <span id="replay-marker-status" class="hint" aria-live="polite"></span>
+            </div>
+            <p id="replay-marker-details" class="hint replay-marker-details" aria-live="polite"></p>
+      </section>
     </section>
   </main>
   <footer>
@@ -469,6 +547,29 @@
         <button id="confirm-accept" class="button button-primary" type="submit" value="confirm">Continue</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="game-options-dialog" class="confirm-dialog game-options-dialog" aria-labelledby="game-options-title">
+    <h2 id="game-options-title">Game options</h2>
+    <p id="game-options-error" class="error-message" role="alert" hidden></p>
+    <div class="game-options-actions">
+      <label class="check-row"><input id="show-card-indicators" type="checkbox" checked><span>Show card indicators</span></label>
+      <label class="check-row" id="board-indicators-option"><input id="show-board-indicators" type="checkbox" checked><span>Show board room indicators</span></label>
+      <button id="game-fullscreen" class="button button-secondary" type="button" disabled>Full screen</button>
+      <button id="game-theme-toggle" class="button button-secondary" type="button">Dark mode</button>
+      <button id="replay-end" class="button button-danger" type="button">End and reveal</button>
+      <button id="new-game-button" class="button button-quiet" type="button">Exit game</button>
+      <button id="game-options-close" class="button button-quiet" type="button">Close</button>
+    </div>
+  </dialog>
+  <dialog id="quickplay-dialog" class="confirm-dialog quickplay-dialog" aria-labelledby="quickplay-title">
+    <p class="eyebrow">Ready to play</p>
+    <h2 id="quickplay-title">Quick play</h2>
+    <div id="quickplay-summary" class="quickplay-summary"></div>
+    <div class="quickplay-actions">
+      <button id="quickplay-cancel" class="button button-quiet" type="button">Back</button>
+      <button id="main-edit-default" class="button button-secondary" type="button">Edit quickplay defaults</button>
+      <button id="quickplay-start" class="button button-primary" type="button" autofocus>Start game</button>
+    </div>
   </dialog>
 </body>
 </html>

@@ -14,6 +14,14 @@ const setupSource = fs.readFileSync(
   path.join(__dirname, "..", "src", "clue_engine", "webapp", "static", "setup.js"),
   "utf8",
 );
+const stylesheet = fs.readFileSync(
+  path.join(__dirname, "..", "src", "clue_engine", "webapp", "static", "style.css"),
+  "utf8",
+);
+const template = fs.readFileSync(
+  path.join(__dirname, "..", "src", "clue_engine", "webapp", "templates", "index.html"),
+  "utf8",
+);
 const startup = source.indexOf("\nsetTheme(document.documentElement.dataset.theme);");
 assert.notEqual(startup, -1, "Could not find frontend initialization");
 
@@ -33,8 +41,10 @@ test("room-start suggestion explains whether the player was summoned", () => {
   assert.match(context.boardInstruction(state), /^You were summoned to Kitchen/);
 });
 
-function frontend({ notebook = false, workspace = false, history = false, debug = false } = {}) {
+function frontend({ notebook = false, workspace = false, history = false, debug = false, board = false, cards = false } = {}) {
   const elements = new Map();
+  const timers = new Map();
+  let nextTimer = 0;
   function element() {
     const classes = new Set();
     return {
@@ -54,22 +64,45 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
         for (const child of children) child.parentElement = this;
         this.children.push(...children);
       },
+      prepend(...children) {
+        for (const child of children) child.parentElement = this;
+        this.children.unshift(...children);
+      },
       replaceChildren(...children) {
         for (const child of children) child.parentElement = this;
         this.children = children;
       },
       contains() { return false; },
       focus() {},
+      addEventListener() {},
+      remove() {
+        if (this.parentElement) {
+          this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+        }
+      },
       setAttribute(name, value) { this[name] = value; },
+      getAttribute(name) { return this[name]; },
       removeAttribute(name) { delete this[name]; },
       insertBefore() {},
-      querySelector() { return null; },
+      querySelector(selector) {
+        if (selector === ".card-annotations" || selector === ".card-topline") {
+          const name = selector.slice(1);
+          for (const child of this.children) {
+            if (child.className === name) return child;
+            const nested = child.querySelector?.(selector);
+            if (nested) return nested;
+          }
+        }
+        return null;
+      },
+      get childElementCount() { return this.children.length; },
     };
   }
   const document = {
     activeElement: { closest() { return null; } },
     body: element(),
     getElementById(id) {
+      if (id === "board-room-notes" && !board) return null;
       if (!elements.has(id)) elements.set(id, element());
       return elements.get(id);
     },
@@ -79,6 +112,8 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
   document.getElementById("board-locations-panel").parentElement = element();
   const context = vm.createContext({
     document,
+    URLSearchParams,
+    performance: { now: () => 10000 },
     window: {
       clueOptions: {
         cards: {
@@ -89,16 +124,25 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       },
       matchMedia: () => ({ matches: false }),
     },
+    setTimeout(callback, delay) {
+      const id = ++nextTimer;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
   });
   vm.runInContext(source.slice(0, startup), context);
   vm.runInContext(`
-    renderBoard = renderHand = renderActions = appendCardReferences = () => {};
+    ${board ? "" : "renderBoard = "}${cards ? "" : "renderHand = "}renderActions = appendCardReferences = () => {};
     cardIllustration = () => document.createElement("svg");
+    ${cards ? "" : `
     createCardFace = (card) => {
       const face = document.createElement("article");
       face.textContent = card.name;
       return face;
     };
+    updateCardNotes = () => {};
+    `}
   `, context);
   if (!history) vm.runInContext("renderHistory = () => {}", context);
   if (!notebook) vm.runInContext("renderNotebook = () => {}", context);
@@ -133,6 +177,7 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
     evaluate(code) {
       return vm.runInContext(code, context);
     },
+    timers,
     async queueExclusions() {
       return vm.runInContext(`
         currentState = {
@@ -195,6 +240,20 @@ test("desktop full screen initializes, toggles, and reports failures", async () 
   assert.match(ui.element("error-message").textContent, /native error/);
 });
 
+test("theme controls stay synchronized in the main menu and game options", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    document.documentElement = { dataset: {} };
+    setTheme("dark");
+    const dark = ["theme-toggle", "game-theme-toggle"].map((id) => $(id).textContent);
+    setTheme("light");
+    return { dark, light: ["theme-toggle", "game-theme-toggle"].map((id) => $(id).textContent) };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    dark: ["Light mode", "Light mode"], light: ["Dark mode", "Dark mode"],
+  });
+});
+
 test("dice display shows both results and total, and clears on a new roll", () => {
   const ui = frontend();
   const result = ui.evaluate(`(() => {
@@ -202,30 +261,575 @@ test("dice display shows both results and total, and clears on a new roll", () =
     $("board-dice").querySelectorAll = () => dice;
     renderDice([3, 6]);
     const rolled = {
-      label: $("board-dice")["aria-label"], values: dice.map((die) => die.textContent),
+      label: $("board-dice")["aria-label"], values: dice.map((die) => die.dataset.value),
       total: $("board-dice-total").textContent, hidden: $("board-dice-total").hidden,
     };
     renderDice(null);
     return { rolled, empty: {
-      label: $("board-dice")["aria-label"], values: dice.map((die) => die.textContent),
+      label: $("board-dice")["aria-label"], values: dice.map((die) => die.dataset.value),
       total: $("board-dice-total").textContent, hidden: $("board-dice-total").hidden,
     } };
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    rolled: { label: "Dice: 3 and 6, total 9", values: ["3", "6"], total: "Total 9", hidden: false },
-    empty: { label: "Dice not rolled", values: ["–", "–"], total: "", hidden: true },
+    rolled: { label: "Dice: 3 and 6, total 9", values: ["3", "6"], total: "9", hidden: false },
+    empty: { label: "Dice not rolled", values: ["0", "0"], total: "–", hidden: false },
   });
+});
+
+test("dice animate new forward rolls without restarting on rerenders or reduced motion", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    let animations = 0, reduced = false;
+    window.matchMedia = () => ({ matches: reduced });
+    const dice = [document.createElement("span"), document.createElement("span")];
+    dice.forEach((die) => {
+      die.getAnimations = () => [];
+      die.animate = () => { animations++; };
+    });
+    $("board-dice").querySelectorAll = () => dice;
+    const board = { dice: [2, 4], turn_player: 1 };
+    const previous = { dice: null, turn: 1 };
+    const roll = isDiceRoll(board, previous, true);
+    renderDice(board.dice, roll);
+    renderDice(board.dice, isDiceRoll(board, { dice: [2, 4], turn: 1 }, true));
+    const beforeReduced = animations;
+    reduced = true;
+    renderDice(board.dice, true);
+    return { roll, beforeReduced, animations,
+      sameValuesNextTurn: isDiceRoll(board, { dice: [2, 4], turn: 0 }, true),
+      backward: isDiceRoll(board, previous, false),
+      initial: isDiceRoll(board, null, true) };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    roll: true, beforeReduced: 2, animations: 2,
+    sameValuesNextTurn: true, backward: false, initial: false,
+  });
+});
+
+test("board animation converts screen displacement to SVG coordinates", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`[
+    boardAnimationOffset(20, -30, { a: 10, b: 0, c: 0, d: 10 }),
+    boardAnimationOffset(6, 8, { a: 0, b: 2, c: -2, d: 0 }),
+    boardAnimationOffset(1, 1, { a: 0, b: 0, c: 0, d: 0 }),
+    boardAnimationOffset(1, 1, null)
+  ]`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), [{ x: 2, y: -3 }, { x: 4, y: -3 }, null, null]);
+});
+
+test("active pawn gets an accessible turn label without extra circle overlays", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    const group = document.createElement("g");
+    const pawn = { id: 0, name: "Miss Scarlet", seat: 0, location: { kind: "hallway", x: 1, y: 2 } };
+    appendPawn(group, pawn, { human_player: 0 }, 1.5, 2.5, true, .42);
+    const marker = group.children[0];
+    const circles = marker.children.filter((child) => child.tagName === "CIRCLE");
+    return { label: marker["aria-label"], classes: marker.children.map((child) => child.class),
+      circleCount: circles.length, radius: circles[0].r };
+  })()`);
+  assert.match(result.label, /current turn/);
+  assert.ok(result.classes.includes("board-pawn board-pawn-active"));
+  assert.equal(result.circleCount, 1);
+  assert.equal(result.radius, "0.42");
+});
+
+test("board passage pairs have matching letters and no markers when passages are disabled", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    const map = document.createElement("svg");
+    const rooms = [12, 13, 14, 15, 16].map((id, i) => ({
+      id, name: "Room " + id, squares: [{ x: i * 2, y: 0 }],
+    }));
+    const layout = { width: 10, height: 1, rooms, hallways: [], walls: [],
+      passages: [[12, 14], [13, 15]] };
+    buildBoardBase(layout, map);
+    const labels = map.children[0].children.filter((child) => child.class === "board-passage-mark")
+      .map((group) => [group["data-passage"], group.children[1].textContent]);
+    buildBoardBase({ ...layout, passages: [] }, map);
+    return { labels, disabled: map.children[0].children.filter(
+      (child) => child.class === "board-passage-mark").length };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    labels: [["0", "A"], ["1", "B"], ["0", "A"], ["1", "B"]], disabled: 0,
+  });
+});
+
+test("board card browser reserves stable space and keeps history independent of card count", () => {
+  assert.match(stylesheet, /flex:\s*0 0 clamp\(153px,\s*calc\(100% - 486px\),\s*315px\)/);
+  assert.match(stylesheet, /\.card-interaction-stage\s*\{\s*height:\s*150px/);
+  assert.match(stylesheet, /body\.game-active\.board-game \.action-history\s*\{\s*flex:\s*1 0 140px/);
+  assert.doesNotMatch(stylesheet, /mini-card \.card-topline\s*\{\s*display:\s*none/);
+});
+
+test("board turn highlight follows the notebook through review, next turn, replay and game end", () => {
+  const ui = frontend({ board: true });
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    document.createTextNode = (text) => ({ textContent: text });
+    buildBoardBase = () => {};
+    renderDice = () => {};
+    $("board-dynamic").querySelectorAll = () => [];
+    const state = {
+      board: { turn_player: 1, phase: "roll", dice: null, visited: [], weapons: [],
+        layout: { rooms: [], doors: [], passages: [] },
+        suspects: [
+          { id: 0, name: "Miss Scarlet", seat: 0, location: { kind: "hallway", x: 1, y: 1 } },
+          { id: 1, name: "Colonel Mustard", seat: 1, location: { kind: "hallway", x: 2, y: 1 } },
+          { id: 2, name: "Mrs. White", seat: null, location: { kind: "hallway", x: 3, y: 1 } },
+        ] },
+      legal: { moves: [] }, to_move: 1, human_player: 0, steps: 1,
+      waiting_for_turn: true, notebook_focus: { turn: 0 },
+    };
+    const snapshot = () => ({
+      label: $("board-turn-label").textContent, turn: $("board-turn").textContent,
+      active: $("board-dynamic").children.filter((pawn) =>
+        pawn.children.some((child) => child.class?.includes("board-pawn-active")))
+        .map((pawn) => pawn.dataset.pawnId),
+    });
+    renderBoard(state);
+    const review = snapshot();
+    state.waiting_for_turn = false;
+    state.notebook_focus.turn = 1;
+    renderBoard(state);
+    const next = snapshot();
+    state.is_replay = true;
+    state.position = 2;
+    state.notebook_focus.turn = 0;
+    renderBoard(state);
+    const replay = snapshot();
+    state.is_replay = false;
+    state.is_over = true;
+    state.status = "Game over";
+    state.notebook_focus.turn = null;
+    renderBoard(state);
+    return { review, next, replay, ended: snapshot() };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    review: { label: "Turn review", turn: "P1 · Miss Scarlet", active: ["0"] },
+    next: { label: "Current turn", turn: "P2 · Colonel Mustard", active: ["1"] },
+    replay: { label: "Current turn", turn: "P1 · Miss Scarlet", active: ["0"] },
+    ended: { label: "Current turn", turn: "Board", active: [] },
+  });
+});
+
+test("suggestion cards fly from the actor's pawn and clean up", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const records = [];
+    const pawn = { getClientRects: () => [1],
+      getBoundingClientRect: () => ({ left: 100, top: 200, width: 20, height: 20 }) };
+    $("board-dynamic").querySelector = () => pawn;
+    const card = { getClientRects: () => [1],
+      getBoundingClientRect: () => ({ left: 300, top: 400, width: 100, height: 80 }),
+      animate: (frames, options) => records.push({ target: true, frames, options }),
+      cloneNode: () => ({
+        style: {}, classList: { add() {} }, setAttribute() {},
+        remove() { records.push({ removed: true }); },
+        animate(frames, options) {
+          records.push({ frames, options });
+          return { finished: new Promise(() => {}), cancel() { records.push({ cancelled: true }); } };
+        },
+      }) };
+    animateSuggestionFromBoard({ board: { suspects: [{ id: 2, seat: 1 }] },
+      activity: { actor: 1 } }, { children: [card] });
+    clearSuggestionFlights();
+    return records;
+  })()`);
+  assert.equal(result[0].frames[0].transform, "translate(-240px, -230px) scale(.25)");
+  assert.equal(result[0].options.duration, 850);
+  assert.equal(result[1].target, true);
+  assert.equal(result[2].cancelled, true);
+  assert.equal(result[3].removed, true);
+});
+
+test("automatic bot responses wait for suggestion flights, but manual advancement remains available", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const state = { waiting_for_turn: false, is_over: false, limit_reached: false,
+      human_player: 0, to_move: 1 };
+    const before = shouldAdvance(state);
+    suggestionFlights.push({ node: { remove() {} }, animation: { cancel() {} } });
+    const during = shouldAdvance(state);
+    const manual = canAdvanceBot(state);
+    clearSuggestionFlights();
+    return [before, during, manual, shouldAdvance(state)];
+  })()`);
+  assert.deepEqual(Array.from(result), [true, false, true, true]);
+});
+
+test("suggestions and reveals have a readable automatic pause, including with reduced motion", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    let now = 10000;
+    performance.now = () => now;
+    window.matchMedia = () => ({ matches: true });
+    const state = { waiting_for_turn: false, is_over: false, limit_reached: false,
+      human_player: 0, to_move: 1, selected_player: 0, steps: 1,
+      activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", number: 1 }] };
+    const values = [cardAnimationKind(state), shouldAdvance(state), canAdvanceBot(state)];
+    now += 799;
+    values.push(shouldAdvance(state));
+    now++;
+    values.push(shouldAdvance(state));
+    state.steps++;
+    state.activity = { kind: "reveal", actor: 1, card_id: 7 };
+    state.events.unshift({ kind: "show", number: 2 });
+    values.push(cardAnimationKind(state), shouldAdvance(state));
+    now += 800;
+    values.push(shouldAdvance(state));
+    return values;
+  })()`);
+  assert.deepEqual(Array.from(result), [null, false, true, false, true, null, false, true]);
+});
+
+test("consecutive passes stay visible and each receives its own automatic reading pause", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    let now = 10000;
+    performance.now = () => now;
+    window.matchMedia = () => ({ matches: true });
+    const state = { mode: "spectate", human_player: null, to_move: 1, selected_player: 0,
+      hand: [], matrix: [], num_players: 4, legal: { reveals: [], pass: false },
+      steps: 1, activity_event_number: 1,
+      activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", actor: 0, number: 1 }] };
+    renderCardInteraction(state);
+    now += 1000;
+    state.steps++;
+    state.events.unshift({ kind: "pass", actor: 1, number: 2 });
+    renderCardInteraction(state);
+    const first = { kind: $("activity-kind").textContent, actor: $("activity-player").textContent,
+      passes: $("activity-passes").textContent,
+      cards: $("focus-cards").children.length, waiting: !shouldAdvance(state) };
+    now += 1199;
+    const stillWaiting = !shouldAdvance(state);
+    now++;
+    const ready = shouldAdvance(state);
+    state.steps++;
+    state.events.unshift({ kind: "pass", actor: 2, number: 3 });
+    renderCardInteraction(state);
+    const second = { kind: $("activity-kind").textContent, actor: $("activity-player").textContent,
+      passes: $("activity-passes").textContent, waiting: !shouldAdvance(state) };
+    return { first, stillWaiting, ready, second, manual: canAdvanceBot(state) };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    first: { kind: "Pass", actor: "Player 2 · suggestion P1",
+      passes: "Passed: P2", cards: 3, waiting: true },
+    stillWaiting: true, ready: true,
+    second: { kind: "Pass", actor: "Player 3 · suggestion P1", passes: "Passed: P2 · P3", waiting: true },
+    manual: true,
+  });
+});
+
+test("passes remain understandable for a human responder and after an unanswered suggestion", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const state = { mode: "play", human_player: 0, to_move: 0, selected_player: 0,
+      hand: [], matrix: [], num_players: 3, steps: 2, activity_event_number: 1,
+      activity: { kind: "suggest", actor: 2, cards: [0, 7, 12] },
+      events: [{ kind: "pass", actor: 1, number: 2 }, { kind: "suggest", actor: 2, number: 1 }],
+      legal: { reveals: [{ id: 7 }], pass: false, suggest: false, accuse: false } };
+    renderCardInteraction(state);
+    const response = { kind: $("activity-kind").textContent, actor: $("activity-player").textContent,
+      cards: $("focus-cards").children.length };
+    state.activity.actor = 0;
+    state.events[1].actor = 0;
+    state.legal = { reveals: [], pass: false, suggest: false, accuse: true, suggest_room: null };
+    state.steps++;
+    renderCardInteraction(state);
+    const finalPass = { title: $("card-interaction-title").textContent,
+      passes: $("activity-passes").textContent, cards: $("focus-cards").children.length };
+    state.events.unshift({ kind: "end_turn", actor: 0, number: 3 });
+    state.waiting_for_turn = true;
+    state.to_move = 1;
+    state.steps++;
+    renderCardInteraction(state);
+    const review = $("activity-passes").textContent;
+    state.waiting_for_turn = false;
+    state.steps++;
+    renderCardInteraction(state);
+    return { response, finalPass, review, nextTurn: $("activity-passes").textContent };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    response: { kind: "Pass", actor: "Player 2 · suggestion P3",
+      cards: 3 },
+    finalPass: { title: "Latest pass", passes: "Passed: P2", cards: 3 },
+    review: "Passed: P2", nextTurn: "",
+  });
+});
+
+test("a pass after a private refutation displays only the public suggestion and passer", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const state = { mode: "spectate", human_player: null, to_move: 3, selected_player: 0,
+      hand: [], matrix: [], num_players: 4, legal: { reveals: [], pass: false },
+      steps: 3, activity_event_number: 3,
+      activity: { kind: "reveal", actor: 1, suggestion_actor: 0,
+        card_id: 7, recipient: 0, cards: [0, 7, 12] },
+      events: [{ kind: "pass", actor: 2, number: 3 }, { kind: "refute", actor: 1, number: 2 },
+        { kind: "suggest", actor: 0, number: 1 }] };
+    renderCardInteraction(state);
+    return { title: $("card-interaction-title").textContent, kind: $("activity-kind").textContent,
+      actor: $("activity-player").textContent, cards: $("focus-cards").children.length };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    title: "Latest pass", kind: "Pass",
+    actor: "Player 3 · suggestion P1", cards: 3,
+  });
+});
+
+test("activity metadata identifies suggestions, responses and reveal visibility without instructions", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const state = { mode: "play", human_player: 0, to_move: 0, selected_player: 0,
+      hand: [], matrix: [], num_players: 4, steps: 1, activity_event_number: 1,
+      activity: { kind: "suggest", actor: 3, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", actor: 3, number: 1 }],
+      legal: { reveals: [], pass: true, suggest: false, accuse: false } };
+    const snapshot = () => ({ title: $("card-interaction-title").textContent,
+      kind: $("activity-kind").textContent, actor: $("activity-player").textContent,
+      hidden: $("activity-meta").hidden, cards: $("focus-cards").children.length });
+    renderCardInteraction(state);
+    const pass = snapshot();
+    state.legal = { reveals: [{ id: 7 }], pass: false, suggest: false, accuse: false };
+    renderCardInteraction(state);
+    const revealChoice = snapshot();
+    state.legal = { reveals: [], pass: false, suggest: false, accuse: false };
+    state.to_move = 1;
+    state.activity = { kind: "refute", actor: 1, suggestion_actor: 3, cards: [0, 7, 12] };
+    renderCardInteraction(state);
+    const refute = snapshot();
+    state.activity = { kind: "reveal", actor: 1, recipient: 3, public: false, card_id: 7 };
+    renderCardInteraction(state);
+    const privateReveal = snapshot();
+    state.activity.public = true;
+    renderCardInteraction(state);
+    const publicReveal = snapshot();
+    state.to_move = 0;
+    state.activity = null;
+    state.legal = { reveals: [], pass: false, suggest: true, accuse: true, suggest_room: 12 };
+    renderCardInteraction(state);
+    const builder = snapshot();
+    return { pass, revealChoice, refute, privateReveal, publicReveal, builder };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    pass: { title: "Table activity", kind: "Suggestion", actor: "Player 4", hidden: false, cards: 3 },
+    revealChoice: { title: "Respond to suggestion", kind: "Suggestion", actor: "Player 4", hidden: false, cards: 3 },
+    refute: { title: "Table activity", kind: "Refutation", actor: "Player 2 · suggestion P4", hidden: false, cards: 3 },
+    privateReveal: { title: "Latest reveal", kind: "Reveal", actor: "Player 2 · to P4", hidden: false, cards: 1 },
+    publicReveal: { title: "Latest reveal", kind: "Reveal", actor: "Player 2 · public", hidden: false, cards: 1 },
+    builder: { title: "Build a suggestion", kind: "Reveal", actor: "Player 2 · public", hidden: true, cards: 0 },
+  });
+  assert.doesNotMatch(source, /card-interaction-hint|You have no matching card; select Pass/);
+  assert.doesNotMatch(template, /card-interaction-hint/);
+  assert.match(template, /<h3>Actions help<\/h3>/);
+  assert.match(template, /If you have no matching card, select Pass/);
+});
+
+test("suggestion reading time starts after the last card flight completes", async () => {
+  const ui = frontend();
+  const result = await ui.evaluate(`(async () => {
+    let now = 10000;
+    performance.now = () => now;
+    const finish = [];
+    $("board-dynamic").querySelector = () => ({ getClientRects: () => [1],
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }) });
+    const card = { getClientRects: () => [1],
+      getBoundingClientRect: () => ({ left: 100, top: 100, width: 20, height: 20 }),
+      animate() {},
+      cloneNode: () => ({
+        style: {}, classList: { add() {} }, setAttribute() {}, remove() {},
+        animate() { return { finished: new Promise((resolve) => finish.push(resolve)), cancel() {} }; },
+      }) };
+    animateSuggestionFromBoard({ board: { suspects: [{ id: 0, seat: 0 }] },
+      activity: { actor: 0 } }, { children: [card, card] });
+    now += 1000;
+    finish[0]();
+    await Promise.resolve();
+    const oneRemaining = cardActivityPending();
+    finish[1]();
+    await Promise.resolve();
+    const afterFlight = cardActivityPending();
+    now += 799;
+    const beforeDeadline = cardActivityPending();
+    now++;
+    return [oneRemaining, afterFlight, beforeDeadline, cardActivityPending()];
+  })()`);
+  assert.deepEqual(Array.from(result), [true, true, true, false]);
+});
+
+test("the human player's suggestion animates while a bot is responding", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const calls = [];
+    animateSuggestionFromBoard = (state, container) => calls.push({
+      actor: state.activity.actor, cards: container.children.map((card) => card.textContent),
+    });
+    const state = { mode: "play", human_player: 0, to_move: 1, selected_player: 0,
+      hand: [], matrix: [], num_players: 2,
+      legal: { reveals: [], pass: false }, steps: 2,
+      activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", number: 2 }] };
+    renderCardInteraction(state);
+    renderCardInteraction(state);
+    return calls;
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), [
+    { actor: 0, cards: ["Miss Scarlet", "Dagger", "Kitchen"] },
+  ]);
+});
+
+test("card indicators show the actual hand and at most one positive notebook mark", () => {
+  const ui = frontend({ cards: true });
+  const result = ui.evaluate(`(() => {
+    const state = { mode: "play", human_player: 0, selected_player: 0, num_players: 3,
+      hand: [0], notebook_mode: "manual", matrix: [{ id: 0, marks: ["+", "-", "?", "-"] }] };
+    const face = createCardFace(cardsById.get(0), { button: true, notes: cardNoteContext(state) });
+    const snapshot = () => ({ label: face["aria-label"],
+      badges: face.querySelector(".card-annotations").children.map((badge) => [badge.textContent, badge.className]) });
+    const own = snapshot();
+    state.matrix[0].marks = ["-", "?", "?", "+"];
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    const envelope = snapshot();
+    state.mode = "spectate";
+    state.selected_player = 1;
+    state.matrix[0].marks = ["-", "+", "?", "-"];
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    const viewed = snapshot();
+    state.matrix[0].marks = ["-", "+", "?", "+"];
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    const conflict = snapshot();
+    showCardIndicators = false;
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    return { own, envelope, viewed, conflict, hidden: snapshot() };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    own: {
+      label: "Miss Scarlet, suspect. In your hand. Notebook: Player 1: held",
+      badges: [["In hand", "card-hand-badge"], ["P1+", "card-note-mark card-note-own"]],
+    },
+    envelope: {
+      label: "Miss Scarlet, suspect. In your hand. Notebook: Envelope: held",
+      badges: [["In hand", "card-hand-badge"], ["E+", "card-note-mark card-note-envelope"]],
+    },
+    viewed: {
+      label: "Miss Scarlet, suspect. In Player 2's hand. Notebook: Player 2: held",
+      badges: [["P2 hand", "card-hand-badge"], ["P2+", "card-note-mark card-note-own"]],
+    },
+    conflict: { label: "Miss Scarlet, suspect. In Player 2's hand",
+      badges: [["P2 hand", "card-hand-badge"]] },
+    hidden: { label: "Miss Scarlet, suspect", badges: [] },
+  });
+});
+
+test("card notes follow optimistic edits and revert in place after a failed save", async () => {
+  const ui = frontend({ cards: true });
+  const result = await ui.evaluate(`(async () => {
+    currentState = { mode: "play", human_player: 0, selected_player: 0, num_players: 2,
+      hand: [0], notebook_mode: "manual", notebook_revision: 0, notebook_clauses: [],
+      matrix: [{ id: 0, marks: ["+", "?", "-"], editable: [true, true, true] }] };
+    const face = createCardFace(cardsById.get(0), { button: true, notes: cardNoteContext(currentState) });
+    document.querySelectorAll = () => [face];
+    globalThis.fetch = async () => { throw new Error("offline"); };
+    const before = face["aria-label"];
+    changeNotebook(0, 0);
+    const immediate = face["aria-label"];
+    await notebookQueue;
+    return { before, immediate, reverted: face["aria-label"],
+      noteContainers: face.querySelector(".card-topline").children.filter((child) => child.className === "card-annotations").length,
+      error: $("error-message").textContent };
+  })()`);
+  assert.match(result.before, /In your hand.*Player 1: held/);
+  assert.equal(result.immediate, "Miss Scarlet, suspect. In your hand");
+  assert.equal(result.reverted, result.before);
+  assert.equal(result.noteContainers, 1);
+  assert.match(result.error, /offline/);
+});
+
+test("board room indicators use the selected notebook, suppress conflicts and toggle independently", () => {
+  const ui = frontend({ board: true });
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    const state = { mode: "play", human_player: 0, selected_player: 0, num_players: 2,
+      hand: [12], notebook_mode: "manual", board: { layout: { rooms: [
+        { id: 12, name: "Kitchen", squares: [{ x: 0, y: 0 }, { x: 5, y: 5 }] },
+        { id: 13, name: "Ballroom", squares: [{ x: 9, y: 0 }, { x: 15, y: 5 }] },
+      ] } }, matrix: [
+        { id: 12, name: "Kitchen", marks: ["+", "-", "?"] },
+        { id: 13, name: "Ballroom", marks: ["-", "?", "+"] },
+      ] };
+    const snapshot = () => ({ groups: $("board-room-notes").children.map((group) => ({
+      label: group["aria-label"], badges: group.children.slice(1).map((badge) => ({
+        kind: badge.class, text: badge.children[1].textContent,
+      })),
+    })), warning: $("knowledge-conflicts").textContent });
+    updateKnowledgeIndicators(state);
+    const normal = snapshot();
+    pendingNotebookEdits.push({ cardId: 12, holder: 1, mark: "+" });
+    updateKnowledgeIndicators(state);
+    const conflict = snapshot();
+    showBoardIndicators = false;
+    updateKnowledgeIndicators(state);
+    return { normal, conflict, hidden: snapshot() };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    normal: { groups: [
+      { label: "Kitchen: In your hand, Player 1: held", badges: [
+        { kind: "board-note-hand", text: "Hand" }, { kind: "board-note-own", text: "P1+" },
+      ] },
+      { label: "Ballroom: Envelope: held", badges: [{ kind: "board-note-envelope", text: "E+" }] },
+    ], warning: "" },
+    conflict: { groups: [
+      { label: "Kitchen: In your hand", badges: [{ kind: "board-note-hand", text: "Hand" }] },
+      { label: "Ballroom: Envelope: held", badges: [{ kind: "board-note-envelope", text: "E+" }] },
+    ], warning: "Conflicting + marks — check notebook: Kitchen · " },
+    hidden: { groups: [], warning: "Conflicting + marks — check notebook: Kitchen · " },
+  });
+});
+
+test("card activity animates only for new forward events in the same perspective", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const state = { is_replay: true, selected_player: 0, steps: 1,
+      activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", number: 1 }] };
+    const values = [cardAnimationKind(state)];
+    state.steps++;
+    state.events.unshift({ kind: "pass", number: 2 });
+    values.push(cardAnimationKind(state));
+    state.steps++;
+    state.events.unshift({ kind: "suggest", number: 3 });
+    values.push(cardAnimationKind(state));
+    state.selected_player = 1;
+    state.steps++;
+    state.events.unshift({ kind: "suggest", number: 4 });
+    values.push(cardAnimationKind(state));
+    state.steps--;
+    state.events = [{ kind: "suggest", number: 1 }];
+    values.push(cardAnimationKind(state));
+    window.matchMedia = () => ({ matches: true });
+    state.steps += 2;
+    state.events.unshift({ kind: "suggest", number: 5 });
+    values.push(cardAnimationKind(state));
+    return values;
+  })()`);
+  assert.deepEqual(Array.from(result), ["suggest", null, "suggest", null, null, null]);
 });
 
 test("wizard payload validates and synchronizes unvisited seat and bot defaults", () => {
   const start = setupSource.indexOf("  function payload() {");
-  const end = setupSource.indexOf("  function renderReview()", start);
+  const end = setupSource.indexOf("  function renderReview(", start);
   assert.ok(start !== -1 && end !== -1);
   const context = vm.createContext({
     fields: {
       mode: { value: "play" }, "notebook-mode": { value: "manual" },
       players: { value: "6" }, seat: { value: "0" }, seed: { value: "42" },
       progress: { value: "turn" }, "max-steps": { value: "10000" }, debug: { checked: false },
+      "shuffle-bots": { checked: false },
       "rule-reverse-refutation": { checked: false },
       "rule-public-refutations": { checked: false },
       "rule-all-refute": { checked: false },
@@ -260,6 +864,69 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   assert.throws(() => vm.runInContext("payload()", context), /Board starting positions are unavailable/);
 });
 
+test("seeded bot seat shuffling preserves styles, human seat, and replay reproducibility", () => {
+  const start = setupSource.indexOf("  function resolveBotSeats(");
+  const end = setupSource.indexOf("  function renderReview(", start);
+  const context = vm.createContext({});
+  vm.runInContext(`const copy = (value) => JSON.parse(JSON.stringify(value)); ${setupSource.slice(start, end)}`, context);
+  const input = {
+    mode: "play", players: 4, seat: 1, seed: 42, shuffle_bots: true,
+    bots: ["deductive", "human-placeholder", "probing", { deal_analysis: true }],
+  };
+  context.input = input;
+  const first = context.resolveBotSeats(input);
+  assert.deepEqual(JSON.parse(JSON.stringify(first)), JSON.parse(JSON.stringify(context.resolveBotSeats(input))));
+  assert.equal(first.bots[1], "human-placeholder");
+  assert.deepEqual(Array.from(first.bots).filter((_, i) => i !== 1).map(JSON.stringify).sort(),
+    [JSON.stringify("deductive"), JSON.stringify("probing"), JSON.stringify({ deal_analysis: true })].sort());
+  assert.equal(first.shuffle_bots, undefined);
+  assert.equal(input.shuffle_bots, true);
+  const assignments = new Set(Array.from({ length: 30 }, (_, seed) =>
+    JSON.stringify(context.resolveBotSeats({ ...input, seed }).bots)));
+  assert.ok(assignments.size > 1);
+  const fixed = context.resolveBotSeats({ ...input, shuffle_bots: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(fixed.bots)), input.bots);
+  const spectate = context.resolveBotSeats({ ...input, mode: "spectate" });
+  assert.deepEqual(Array.from(spectate.bots).map(JSON.stringify).sort(), input.bots.map(JSON.stringify).sort());
+});
+
+test("factory quickplay uses four board players and the three requested bot styles", () => {
+  const start = setupSource.indexOf("  function defaultQuickplay()");
+  const end = setupSource.indexOf("  async function loadQuickplay()", start);
+  const context = vm.createContext({});
+  vm.runInContext(`const standardRules = { secret_passages: true };
+    const gameRuleIds = { all_refute: "rule-all-refute" }; ${setupSource.slice(start, end)}`, context);
+  const config = context.defaultQuickplay();
+  assert.equal(config.game_type, "board");
+  assert.equal(config.players, 4);
+  assert.equal(config.mode, "play");
+  assert.equal(config.shuffle_bots, true);
+  assert.deepEqual(Array.from(config.bots).slice(1).sort(), ["deductive", "probing", "strategic"]);
+});
+
+test("quickplay review describes shuffled styles without claiming assigned bot seats", () => {
+  const start = setupSource.indexOf("  function renderReview(");
+  const end = setupSource.indexOf("  function showStep(", start);
+  const context = vm.createContext({});
+  const result = vm.runInContext(`(() => {
+    const data = { game_type: "card_only", mode: "play", players: 3, seat: 0,
+      notebook_mode: "manual", bots: ["random", "probing", "strategic"],
+      shuffle_bots: true, seed: 12, progress: "turn", max_steps: 100, debug: false, game_rules: {} };
+    const payload = () => data, score = () => 50, standardRules = {};
+    const document = { createElement: () => ({ textContent: "", children: [],
+      append(...items) { this.children.push(...items); } }),
+      createTextNode: (text) => ({ textContent: text }) };
+    ${setupSource.slice(start, end)}
+    const review = { children: [], replaceChildren() { this.children = []; },
+      append(child) { this.children.push(child); } };
+    renderReview(review, false);
+    return review.children.map((row) => row.children.map((item) => item.textContent).join(""));
+  })()`, context);
+  assert.ok(result.some((row) => row.includes("probing, strategic · randomly assigned")));
+  assert.ok(result.some((row) => row === "Player 2: Bot (random style)"));
+  assert.ok(!result.some((row) => row.startsWith("Seed:")));
+});
+
 test("setup profiles validate and persist in browser and desktop storage", async () => {
   const start = setupSource.indexOf("  function validateProfile(");
   const end = setupSource.indexOf("  function beginFresh()", start);
@@ -267,7 +934,7 @@ test("setup profiles validate and persist in browser and desktop storage", async
   const context = vm.createContext({});
   const result = await vm.runInContext(`(async () => {
     const presets = { random: {} }, strategyLabels = {}, ruleIds = {}, gameRuleIds = {};
-    const storageKey = "profiles";
+    const storageKey = "profiles", quickplayProfile = "__clue_engine_quickplay__";
     let profiles = Object.create(null), profilesReady = false, saved = null, calls = [];
     const select = { value: "", replaceChildren(...items) { this.items = items; },
       append(item) { this.items.push(item); } };
@@ -529,6 +1196,134 @@ test("cards-only help tab selects and labels its panel", () => {
   assert.equal(ui.element("help-tab")["aria-selected"], "true");
 });
 
+test("replay replaces the card browser without adding a workspace tab", () => {
+  const ui = frontend({ workspace: true });
+  ui.evaluate("replayMode = true; setReplayPresentation(true)");
+  assert.equal(ui.element("replay-timeline").hidden, false);
+  assert.equal(ui.element("replay-knowledge").hidden, false);
+  assert.equal(ui.element("card-view-tabs").hidden, true);
+  assert.equal(ui.element("hand-cards").hidden, true);
+  assert.equal(ui.evaluate("insightsTabs.join(',')"), "history,clauses,help");
+  assert.equal(ui.evaluate("boardTabs.join(',')"), "cards,history,clauses,locations,help");
+  ui.switchBoard("history");
+  assert.equal(ui.element("replay-timeline").hidden, false);
+  ui.switchBoard("cards");
+  assert.equal(ui.element("cards-panel").hidden, false);
+  assert.equal(ui.element("insights-panel").hidden, true);
+  ui.evaluate("replayMode = false; setReplayPresentation(false)");
+  assert.equal(ui.element("replay-timeline").hidden, true);
+  assert.equal(ui.element("replay-knowledge").hidden, true);
+  assert.equal(ui.element("hand-cards").hidden, false);
+});
+
+test("replay playback runs serially, respects speed, pauses, and stops at the end", async () => {
+  const ui = frontend();
+  ui.element("replay-speed").value = "500";
+  ui.evaluate(`replayMode = true; currentState = { is_replay: true, position: 0, positions: 3 };
+    loadReplay = async () => { currentState.position = Number($("replay-position").value); return true; };
+    toggleReplayPlayback()`);
+  assert.equal(ui.element("replay-play").textContent, "Pause");
+  assert.equal(ui.timers.size, 1);
+  assert.equal([...ui.timers.values()][0].delay, 500);
+  let [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 1);
+  assert.equal(ui.timers.size, 1);
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 2);
+  assert.equal(ui.element("replay-play").textContent, "Play");
+  assert.equal(ui.element("replay-play").disabled, true);
+  assert.equal(ui.timers.size, 0);
+
+  ui.evaluate("currentState.position = 0; toggleReplayPlayback(); stopReplayPlayback()");
+  assert.equal(ui.timers.size, 0);
+  assert.equal(ui.element("replay-play").textContent, "Play");
+  ui.evaluate("loadReplay = async () => false; toggleReplayPlayback()");
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("replayPlaying"), false);
+  assert.equal(ui.timers.size, 0);
+});
+
+test("continuous replay waits for card activity without blocking manual navigation", async () => {
+  const ui = frontend();
+  ui.element("replay-speed").value = "500";
+  ui.evaluate(`let now = 10000; performance.now = () => now;
+    replayMode = true; currentState = { is_replay: true, position: 0, positions: 3, turns: [] };
+    loadReplay = async () => { currentState.position = Number($("replay-position").value); return true; };
+    cardActivityReadUntil = now + 800; toggleReplayPlayback()`);
+  let [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  ui.evaluate("now += 500");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 0);
+  assert.equal([...ui.timers.values()][0].delay, 300);
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  ui.evaluate("now += 300");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 1);
+  ui.evaluate("cardActivityReadUntil = now + 800; moveReplay(1)");
+  assert.equal(ui.evaluate("currentState.position"), 2);
+  assert.equal(ui.timers.size, 0);
+});
+
+test("continuous replay gives each pass its own reading time at fast speed", async () => {
+  const ui = frontend();
+  ui.element("replay-speed").value = "500";
+  ui.evaluate(`let now = 10000; performance.now = () => now;
+    replayMode = true;
+    currentState = { is_replay: true, position: 0, positions: 3, steps: 2,
+      mode: "replay", human_player: null, to_move: 2, selected_player: 0,
+      hand: [], matrix: [], num_players: 3, legal: { reveals: [], pass: false },
+      activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] }, activity_event_number: 1,
+      events: [{ kind: "pass", actor: 1, number: 2 }, { kind: "suggest", actor: 0, number: 1 }] };
+    loadReplay = async () => { currentState.position = Number($("replay-position").value); return true; };
+    renderCardInteraction(currentState); toggleReplayPlayback()`);
+  let [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  ui.evaluate("now += 500");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 0);
+  assert.equal([...ui.timers.values()][0].delay, 700);
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  ui.evaluate("now += 700");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 1);
+  ui.evaluate("stopReplayPlayback()");
+});
+
+test("pausing ignores an in-flight replay response and playback errors stop explicitly", async () => {
+  const ui = frontend();
+  ui.element("replay-speed").value = "500";
+  ui.element("replay-player").value = "0";
+  ui.evaluate(`replayMode = true; currentState = { is_replay: true, position: 0, positions: 3 };
+    requestJson = () => new Promise((resolve) => { globalThis.finishReplayRequest = resolve; });
+    toggleReplayPlayback()`);
+  let [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  const pending = timer.callback();
+  ui.evaluate("stopReplayPlayback(); finishReplayRequest({ is_replay: true, position: 1, positions: 3 })");
+  await pending;
+  assert.equal(ui.evaluate("currentState.position"), 0);
+  assert.equal(ui.element("replay-position").value, "0");
+  assert.equal(ui.timers.size, 0);
+
+  ui.evaluate(`requestJson = async () => { throw new Error("offline"); }; toggleReplayPlayback()`);
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("replayPlaying"), false);
+  assert.equal(ui.element("replay-position").value, "0");
+  assert.match(ui.element("error-message").textContent, /offline/);
+  assert.equal(ui.timers.size, 0);
+});
+
 test("clause entry selects notebook cells, validates, saves and preserves exclusions on edit", async () => {
   const ui = frontend({ notebook: true });
   const result = await ui.evaluate(`(async () => {
@@ -612,6 +1407,36 @@ test("clause selection replaces the previous selection and can be cleared", () =
     return result;
   })()`);
   assert.deepEqual(Array.from(values), [null, 1, 2, null]);
+});
+
+test("leaving clauses clears selection and refreshes the notebook in both workspaces", () => {
+  const ui = frontend({ workspace: true });
+  const result = ui.evaluate(`(() => {
+    const updates = [];
+    renderNotebook = () => updates.push("notebook");
+    renderClauses = () => updates.push("clauses");
+    currentState = {};
+    document.body.classList.add("board-game");
+    switchBoardTab("clauses");
+    selectedClause = 1;
+    switchBoardTab("clauses");
+    const stillSelected = selectedClause;
+    switchBoardTab("cards");
+    const boardCleared = selectedClause;
+    switchBoardTab("clauses");
+    selectedClause = 2;
+    switchBoardTab("history");
+    const boardHistoryCleared = selectedClause;
+    document.body.classList.remove("board-game");
+    switchInsightsTab("clauses");
+    selectedClause = 3;
+    switchInsightsTab("help");
+    return { stillSelected, boardCleared, boardHistoryCleared, cardsOnlyCleared: selectedClause, updates };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    stillSelected: 1, boardCleared: null, boardHistoryCleared: null, cardsOnlyCleared: null,
+    updates: ["notebook", "clauses", "notebook", "clauses", "notebook", "clauses"],
+  });
 });
 
 test("clause selection does not carry into another perspective or resolved clause", () => {
@@ -771,6 +1596,30 @@ test("notebook renders overlapping clause references without replacing marks", (
   assert.equal(remaining[0].style["--clause-color"], links[1].style["--clause-color"]);
 });
 
+test("clause indicators stay out of notebook row layout and remain separate when crowded", () => {
+  const containerRule = stylesheet.match(/\.clause-indicators\s*\{([^}]*)\}/);
+  const indicatorRule = stylesheet.match(/\.clause-indicator\s*\{([^}]*)\}/);
+  assert.ok(containerRule);
+  assert.match(containerRule[1], /position:\s*absolute/);
+  assert.doesNotMatch(containerRule[1], /flex-wrap:\s*wrap/);
+  assert.ok(indicatorRule);
+  assert.match(indicatorRule[1], /flex:\s*0\s+1\s+10px/);
+  assert.match(indicatorRule[1], /min-width:\s*0/);
+
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9],
+    matrix: [{ id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "?", "?"],
+      editable: [true, true, true] }],
+    notebook_clauses: Array.from({ length: 20 }, (_, id) => ({ id, holder: 0, active_cards: [0] })),
+  };
+  ui.renderNotebook(state);
+  const cell = ui.element("notebook").children[0].children[1].children[1].children[1];
+  assert.equal(cell.children[0].dataset.notebookCard, "0");
+  assert.equal(cell.children[1].children.length, 20);
+  assert.equal(new Set(cell.children[1].children.map((indicator) => indicator.dataset.clauseId)).size, 20);
+});
+
 test("clause list colors match notebook colors and selection survives filtering", () => {
   const ui = frontend({ notebook: true });
   const state = {
@@ -811,18 +1660,131 @@ test("clause colors stay distinct for the first two palette cycles in a column",
   assert.equal(new Set(colors).size, 24);
 });
 
-test("replay deduction entries name the player, card and jump position", () => {
+test("replay flags group positions, filter discoveries and support next/previous navigation", () => {
   const ui = frontend();
-  ui.evaluate(`renderReplayDeductions([
-    { player: 0, card: 0, step: 0, position: 0 },
-    { player: 1, card: 7, step: 4, position: 6 },
-  ])`);
-  const items = ui.element("replay-deductions").children;
-  assert.equal(items[0].textContent, "Player 1: Miss Scarlet · start");
-  assert.equal(items[1].textContent, "Player 2: Dagger · action 4");
-  assert.equal(items[1].dataset.replayPosition, "6");
-  ui.evaluate("renderReplayDeductions([])");
-  assert.equal(ui.element("replay-deductions").textContent, "No envelope cards inferred yet.");
+  ui.evaluate(`cardIllustration = (id) => {
+    const svg = document.createElement("svg"); svg.dataset.cardId = String(id); return svg;
+  }`);
+  ui.evaluate('replayMarkerType = "all"; replayMarkerPlayer = "all"');
+  ui.evaluate(`currentState = {
+    is_replay: true, num_players: 2, positions: 11, position: 0,
+    deduction_timeline: [
+      { player: 0, holder: 2, card: 0, step: 0, position: 0 },
+      { player: 1, holder: 2, card: 7, step: 4, position: 6 },
+      { player: 0, holder: 1, card: 12, step: 4, position: 6 },
+      { player: 1, holder: 0, card: 0, step: 5, position: 7 },
+    ],
+  }; renderReplayMarkers(currentState)`);
+  const markers = ui.element("replay-markers");
+  assert.equal(markers.children.length, 3);
+  assert.equal(markers.children[0].style.left, "0%");
+  assert.equal(markers.children[1].style.left, "60%");
+  const groupedBadges = markers.children[1].children[0].children;
+  assert.deepEqual(groupedBadges.map((badge) => badge.children[1].textContent), ["1", "2"]);
+  assert.deepEqual(groupedBadges.map((badge) => badge.children[0].dataset.cardId), ["12", "7"]);
+  assert.notEqual(groupedBadges[0].style["--player-color"], groupedBadges[1].style["--player-color"]);
+  assert.match(markers.children[1]["aria-label"], /Player 2 inferred Dagger in the envelope/);
+  assert.match(markers.children[1]["aria-label"], /Player 1 inferred Kitchen in Player 2/);
+  assert.equal(markers.children[0]["aria-current"], "true");
+  const marker = markers.children[1];
+  ui.evaluate("currentState.position = 6; renderReplayMarkers(currentState)");
+  assert.equal(markers.children[1], marker);
+  assert.equal(marker["aria-current"], "true");
+  assert.match(ui.element("replay-marker-details").textContent, /Player 2 inferred Dagger/);
+  ui.evaluate("loadReplay = () => {}; moveReplayMarker(1)");
+  assert.equal(ui.element("replay-position").value, "7");
+  ui.evaluate("moveReplayMarker(-1)");
+  assert.equal(ui.element("replay-position").value, "0");
+  ui.evaluate('replayMarkerType = "holder"; replayMarkerPlayer = "0"');
+  ui.evaluate("renderReplayMarkers(currentState)");
+  assert.equal(markers.children.length, 1);
+  assert.equal(markers.children[0].dataset.replayPosition, "6");
+  const cardBadge = markers.children[0].children[0].children[0];
+  assert.equal(cardBadge.className, "replay-card-badge room");
+  assert.equal(cardBadge.children[0].dataset.cardId, "12");
+  ui.evaluate('replayMarkerType = "none"');
+  ui.evaluate("renderReplayMarkers(currentState)");
+  assert.equal(markers.children.length, 0);
+  assert.equal(ui.element("replay-marker-status").textContent, "No matching flags");
+  assert.equal(ui.element("replay-next-marker").disabled, true);
+});
+
+test("replay knowledge table emphasizes locations and compares all players by category", () => {
+  const ui = frontend();
+  ui.evaluate(`currentState = { is_replay: true, knowledge_summary: [
+    { player: 0, categories: {
+      suspect: { located: 2, total: 6, marks: 10, mark_total: 18, envelope: 1 },
+      weapon: { located: 1, total: 6, marks: 7, mark_total: 18, envelope: 0 },
+      room: { located: 3, total: 9, marks: 14, mark_total: 27, envelope: 0 },
+    } },
+    { player: 1, categories: {
+      suspect: { located: 3, total: 6, marks: 12, mark_total: 18, envelope: 0 },
+      weapon: { located: 2, total: 6, marks: 8, mark_total: 18, envelope: 1 },
+      room: { located: 4, total: 9, marks: 16, mark_total: 27, envelope: 1 },
+    } },
+  ] }; renderReplayKnowledge(currentState.knowledge_summary)`);
+  let rows = ui.element("replay-knowledge-body").children;
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].children[0].children[1].textContent, "Player 2");
+  assert.equal(rows[1].children[1].children[0].textContent, "6/21 located");
+  assert.equal(rows[1].children[1].children[1].textContent, "31/63 marks");
+  assert.equal(rows[1].children[2].children[0].textContent, "2/6 located");
+  assert.equal(rows[0].children[5].children[0].textContent, "2/3");
+  assert.equal(ui.element("replay-knowledge-head-total")["aria-sort"], "descending");
+  ui.evaluate('setReplayKnowledgeSort("total")');
+  rows = ui.element("replay-knowledge-body").children;
+  assert.equal(rows[0].children[0].children[1].textContent, "Player 1");
+  assert.equal(ui.element("replay-knowledge-head-total")["aria-sort"], "ascending");
+  ui.evaluate('setReplayKnowledgeSort("suspect"); setReplayKnowledgeColumn("suspect", false)');
+  rows = ui.element("replay-knowledge-body").children;
+  assert.equal(ui.element("replay-knowledge-head-suspect").hidden, true);
+  assert.equal(ui.element("replay-knowledge-head-total")["aria-sort"], "descending");
+  assert.equal(rows[0].children.length, 5);
+  ui.evaluate(`for (const column of ["total", "weapon", "room", "envelope"])
+    setReplayKnowledgeColumn(column, false)`);
+  rows = ui.element("replay-knowledge-body").children;
+  assert.equal(ui.element("replay-knowledge-head-player")["aria-sort"], "ascending");
+  assert.equal(rows[0].children.length, 1);
+  assert.equal(rows[0].children[0].children[1].textContent, "Player 1");
+  ui.evaluate('setReplayKnowledgeColumn("room", true); setReplayKnowledgeSort("room")');
+  rows = ui.element("replay-knowledge-body").children;
+  assert.equal(rows[0].children[0].children[1].textContent, "Player 2");
+  assert.equal(rows[0].children.length, 2);
+  ui.evaluate(`currentState.knowledge_summary[0].categories.room.located = 4;
+    currentState.knowledge_summary[0].categories.room.marks = 20;
+    renderReplayKnowledge(currentState.knowledge_summary)`);
+  rows = ui.element("replay-knowledge-body").children;
+  assert.equal(rows[0].children[0].children[1].textContent, "Player 1");
+  assert.equal(ui.element("replay-knowledge-head-room")["aria-sort"], "descending");
+});
+
+test("crowded replay flags retain all players in their details and category filters", () => {
+  const ui = frontend();
+  ui.evaluate(`cardIllustration = (id) => {
+    const svg = document.createElement("svg"); svg.dataset.cardId = String(id); return svg;
+  }`);
+  ui.evaluate('replayMarkerType = "all"; replayMarkerPlayer = "all"');
+  ui.evaluate(`currentState = {
+    is_replay: true, num_players: 8, positions: 3, position: 0,
+    deduction_timeline: [
+      ...Array.from({ length: 8 }, (_, player) => ({ player, holder: 8, card: 0, step: 1, position: 1 })),
+      { player: 7, holder: 8, card: 7, step: 1, position: 1 },
+      { player: 7, holder: 8, card: 12, step: 1, position: 1 },
+      { player: 7, holder: 8, card: 13, step: 1, position: 1 },
+    ],
+  }; renderReplayMarkers(currentState)`);
+  const marker = ui.element("replay-markers").children[0];
+  assert.deepEqual(marker.children[0].children.map((badge) =>
+    badge.children.length ? badge.children[1].textContent : badge.textContent),
+  ["1", "2", "3", "4", "5", "+6"]);
+  assert.match(marker["aria-label"], /Player 8 inferred Dagger/);
+  ui.evaluate('replayMarkerPlayer = "7"');
+  ui.evaluate("renderReplayMarkers(currentState)");
+  const cardBadges = ui.element("replay-markers").children[0].children[0].children;
+  assert.deepEqual(cardBadges.map((badge) => badge.className),
+    ["replay-card-badge suspect", "replay-card-badge weapon", "replay-card-badge room",
+      "replay-card-badge room"]);
+  assert.deepEqual(cardBadges.map((badge) => badge.children[0].dataset.cardId), ["0", "7", "12", "13"]);
 });
 
 test("notebook highlights turn, actor, cards and visible reveal without disturbing clauses", () => {
@@ -878,6 +1840,11 @@ test("notebook highlights turn, actor, cards and visible reveal without disturbi
   assert.equal(all.filter((node) => node.dataset.clauseCard).length, 2);
 });
 
+test("notebook actor highlighting uses inset decoration instead of changing borders", () => {
+  assert.match(stylesheet, /\.notebook-table th\.notebook-actor\s*\{\s*box-shadow:/);
+  assert.match(stylesheet, /\.notebook-table th\.notebook-turn\.notebook-actor\s*\{\s*box-shadow:/);
+});
+
 test("stale refresh preserves the entire manual notebook snapshot", () => {
   const ui = frontend();
   const current = {
@@ -908,6 +1875,7 @@ function state(overrides = {}) {
     steps: 2,
     player0_turns: 1,
     selected_player: 0,
+    hand: [], matrix: [], num_players: 2,
     status: "Player 0",
     clauses: "",
     events: [
@@ -971,6 +1939,38 @@ test("a previous-turn reveal does not hide a new room suggestion", () => {
   assert.equal(ui.element("card-suggest-button").disabled, true);
   assert.equal(ui.element("card-accuse-button").disabled, false);
   assert.equal(ui.element("use-room-button").hidden, false);
+});
+
+test("a reveal animates once per new event and respects reduced motion", () => {
+  const ui = frontend();
+  ui.render(state({
+    events: [{ kind: "show", number: 4 }], legal: {
+      ...state().legal, suggest: false, accuse: false,
+    },
+  }));
+  assert.ok(ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+  ui.evaluate("renderCardInteraction(state)");
+  assert.ok(!ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+  ui.evaluate("state.steps++; state.events.unshift({ kind: 'move', number: 5 }); renderCardInteraction(state)");
+  assert.ok(!ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+  ui.evaluate("state.steps++; state.events.unshift({ kind: 'show', number: 6 }); renderCardInteraction(state)");
+  assert.ok(ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+  ui.evaluate("window.matchMedia = () => ({ matches: true }); state.steps++; state.events.unshift({ kind: 'show', number: 7 }); renderCardInteraction(state)");
+  assert.ok(!ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+});
+
+test("private spectator reveals use the selected view's event identity", () => {
+  const ui = frontend();
+  ui.render(state({
+    mode: "spectate", selected_player: 0, activity_event_number: 3,
+    events: [{ kind: "refute", number: 2 }, { kind: "suggest", number: 1 }],
+    legal: { ...state().legal, suggest: false, accuse: false },
+  }));
+  assert.ok(ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+  ui.evaluate("state.steps++; state.events.unshift({ kind: 'move', number: 3 }); renderCardInteraction(state)");
+  assert.ok(!ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
+  ui.evaluate("state.steps++; state.activity_event_number = 7; renderCardInteraction(state)");
+  assert.ok(ui.element("focus-cards").children[0].classList.contains("reveal-enter"));
 });
 
 test("the builder replaces the previous reveal as the next room turn begins", () => {

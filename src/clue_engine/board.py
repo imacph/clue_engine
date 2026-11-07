@@ -1,6 +1,7 @@
 """Immutable board topology, independent of game rules and presentation."""
 
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, replace
 
 from .cards import CARDS
 from .models import CardType
@@ -162,12 +163,9 @@ class BoardLayout:
             for pair in self.passages
         ):
             raise TypeError("passages must be a tuple of integer room pairs")
-        expected_passages = {
-            frozenset((corner_rooms[0], corner_rooms[3])),
-            frozenset((corner_rooms[1], corner_rooms[2])),
-        }
-        if len(self.passages) != 2 or {frozenset(pair) for pair in self.passages} != expected_passages:
-            raise ValueError("passages must connect opposite corner rooms")
+        passage_rooms = [room_id for pair in self.passages for room_id in pair]
+        if len(passage_rooms) != len(set(passage_rooms)) or not set(passage_rooms) <= expected_rooms:
+            raise ValueError("passages must connect distinct rooms, with at most one passage per room")
 
         if not isinstance(self.starts, tuple) or not all(
             isinstance(start, CharacterStart) for start in self.starts
@@ -286,3 +284,59 @@ def _make_default_board() -> BoardLayout:
 
 
 DEFAULT_BOARD = _make_default_board()
+
+
+def randomize_board_layout(
+    layout: BoardLayout, rng: random.Random, *,
+    rooms: bool = False, doors: bool = False, passages: bool = False, passage_count: int = 2,
+) -> BoardLayout:
+    """Randomize independent aspects of a layout without altering its geometry."""
+    if type(passage_count) is not int:
+        raise TypeError("passage_count must be an integer")
+    if not 0 <= passage_count <= len(layout.rooms) // 2:
+        raise ValueError("passage_count exceeds the number of available room pairs")
+    if not (rooms or doors or passages):
+        return layout
+    seed = rng.getrandbits(256)
+    if rooms:
+        shuffled = [room.card_id for room in layout.rooms]
+        random.Random(f"{seed}:rooms").shuffle(shuffled)
+        mapping = {room.card_id: card_id for room, card_id in zip(layout.rooms, shuffled, strict=True)}
+        layout = replace(
+            layout,
+            rooms=tuple(Room(mapping[room.card_id], room.squares) for room in layout.rooms),
+            doors=tuple(replace(door, room_id=mapping[door.room_id]) for door in layout.doors),
+            passages=tuple((mapping[first], mapping[second]) for first, second in layout.passages),
+        )
+    if doors:
+        door_rng = random.Random(f"{seed}:doors")
+        randomized_doors = []
+        for room in layout.rooms:
+            candidates: dict[tuple[int, int], list[Door]] = {}
+            for square in sorted(room.squares):
+                for neighbor in _neighbors(square):
+                    if neighbor in layout.hallways:
+                        side = (neighbor.x - square.x, neighbor.y - square.y)
+                        dx, dy = side
+                        if all(
+                            Square(square.x - offset * dy, square.y + offset * dx) in room.squares
+                            and Square(neighbor.x - offset * dy, neighbor.y + offset * dx)
+                            in layout.hallways
+                            for offset in (-1, 1)
+                        ):
+                            candidates.setdefault(side, []).append(Door(room.card_id, square, neighbor))
+            count = len(layout.doors_for(room.card_id))
+            if count > len(candidates):
+                raise ValueError(f"Room {room.card_id} has too few eligible sides for {count} doors")
+            for side in door_rng.sample(sorted(candidates), count):
+                randomized_doors.append(door_rng.choice(candidates[side]))
+        layout = replace(layout, doors=tuple(randomized_doors))
+    if passages:
+        room_ids = [room.card_id for room in layout.rooms]
+        random.Random(f"{seed}:passages").shuffle(room_ids)
+        layout = replace(
+            layout,
+            passages=tuple((room_ids[2 * index], room_ids[2 * index + 1])
+                           for index in range(passage_count)),
+        )
+    return replace(layout, layout_id=f"{layout.layout_id}-randomized-v1")

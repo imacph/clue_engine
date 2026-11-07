@@ -57,6 +57,13 @@ class SessionSnapshot:
     turn_player: int | None = None
 
 
+def completed_turns(engine: Engine, player: int) -> int:
+    """Count completed turns, including a winning accusation."""
+    return sum(
+        event.kind is EventKind.END_TURN and event.actor == player for event in engine.log
+    ) + int(engine.winner == player)
+
+
 def create_game(
     num_players: int, seed: int, policy_name: str, *, game_rules: GameRules = DEFAULT_GAME_RULES,
 ) -> tuple[Engine, tuple[Policy, ...]]:
@@ -146,9 +153,7 @@ class GameSession:
         )
         is_over = engine.is_over
         winner = engine.winner
-        player0_turns = sum(
-            event.kind is EventKind.END_TURN and event.actor == 0 for event in engine.log
-        ) + int(winner == 0)
+        player0_turns = completed_turns(engine, 0)
         limit_reached = not is_over and self._steps >= self._max_steps
         legal = (
             engine.legal_actions()

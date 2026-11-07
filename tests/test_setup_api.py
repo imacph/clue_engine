@@ -50,6 +50,8 @@ def test_structured_board_setup_and_validation():
     assert state["board_rules"] == {
         **config["board_rules"], "early_end": True, "revisit_hallways": False,
         "optional_suggestion": False, "accuse_in_room": False, "stay_to_suggest": False,
+        "randomize_rooms": False, "randomize_doors": False, "randomize_passages": False,
+        "passage_count": 2,
     }
     assert state["board"]["suspects"][2]["seat"] == 0
 
@@ -63,3 +65,26 @@ def test_structured_board_setup_and_validation():
     assert client.post("/api/game", json=invalid, headers=headers).status_code == 400
     invalid = dict(config, bots=None)
     assert client.post("/api/game", json=invalid, headers=headers).status_code == 400
+
+
+def test_random_layout_options_are_validated_and_recorded_in_web_replay():
+    client, token = client_and_token()
+    headers = {"X-CSRF-Token": token}
+    rules = {
+        "randomize_rooms": True, "randomize_doors": True,
+        "randomize_passages": True, "passage_count": 4,
+    }
+    config = {"game_type": "board", "players": 4, "seed": 42, "progress": "step", "board_rules": rules}
+    response = client.post("/api/game", json=config, headers=headers)
+    assert response.status_code == 201
+    initial = response.get_json()
+    assert {key: initial["board_rules"][key] for key in rules} == rules
+    assert len(initial["board"]["layout"]["passages"]) == 4
+    assert client.post("/api/replay/end", json={"confirmed": True}, headers=headers).status_code == 200
+    replay = client.get("/api/replay/state?position=0&player=0").get_json()
+    assert replay["board"]["layout"] == initial["board"]["layout"]
+    for bad in (-1, 5, True, 2.5):
+        response = client.post(
+            "/api/game", json={**config, "board_rules": {**rules, "passage_count": bad}}, headers=headers,
+        )
+        assert response.status_code == 400

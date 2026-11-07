@@ -4,8 +4,10 @@ from dataclasses import replace
 
 import pytest
 
+from clue_engine.board import DEFAULT_BOARD, Door, Square, randomize_board_layout
 from clue_engine.board_record import read_board_record, write_board_record
 from clue_engine.board_state import RoomPosition, SuspectToken
+from clue_engine.board_turn import Roll, UsePassage
 from clue_engine.engine import Engine, replay_history
 from clue_engine.game_settings import BoardRules, GameRules
 from clue_engine.knowledge import Mark, knowledge_for
@@ -156,6 +158,154 @@ def test_layered_mutators_run_with_bots():
     while not session.snapshot().is_over and not session.snapshot().limit_reached:
         session.advance_bot()
     assert session.snapshot().steps > 0
+
+
+@pytest.mark.parametrize("count", range(5))
+def test_randomized_passages_are_distinct_seeded_pairs(count):
+    rules = BoardRules(randomize_passages=True, passage_count=count)
+    first, _ = create_board_game(4, 42, "random", board_rules=rules)
+    second, _ = create_board_game(4, 42, "random", board_rules=rules)
+    normal, _ = create_board_game(4, 42, "random")
+    layout = first.state.board.board.layout
+    assert layout == second.state.board.board.layout
+    assert len(layout.passages) == count
+    rooms = [room for pair in layout.passages for room in pair]
+    assert len(rooms) == len(set(rooms))
+    for a, b in layout.passages:
+        assert layout.passage_from(a) == b
+        assert layout.passage_from(b) == a
+    assert first.state.solution == normal.state.solution
+    assert first.state.player_hands == normal.state.player_hands
+
+
+@pytest.mark.parametrize("value", [-1, 5, True, 2.5])
+def test_passage_count_rejects_invalid_values(value):
+    with pytest.raises((TypeError, ValueError), match="passage_count"):
+        BoardRules(passage_count=value)
+
+
+def test_room_shuffle_remaps_doors_and_passages_without_moving_geometry():
+    rules = BoardRules(randomize_rooms=True)
+    engine, _ = create_board_game(4, 42, "random", board_rules=rules)
+    same, _ = create_board_game(4, 42, "random", board_rules=rules)
+    other, _ = create_board_game(4, 43, "random", board_rules=rules)
+    layout = engine.state.board.board.layout
+    assert layout == same.state.board.board.layout
+    assert layout.rooms != DEFAULT_BOARD.rooms
+    assert layout.rooms != other.state.board.board.layout.rooms
+    mapping = {old.card_id: new.card_id for old, new in zip(DEFAULT_BOARD.rooms, layout.rooms, strict=True)}
+    assert [room.squares for room in layout.rooms] == [room.squares for room in DEFAULT_BOARD.rooms]
+    assert layout.doors == tuple(replace(door, room_id=mapping[door.room_id]) for door in DEFAULT_BOARD.doors)
+    assert layout.passages == tuple((mapping[a], mapping[b]) for a, b in DEFAULT_BOARD.passages)
+    assert layout.hallways == DEFAULT_BOARD.hallways
+    assert layout.starts == DEFAULT_BOARD.starts
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_randomized_doors_preserve_each_location_count_and_valid_connections(seed):
+    rules = BoardRules(randomize_rooms=True, randomize_doors=True)
+    engine, _ = create_board_game(4, seed, "random", board_rules=rules)
+    layout = engine.state.board.board.layout
+    original_by_squares = {room.squares: room.card_id for room in DEFAULT_BOARD.rooms}
+    for room in layout.rooms:
+        doors = layout.doors_for(room.card_id)
+        assert len(doors) == len(DEFAULT_BOARD.doors_for(original_by_squares[room.squares]))
+        sides = {
+            (door.hallway_square.x - door.room_square.x, door.hallway_square.y - door.room_square.y)
+            for door in doors
+        }
+        assert len(sides) == len(doors)
+        for door in doors:
+            assert door.room_square in room.squares
+            assert door.hallway_square in layout.hallways
+            assert abs(door.room_square.x - door.hallway_square.x) + abs(
+                door.room_square.y - door.hallway_square.y
+            ) == 1
+            dx = door.hallway_square.x - door.room_square.x
+            dy = door.hallway_square.y - door.room_square.y
+            for offset in (-1, 1):
+                assert Square(door.room_square.x - offset * dy, door.room_square.y + offset * dx) in room.squares
+                assert Square(
+                    door.hallway_square.x - offset * dy, door.hallway_square.y + offset * dx
+                ) in layout.hallways
+    assert {(d.room_square, d.hallway_square) for d in layout.doors} != {
+        (d.room_square, d.hallway_square) for d in DEFAULT_BOARD.doors
+    }
+
+
+def test_door_randomization_rejects_layouts_with_too_few_sides():
+    room = DEFAULT_BOARD.rooms[0]
+    original_doors = set(DEFAULT_BOARD.doors)
+    extra = next(
+        door for square in sorted(room.squares)
+        for neighbor in (
+            Square(square.x, square.y - 1), Square(square.x + 1, square.y),
+            Square(square.x, square.y + 1), Square(square.x - 1, square.y),
+        )
+        if neighbor in DEFAULT_BOARD.hallways
+        for door in (Door(room.card_id, square, neighbor),)
+        if door not in original_doors
+    )
+    layout = replace(DEFAULT_BOARD, doors=(*DEFAULT_BOARD.doors, extra))
+    with pytest.raises(ValueError, match="too few eligible sides"):
+        randomize_board_layout(layout, random.Random(42), doors=True)
+
+
+def test_randomized_passage_is_a_legal_move_to_its_generated_destination():
+    rules = BoardRules(randomize_passages=True, passage_count=4)
+    engine, _ = create_board_game(4, 42, "random", board_rules=rules)
+    turn = engine.state.board
+    source, destination = turn.board.layout.passages[0]
+    suspect = turn.board.seat_suspects[engine.state.current_player]
+    tokens = tuple(
+        replace(token, location=RoomPosition(source)) if token.suspect_id == suspect else token
+        for token in turn.board.suspects
+    )
+    engine.state.board = replace(turn, board=replace(turn.board, suspects=tokens))
+    assert UsePassage() in engine.legal_actions()
+    engine.step(UsePassage())
+    pawn = next(token for token in engine.state.board.board.suspects if token.suspect_id == suspect)
+    assert pawn.location == RoomPosition(destination)
+
+
+def test_layout_randomizers_are_independent_for_the_same_seed():
+    def layout(rules):
+        engine, _ = create_board_game(4, 42, "random", board_rules=rules)
+        return engine.state.board.board.layout
+
+    doors_only = layout(BoardRules(randomize_doors=True))
+    passages_only = layout(BoardRules(randomize_passages=True, passage_count=4))
+    combined = layout(BoardRules(
+        randomize_rooms=True, randomize_doors=True, randomize_passages=True, passage_count=4,
+    ))
+    assert {(door.room_square, door.hallway_square) for door in doors_only.doors} == {
+        (door.room_square, door.hallway_square) for door in combined.doors
+    }
+
+    def passage_locations(board):
+        by_id = {room.card_id: room.squares for room in board.rooms}
+        return {frozenset((by_id[a], by_id[b])) for a, b in board.passages}
+
+    assert passage_locations(passages_only) == passage_locations(combined)
+    assert doors_only.rooms == DEFAULT_BOARD.rooms
+    assert doors_only.passages == DEFAULT_BOARD.passages
+
+
+def test_randomized_layout_round_trips_in_replays_and_private_board_records(tmp_path):
+    rules = BoardRules(randomize_rooms=True, randomize_doors=True, randomize_passages=True, passage_count=4)
+    engine, _ = create_board_game(4, 42, "random", board_rules=rules)
+    initial = deepcopy(engine.state)
+    engine.step(Roll())
+    record = Replay(initial, engine.history, None, "automatic", ())
+    restored = decode_replay(encode_replay(record))
+    assert restored.initial.board.board.layout == initial.board.board.layout
+    assert restored.initial.board_rules == rules
+    assert replay_history(restored.initial, restored.history).log == engine.log
+    path = tmp_path / "randomized-board.json"
+    write_board_record(path, initial, engine.history)
+    board_replay = read_board_record(path)
+    assert board_replay.state.board.board.layout == initial.board.board.layout
+    assert board_replay.log == engine.log
 
 
 @pytest.mark.parametrize("board", [False, True])

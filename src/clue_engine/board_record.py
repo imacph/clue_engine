@@ -45,13 +45,15 @@ def write_board_record(
     board_rules = initial["board_rules"]
     new_rules = (
         "early_end", "revisit_hallways", "optional_suggestion", "accuse_in_room", "stay_to_suggest",
+        "randomize_rooms", "randomize_doors", "randomize_passages",
     )
-    extended = any(board_rules[key] for key in new_rules) or any(
+    extended = any(board_rules[key] for key in new_rules) or board_rules["passage_count"] != 2 or any(
         asdict(initial_state.game_rules).values()
     )
     if not extended:
         for key in new_rules:
             del board_rules[key]
+        del board_rules["passage_count"]
         del initial["game_rules"]
         del initial["public_cards"]
     payload = {

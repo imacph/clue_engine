@@ -18,7 +18,7 @@ from ..board_state import RoomPosition, create_board
 from ..board_turn import BoardTurn, Move, Roll, UsePassage
 from ..cards import CARDS, CARDS_BY_ID
 from ..desktop_preferences import DesktopPreferences
-from ..engine import IllegalActionError, replay_history
+from ..engine import Engine, IllegalActionError, replay_history
 from ..game_settings import BoardRules, BotStrategy, GameRules
 from ..knowledge import Knowledge, Mark, knowledge_for
 from ..models import (
@@ -45,7 +45,13 @@ from ..presentation import (
     notebook_actor,
 )
 from ..replay import Replay, decode_replay, encode_replay
-from ..session import DebugInfo, GameSession, create_board_game, create_game
+from ..session import (
+    DebugInfo,
+    GameSession,
+    completed_turns,
+    create_board_game,
+    create_game,
+)
 
 _SESSION_TTL_SECONDS = 60 * 60
 _MAX_ACTIVE_SESSIONS = 64
@@ -71,6 +77,7 @@ class WebGame:
     replay_deduction_step: int = -1
     replay_deduction_events: tuple[Event, ...] = ()
     replay_deductions: list[dict[str, int]] = field(default_factory=list)
+    replay_knowledge_summaries: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -215,7 +222,7 @@ def _event_payload(events: tuple[Any, ...]) -> list[dict[str, Any]]:
     ]
 
 
-def _activity_payload(events: tuple[Any, ...]) -> dict[str, Any] | None:
+def _activity_payload(events: tuple[Any, ...]) -> tuple[dict[str, Any] | None, int | None]:
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
         if event.kind not in (
@@ -236,7 +243,7 @@ def _activity_payload(events: tuple[Any, ...]) -> dict[str, Any] | None:
                     event.combo.weapon_id,
                     event.combo.room_id,
                 ],
-            }
+            }, index + 1
 
         suggestion = next(
             (item for item in reversed(events[:index]) if item.kind is EventKind.SUGGEST),
@@ -260,8 +267,8 @@ def _activity_payload(events: tuple[Any, ...]) -> dict[str, Any] | None:
             activity["card_id"] = event.card_id
             activity["recipient"] = event.private_to
             activity["public"] = event.public
-        return activity
-    return None
+        return activity, index + 1
+    return None, None
 
 
 def _square_payload(square: Square) -> dict[str, int]:
@@ -351,6 +358,7 @@ def _replay_deductions(
     relevant = {EventKind.PASS, EventKind.REFUTE, EventKind.SHOW, EventKind.EXPOSE,
                 EventKind.ACCUSE, EventKind.END_TURN}
     sizes = tuple(len(hand) for hand in replay.initial.player_hands)
+    seen = {(item["player"], item["holder"], item["card"]) for item in game.replay_deductions}
     for step in range(game.replay_deduction_step + 1, target_step + 1):
         events = replay.history[step - 1].events if step else ()
         replay_events = game.replay_deduction_events + events
@@ -359,18 +367,50 @@ def _replay_deductions(
             for player, hand in enumerate(replay.initial.player_hands):
                 view = view_for(replay_events, player, hand, hand_sizes=sizes)
                 knowledge = knowledge_for(view, len(sizes))
-                for card_id in CARDS_BY_ID:
-                    if (knowledge.mark_of(knowledge.envelope, card_id) is Mark.HELD
-                            and not any(item["player"] == player and item["card"] == card_id
-                                        for item in deductions)):
-                        deductions.append({
-                            "player": player, "card": card_id,
-                            "step": step, "position": positions[step],
-                        })
+                shown = {
+                    (event.actor, event.card_id) for event in view.events
+                    if event.kind in (EventKind.SHOW, EventKind.EXPOSE)
+                }
+                for holder in range(len(sizes) + 1):
+                    if holder == player:
+                        continue
+                    for card_id in CARDS_BY_ID:
+                        key = (player, holder, card_id)
+                        if (key not in seen and (holder, card_id) not in shown
+                                and knowledge.mark_of(holder, card_id) is Mark.HELD):
+                            deductions.append({
+                                "player": player, "holder": holder, "card": card_id,
+                                "step": step, "position": positions[step],
+                            })
+                            seen.add(key)
         game.replay_deduction_events = replay_events
         game.replay_deductions = deductions
         game.replay_deduction_step = step
     return [item for item in game.replay_deductions if item["step"] <= target_step]
+
+
+def _replay_knowledge_summary(engine: Engine) -> list[dict[str, Any]]:
+    summaries = []
+    for player in range(engine.num_players):
+        knowledge = knowledge_for(engine.view(player), engine.num_players)
+        categories = {}
+        for card_type, cards in CARDS.items():
+            marks = [
+                knowledge.mark_of(holder, card.id)
+                for card in cards for holder in range(engine.num_players + 1)
+            ]
+            categories[card_type.name.lower()] = {
+                "located": sum(mark is Mark.HELD for mark in marks),
+                "total": len(cards),
+                "marks": sum(mark is not Mark.UNKNOWN for mark in marks),
+                "mark_total": len(marks),
+                "envelope": sum(
+                    knowledge.mark_of(knowledge.envelope, card.id) is Mark.HELD
+                    for card in cards
+                ),
+            }
+        summaries.append({"player": player, "categories": categories})
+    return summaries
 
 
 def _serialize_state(
@@ -470,6 +510,7 @@ def _serialize_state(
             ],
         }
     activity_events = snapshot.events if snapshot.debug_info is not None else view.events
+    activity, activity_event_number = _activity_payload(activity_events)
     review_completed_turn = (
         game.waiting_for_turn and replay_snapshot is None and not game.abandoned
         and not snapshot.is_over and not snapshot.limit_reached
@@ -551,7 +592,8 @@ def _serialize_state(
         "limit_reached": snapshot.limit_reached,
         "status": status,
         "hand": sorted(view.own_hand),
-        "activity": _activity_payload(activity_events),
+        "activity": activity,
+        "activity_event_number": activity_event_number,
         "notebook_focus": notebook_focus,
         "events": _event_payload(snapshot.events),
         "matrix": matrix,
@@ -804,6 +846,14 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
 
+    @app.delete("/api/game")
+    def exit_game():
+        game_id = browser_session.pop("game_id", None)
+        if isinstance(game_id, str):
+            with games_lock:
+                games.pop(game_id, None)
+        return jsonify(ok=True)
+
     @app.get("/api/state")
     def game_state():
         game = _game_from_request(games, games_lock)
@@ -936,7 +986,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 show_all = request.args.get("omniscient") == "1"
                 snapshot = replace(
                     game.game.snapshot(), human_player=player, to_move=None, is_over=True,
-                    winner=engine.winner, steps=step, limit_reached=False, view=view,
+                    winner=engine.winner, steps=step, player0_turns=completed_turns(engine, 0),
+                    limit_reached=False, view=view,
                     events=engine.log if show_all else view.events, legal_actions=(),
                     debug_info=DebugInfo(engine.state.solution, tuple(engine.state.player_hands))
                     if show_all else None,
@@ -968,6 +1019,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                     public_refutations=engine.state.game_rules.public_refutations,
                     omniscient=show_all,
                 )
+                if step not in game.replay_knowledge_summaries:
+                    game.replay_knowledge_summaries[step] = _replay_knowledge_summary(engine)
                 result.update(
                     mode="replay", paused=True, auto_progress=False, is_replay=True,
                     position=position, positions=len(timeline), turns=turns,
@@ -975,10 +1028,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                     status=f"Replay: action {step} of {len(replay.history)}.",
                     board_rules=asdict(engine.state.board_rules) if engine.state.board else None,
                     game_rules=asdict(engine.state.game_rules),
-                    deduction_timeline=[
-                        item for item in _replay_deductions(game, replay, timeline, step)
-                        if show_all or item["player"] == player
-                    ],
+                    deduction_timeline=_replay_deductions(game, replay, timeline, len(replay.history)),
+                    knowledge_summary=game.replay_knowledge_summaries[step],
                 )
                 for card in result["matrix"]:
                     card["editable"] = [False] * len(card["editable"])

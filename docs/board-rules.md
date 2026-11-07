@@ -20,7 +20,7 @@ reproduced. Card-only mode keeps its current rules and remains the default.
   solution; deal all remaining cards as evenly as possible. Players keep their
   hands private unless an information variant is enabled.
 - **BR-05 — Board:** Use nine rooms, hallways, doors and passages between
-  diagonally opposite corner rooms. Use original or appropriately licensed
+  diagonally opposite corner rooms by default. Use original or appropriately licensed
   artwork and document any topology differences from the reference edition.
 
 ## Movement and suggestions
@@ -34,7 +34,8 @@ reproduced. Card-only mode keeps its current rules and remains the default.
   turn. A door is an opening, not an additional square. Entering a room costs
   one step and ends movement even when the roll has steps left.
 - **BR-08 — Passage:** At the start of a turn in a corner room, a player may
-  take its secret passage to the opposite corner room instead of rolling.
+  take its secret passage to the opposite corner room instead of rolling. When
+  passages are randomized, the same action connects the configured room pair.
 - **BR-09 — Blocked movement:** A player trapped in a room by blocked doors
   remains there until an exit is available. If a hallway path cannot continue,
   ending at the last reachable square is the planned interpretation where the
@@ -105,6 +106,17 @@ still moves suspects but requires the affected player to move normally on their
 next turn. Disabling passages removes passage actions and may leave a player
 blocked until the game's action limit. Passing remains mandatory only when no
 card matches.
+
+Three independent board-layout options shuffle room identities among existing
+locations, randomize each physical room's doors while preserving its door
+count, using at most one door per side, and keeping doors away from corners and
+outside walls, and replace the
+passages with 0–4 random disjoint room pairs. Layouts without enough
+eligible sides for their existing door count cannot randomize doors.
+Without
+passage randomization, passages stay attached to their physical locations when
+rooms are shuffled. The layout is generated reproducibly from the game seed,
+independently of the card deal, and is stored in private replays and records.
 
 The browser and Windows wizard offer Standard and No relocation presets as well
 as custom settings. Rules are fixed when a game starts and are included in

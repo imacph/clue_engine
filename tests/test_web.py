@@ -58,6 +58,13 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     assert b"/static/app.js" in response.data
     assert b"csrf-token" in response.data
     assert b'id="theme-toggle"' in response.data
+    assert b'id="game-theme-toggle"' in response.data
+    assert b"Local game" not in response.data
+    menu = response.data.split(b'<section id="main-menu"', 1)[1].split(b"</section>", 1)[0]
+    dialog = response.data.split(b'<dialog id="quickplay-dialog"', 1)[1].split(b"</dialog>", 1)[0]
+    assert b'id="main-edit-default"' not in menu
+    assert b'id="main-edit-default"' in dialog
+    assert b'id="quickplay-summary"' in dialog
     assert b'id="action-dialog"' not in response.data
     assert b'id="action-menu-button"' not in response.data
     assert b'id="card-action-buttons"' in response.data
@@ -77,6 +84,16 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     stylesheet = client.get("/static/style.css")
     assert stylesheet.status_code == 200
     assert b"[hidden] { display: none !important; }" in stylesheet.data
+
+
+def test_exit_game_discards_session_and_requires_csrf(client):
+    token = csrf_token(client)
+    assert post(client, token, "/api/game", {"players": 4, "seed": 42}).status_code == 201
+    assert client.delete("/api/game").status_code == 403
+    assert client.get("/api/state").status_code == 200
+    assert client.delete("/api/game", headers={"X-CSRF-Token": token}).get_json() == {"ok": True}
+    assert client.get("/api/state").status_code == 404
+    assert client.delete("/api/game", headers={"X-CSRF-Token": token}).status_code == 200
 
 
 def test_notebook_focus_tracks_accusations_and_game_completion(client, monkeypatch):
@@ -150,6 +167,10 @@ def test_private_replay_captures_perspectives_and_manual_history(client, monkeyp
     player2 = client.get("/api/replay/state?position=4&player=2").get_json()
     assert player0["hand_sizes"] == player2["hand_sizes"] == [5, 5, 4, 4]
     assert player0["matrix"][7]["marks"][1] == "+"
+    assert not any(
+        item["player"] == 0 and item["holder"] == 1 and item["card"] == 7
+        for item in player0["deduction_timeline"]
+    )
     assert player2["matrix"][7]["marks"][1] == "?"
     assert all(event["kind"] != "show" for event in player2["events"])
     assert player0["notebook_focus"] == {
@@ -185,7 +206,7 @@ def test_private_replay_captures_perspectives_and_manual_history(client, monkeyp
     assert post(client, token, "/api/replay/import", record).status_code == 400
 
 
-def test_replay_deduction_timeline_tracks_visible_information_and_hides_future(client, monkeypatch):
+def test_replay_deduction_timeline_covers_all_players_and_future_positions(client, monkeypatch):
     def scripted(num_players, seed, policy_name):
         return make_engine(), (
             ScriptedPolicy(), ScriptedPolicy(Pass()), ScriptedPolicy(Pass()), ScriptedPolicy(Pass()),
@@ -203,22 +224,50 @@ def test_replay_deduction_timeline_tracks_visible_information_and_hides_future(c
     assert post(client, token, "/api/action", {
         "action": "suggest", "suspect_id": 0, "weapon_id": 6, "room_id": 12,
     }).status_code == 200
-    for _ in range(3):
-        assert post(client, token, "/api/advance", {"step": True}).status_code == 200
+    for player in range(1, 4):
+        response = post(client, token, "/api/advance", {"step": True})
+        assert response.status_code == 200
+        state = response.get_json()
+        assert state["events"][0]["kind"] == "pass"
+        assert state["events"][0]["actor"] == player
+        assert state["activity"] == {"kind": "suggest", "actor": 0, "cards": [0, 6, 12]}
     post(client, token, "/api/replay/end", {"confirmed": True})
 
     initial = client.get("/api/replay/state?position=0&player=0").get_json()
     initial_items = initial["deduction_timeline"]
-    assert {"player": 0, "card": 0, "step": 0, "position": 0} in initial_items
-    assert all(item["step"] == 0 for item in initial_items)
+    assert {"player": 0, "holder": 4, "card": 0, "step": 0, "position": 0} in initial_items
     final = client.get("/api/replay/state?position=5&player=0").get_json()
     discoveries = final["deduction_timeline"]
-    assert {"player": 0, "card": 6, "step": 4, "position": 5} in discoveries
-    assert {"player": 0, "card": 12, "step": 4, "position": 5} in discoveries
+    assert {"player": 0, "holder": 4, "card": 6, "step": 4, "position": 5} in discoveries
+    assert {"player": 0, "holder": 4, "card": 12, "step": 4, "position": 5} in discoveries
+    assert initial_items == discoveries
+    assert {item["player"] for item in discoveries} == {0, 1}
+    assert all(item["player"] != item["holder"] for item in discoveries)
+    assert initial["knowledge_summary"] == client.get(
+        "/api/replay/state?position=1&player=0&manual=1"
+    ).get_json()["knowledge_summary"]
+    for seat in range(4):
+        state = client.get(f"/api/replay/state?position=5&player={seat}").get_json()
+        assert state["knowledge_summary"] == final["knowledge_summary"]
+        summary = state["knowledge_summary"][seat]
+        assert summary["player"] == seat
+        for category, values in summary["categories"].items():
+            cards = [card for card in state["matrix"] if card["type"] == category]
+            assert values == {
+                "located": sum("+" in card["marks"] for card in cards),
+                "total": len(cards),
+                "marks": sum(mark != "?" for card in cards for mark in card["marks"]),
+                "mark_total": len(cards) * 5,
+                "envelope": sum(card["marks"][4] == "+" for card in cards),
+            }
+    assert initial["knowledge_summary"][0]["categories"]["suspect"]["located"] == 6
+    assert final["knowledge_summary"][0]["categories"]["room"]["located"] > (
+        initial["knowledge_summary"][0]["categories"]["room"]["located"]
+    )
     player2 = client.get("/api/replay/state?position=5&player=2").get_json()
-    assert all(item["player"] == 2 for item in player2["deduction_timeline"])
+    assert player2["deduction_timeline"] == discoveries
     omniscient = client.get("/api/replay/state?position=5&player=2&omniscient=1").get_json()
-    assert all(item in omniscient["deduction_timeline"] for item in discoveries)
+    assert omniscient["deduction_timeline"] == discoveries
     assert client.get("/api/replay/state?position=0&player=0").get_json()[
         "deduction_timeline"
     ] == initial_items
@@ -226,6 +275,40 @@ def test_replay_deduction_timeline_tracks_visible_information_and_hides_future(c
     assert post(client, token, "/api/replay/import", record).status_code == 200
     restored = client.get("/api/replay/state?position=5&player=0").get_json()
     assert restored["deduction_timeline"] == discoveries
+    assert restored["knowledge_summary"] == final["knowledge_summary"]
+
+
+def test_replay_marks_inferred_other_player_card_at_first_discovery(client):
+    token = csrf_token(client)
+    state = post(client, token, "/api/game", {
+        "mode": "spectate", "players": 4, "progress": "step", "seed": 42,
+    }).get_json()
+    for _ in range(70):
+        if state["is_over"]:
+            break
+        response = post(client, token, "/api/advance", {"step": True})
+        assert response.status_code == 200
+        state = response.get_json()
+    if not state["is_over"]:
+        assert post(client, token, "/api/replay/end", {"confirmed": True}).status_code == 200
+
+    start = client.get("/api/replay/state?position=0&player=0").get_json()
+    discovery = next(
+        item for item in start["deduction_timeline"]
+        if item["holder"] < start["num_players"] and item["position"] > 0
+    )
+    player, holder, card, position = (
+        discovery["player"], discovery["holder"], discovery["card"], discovery["position"]
+    )
+    before = client.get(f"/api/replay/state?position={position - 1}&player={player}").get_json()
+    after = client.get(f"/api/replay/state?position={position}&player={player}").get_json()
+    assert before["matrix"][card]["marks"][holder] == "?"
+    assert after["matrix"][card]["marks"][holder] == "+"
+    assert not any(
+        event["kind"] in ("show", "expose")
+        and event["actor"] == holder and after["matrix"][card]["name"] in event["text"]
+        for event in after["events"]
+    )
 
 
 @pytest.mark.parametrize("public", [False, True])
@@ -306,6 +389,39 @@ def test_replay_unlocks_on_game_over_but_not_action_limit(client, monkeypatch):
     assert replay["manual_available"] is False
 
 
+def test_replay_counts_player_one_completed_turns_at_each_position_and_after_import(client, monkeypatch):
+    def scripted(num_players, seed, policy_name):
+        return make_engine(), (
+            ScriptedPolicy(), ScriptedPolicy(EndTurn()),
+            ScriptedPolicy(EndTurn()), ScriptedPolicy(EndTurn()),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step", "notebook_mode": "manual",
+    })
+    assert post(client, token, "/api/action", {"action": "end_turn"}).status_code == 200
+    assert client.put(
+        "/api/notebook", json={"card_id": 7, "holder": 2, "mark": "+"},
+        headers={"X-CSRF-Token": token},
+    ).status_code == 200
+    for _ in range(3):
+        assert post(client, token, "/api/advance", {"step": True}).status_code == 200
+        assert post(client, token, "/api/next-turn", {}).status_code == 200
+    assert post(client, token, "/api/action", {
+        "action": "accuse", "confirmed": True, "suspect_id": 0, "weapon_id": 6, "room_id": 12,
+    }).get_json()["player0_turns"] == 2
+    for imported in (False, True):
+        if imported:
+            record = client.get("/api/replay/export").get_json()
+            assert post(client, token, "/api/replay/import", record).status_code == 200
+        assert [
+            client.get(f"/api/replay/state?position={position}&player=0").get_json()["player0_turns"]
+            for position in range(7)
+        ] == [0, 1, 1, 1, 1, 1, 2]
+
+
 def test_optional_setup_controls_are_disclosed_on_demand(client):
     page = client.get("/").get_data(as_text=True)
     for summary in ("Advanced options", "Saved setup profiles"):
@@ -316,6 +432,9 @@ def test_optional_setup_controls_are_disclosed_on_demand(client):
     assert 'id="setup-form" novalidate' in page
     assert 'id="setup-quick-play" type="submit"' in page
     assert page.index('id="setup-next"') < page.index('data-step="0"')
+    navigation = page.split('class="form-actions setup-navigation"', 1)[1].split("</div>", 1)[0]
+    assert 'id="save-quickplay-default"' in navigation
+    assert 'id="quickplay-status"' in navigation
 
 
 def test_start_game_and_submit_actions_without_exposing_solution(client):
@@ -714,6 +833,7 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
     dagger = next(row for row in private_view["matrix"] if row["id"] == 7)
     assert dagger["marks"][1] == "+"
     assert private_view["activity"]["card_id"] == 7
+    assert private_view["activity_event_number"] == 3
     assert private_view["notebook_focus"]["shown"] == {"card": 7, "holder": 1}
     assert private_view["notebook_focus"]["turn"] == private_view["notebook_focus"]["actor"] == 0
     assert all(event["kind"] != "show" for event in private_view["events"])
@@ -722,6 +842,7 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
 
     unrelated_view = client.get("/api/state?player=2").get_json()
     assert unrelated_view["activity"]["kind"] == "refute"
+    assert unrelated_view["activity_event_number"] == 2
     assert "card_id" not in unrelated_view["activity"]
     assert unrelated_view["notebook_focus"]["shown"] is None
     clause = unrelated_view["notebook_clauses"][0]

@@ -14,8 +14,8 @@ No license granting redistribution rights is provided.
 ## Versions
 
 <!-- component-versions:start -->
-The game API and Python distribution are **0.6.1**, the shared browser/desktop
-frontend is **0.5.2**, and the Windows desktop wrapper is **0.4.0**.
+The game API and Python distribution are **0.6.2**, the shared browser/desktop
+frontend is **0.6.0**, and the Windows desktop wrapper is **0.4.1**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -238,7 +238,10 @@ alongside the card-based actions. History and deduction clauses are available
 in the right-side tabbed panel. The
 knowledge matrix groups suspects, weapons, and rooms with matching icons and
 colors. A theme toggle follows the system preference by default and remembers
-your selection. The card area switches between your hand, individual card
+your selection. Pawn moves, new suggestions from the acting pawn, and newly
+visible reveals animate in play and replay; animations are disabled when the
+system requests reduced motion. A gold outline marks the turn owner's pawn. The card area
+switches between your hand, individual card
 categories, and the full deck. Click cards to build suggestions or accusations,
 or click a matching held card to reveal it; the adjacent card panel identifies
 the latest suggestion, accusation, refutation, or visible reveal and its player.
@@ -248,10 +251,23 @@ existing Tkinter app remains available with
 `python -m clue_engine.gui`; its batch statistics and trace tools are not yet
 part of the browser interface.
 
-The browser and Windows app use a five-step new-game wizard for game type,
-seats, bots, rules, and review. Use **Quick play** to start with the currently
-selected settings and defaults without visiting the remaining steps, or use
-**Next** to customize and review them. Wizard navigation stays at the bottom of
+The browser and Windows app open to a main menu. **Quick play** shows the
+current profile before starting; its default is a four-player board game with a
+manual notebook and deductive, probing, and strategic bots randomly assigned to
+the three bot seats. To change these defaults, select **Edit quickplay defaults**
+in the quickplay dialog, adjust the settings, and choose
+**Save as quickplay defaults** in the setup navigation bar. Defaults are stored with
+setup profiles and use a fresh seed for every game. The menu also offers
+**Game setup**, **Load replay**, full screen, and light/dark mode. The game
+options menu also contains the display settings. **Quit game** is available
+in the Windows app; close the browser tab when using the browser.
+
+The five-step new-game wizard covers game type, seats, bots, rules, and review.
+Use **Start game** at any step or **Next** to customize and review them.
+On the bots step, **Randomly assign bot styles to seats** shuffles the
+configured bot styles among bot seats while keeping the human seat fixed.
+The seed determines the shuffle, and **Replay previous setup** restores the
+actual assignments used. Wizard navigation stays at the bottom of
 the window as you move between steps. Board character selection includes a preview of
 all six starting positions before cards are dealt. Miss Scarlet must be
 assigned and starts; turns then proceed in seat order. The browser and Windows
@@ -296,13 +312,14 @@ Space to cycle through unknown (`?`), held (`+`), and not held (`-`). Record
 shown cards and other deductions yourself; arrow keys move between editable
 cells. Marks appear immediately while they save; a failed save is reported and
 reverted unless a later edit supersedes it. Your notes do not affect the bots.
-The right-side **Help** tab summarizes notebook and clause controls.
+The right-side **Help** tab summarizes action, notebook, and clause controls.
 In the browser and Windows app, the notebook highlights the turn owner's column
 in blue, the acting player's column in gold, and the cards in the current
 suggestion or accusation.
 An underlined cell marks a card visibly shown to the selected perspective.
 While a bot turn awaits **Next turn**, its column and suggestion rows remain
-highlighted for review. Highlights follow the current turn and replay position without revealing
+highlighted for review; the board marks the same player and labels the turn as
+under review. Highlights follow the current turn and replay position without revealing
 another player's private cards. During private responses, the acting column is
 highlighted only for the suggester or responder; public and omniscient views
 can highlight it for everyone. The legacy Tk notebook highlights the card rows
@@ -314,12 +331,14 @@ the envelope. Selecting a different column moves the whole clause to that
 holder; selecting a different card of the same type replaces the previous card.
 Select **Confirm** to save, or **Cancel** to discard the draft. Cell
 marks do not change while entering a clause, and any cell can be selected.
-Colored dots identify the clauses linked to each cell, with separate
-dots for overlapping clauses and matching dots in the list. Colors distinguish
+Colored dots identify the clauses linked to each cell without increasing its
+row height, with separate dots for overlapping clauses and matching dots in
+the list. Colors distinguish
 clauses within a column and do not depend on selection or list filters. Select
 a dot to open its clause in the **Clauses** tab, or select a clause heading to
 emphasize its linked cells. Only one clause is selected at a time; select its
-heading again to clear the selection.
+heading again to clear the selection. Leaving the **Clauses** tab also clears
+the selection and its linked-cell highlighting.
 Clause numbers are notebook numbers, not history event numbers.
 You can edit clauses using the same notebook interaction, resolve, reopen, or
 delete them, and independently exclude
@@ -363,7 +382,11 @@ refutations, responses from every other player, or reverse response order in
 any combination. Face-up mode exposes one randomly selected card per player
 and requires each player to have at least one card. Board games also offer
 suggesting without moving when starting a turn in a room and other movement,
-relocation, and accusation options. The strategy toolkit score describes the
+relocation, and accusation options. Independent layout options scramble room
+identities, randomize door positions away from corners and outside walls with
+at most one door per side while keeping each room's door count, and
+randomize 0–4 passages between distinct room pairs. A seed reproduces the
+layout, and replays retain it. The strategy toolkit score describes the
 enabled techniques; it is not a predicted win rate. See the
 [board rules contract](docs/board-rules.md) for rule defaults and effects.
 
@@ -376,9 +399,17 @@ tabs. Cards and actions also
 show the latest eight unfiltered history events. On smaller screens these areas
 stack vertically and the page scrolls as needed. The cards tab opens when a room suggestion
 or response needs your attention. Card choices appear above the combination
-and action controls; longer lists scroll within the card area. On your turn, roll the
-dice or take an available passage. The dice display shows both results and their
-total; the movement indicator separately shows steps remaining. Select highlighted board squares
+and action controls; longer lists scroll within the card area. Cards show an
+**In hand** badge for the viewed player's actual hand and at most one positive
+player or envelope notebook mark. Board rooms show the same indicators.
+Game options can independently hide card and board indicators. Conflicting
+positive marks are reported in the status area and not shown on the affected
+card or room. Manual marks update immediately and can differ from the actual hand.
+On your turn, roll the
+dice or take an available passage. The board header groups the current turn,
+dice, movement, and available actions above the map. The dice display animates
+new rolls and shows both results and their total; the movement indicator shows steps
+remaining. Dice animation respects reduced-motion preferences. Select highlighted board squares
 with the mouse, touch, or keyboard. When the board viewport or a highlighted
 square is focused, arrow keys move in that direction, including through doors.
 If multiple exits share a direction, use that arrow to choose an exit and press
@@ -386,14 +417,23 @@ Enter. Entering a room ends movement. The board can be
 zoomed and scrolled; the locations tab
 describes suspect and weapon positions and identifies your piece, bots, and
 unassigned suspects. On the board, player pieces show their seat numbers;
-unassigned suspects show initials and a dashed outline. On small screens or when zoomed,
+unassigned suspects show initials and a dashed outline. Matching letters on
+rooms identify passage pairs; the locations tab also names each destination.
+On small screens or when zoomed,
 individual panels may scroll without scrolling the game page.
+
+Suggestion cards animate from the suggesting player's pawn, including your own
+suggestions. Automatic bot responses and continuous replay give suggestions and
+reveals time to be read; manual actions and replay navigation remain available.
+Each pass is shown with the suggested cards and a summary of earlier passes,
+and receives its own reading pause during automatic play and continuous replay.
+Reduced-motion preferences disable the animation.
 
 After entering a room, choose a suspect and weapon in the cards area; the
 current room is selected for your suggestion. Accusations may name a different
 room. If you select another room, **Use current room** restores the room for a
 suggestion. When summoned to a room, you can suggest there or move normally.
-Follow the card-area prompt to reveal a card or pass when responding. Board
+When responding, select a matching card to reveal it, or pass if you have none. Board
 geometry is original rather than a reproduction of the printed C00045 board.
 
 Spectator mode exposes each player's private hand and notebook; use **View as**
@@ -405,23 +445,47 @@ hidden information.
 ### Private game replay
 
 When a game finishes, select **Replay** to step through actions and recorded
-notebook edits, or jump between turns. Select a player to see their hand and
-automatic deductions based only on what that player had observed at that point.
+notebook edits, jump between turns, or play continuously at a chosen speed.
+Playback stops at the end; manual navigation or changing the replay perspective
+pauses it. Select a player to see their notebook and automatic deductions
+based only on what that player had observed at that point.
 For a human manual notebook, **Original notes** shows the marks and clauses
 actually recorded, including intermediate edits. **Reveal all** additionally
 shows the solution, all hands, and private events. Replay is read-only.
-**Inferred envelope discoveries so far** lists the first replay position at
-which automatic deduction identified each envelope card for the selected player.
-Switch players to review their discoveries, or enable **Reveal all** to show
-everyone's. Select an entry to jump there. These are deductions available from that player's
-observations, not a record of what a human or bot actually noticed; future
-discoveries stay hidden until the replay reaches them.
+The timeline and playback controls remain at the bottom of the screen. The
+player knowledge comparison replaces the card browser in the **Actions** area
+during replay. Its rankings animate during playback when players change
+position, unless reduced motion is enabled. **Timeline flags** mark the
+first replay position where automatic deduction
+identified an envelope card or another player's card. Choose the type and
+which players' flags to show using the controls below the timeline,
+independently of the notebook perspective.
+Select a flag to jump there, or use **Previous flag** and **Next flag** when
+markers are close together. A flag can represent multiple discoveries; hover,
+focus, or select it to see their details. Flags cover the entire replay
+and reveal future discoveries, regardless of **Reveal all**. They represent
+deductions available from each player's observations, not necessarily what
+they noticed; direct card shows do not create inferred-card flags. Flags show
+card icons, with player colors and numbers when showing all players, or
+category colors when filtering to one player. A `+N` badge indicates
+additional discoveries at a crowded position.
+
+**Player knowledge at this point** compares every player at the current replay
+position. The prominent counts show card locations known in each category,
+including the player's own hand and visible reveals, and the number of
+identified envelope cards. Smaller counts show known notebook marks (held or
+ruled out) out of all cells in that category. These are automatic deductions,
+not the player's recorded manual notes; unresolved clauses are not counted as
+known marks.
+Select a column heading to sort, and use **Columns** to choose which columns
+are shown. Card locations are the primary sort key; known marks break ties.
 
 To reveal an unfinished or action-limited game, open **Game options**, choose
-**End and reveal**, and confirm. **New game** is also in this menu and requires
-confirmation. Ending permanently ends that game; an action limit alone does not unlock
-its secrets. **Save private replay** downloads a JSON file, and **Import private
-replay** on the setup screen opens a saved record. Replay files contain every
+**End and reveal**, and confirm. **Exit game** also requires confirmation,
+discards the current game, and returns to the main menu. Ending permanently ends
+that game; an action limit alone does not unlock
+its secrets. **Save private replay** downloads a JSON file, and **Load replay**
+on the main menu opens a saved record. Replay files contain every
 hand and the solution even if **Reveal all** was not selected: do not share
 them with anyone who should not see the answers. Files are not encrypted.
 Import also accepts existing private version-1 and version-2 board records, but

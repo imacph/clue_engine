@@ -14,11 +14,21 @@ class BoardRules:
     optional_suggestion: bool = False
     accuse_in_room: bool = False
     stay_to_suggest: bool = False
+    randomize_rooms: bool = False
+    randomize_doors: bool = False
+    randomize_passages: bool = False
+    passage_count: int = 2
 
     def __post_init__(self) -> None:
         for item in fields(self):
+            if item.name == "passage_count":
+                continue
             if type(getattr(self, item.name)) is not bool:
                 raise TypeError(f"{item.name} must be true or false")
+        if type(self.passage_count) is not int:
+            raise TypeError("passage_count must be an integer")
+        if not 0 <= self.passage_count <= 4:
+            raise ValueError("passage_count must be between 0 and 4")
         if not self.move_suspect and self.summoned_suggestion:
             raise ValueError("summoned suggestions require suspect relocation")
 

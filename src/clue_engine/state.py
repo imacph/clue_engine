@@ -1,8 +1,8 @@
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from .board import DEFAULT_BOARD, BoardLayout
+from .board import DEFAULT_BOARD, BoardLayout, randomize_board_layout
 from .board_setup import BoardSetup
 from .board_state import create_board
 from .board_turn import BoardTurn
@@ -63,6 +63,14 @@ def deal_board(
         BoardSetup(num_players), layout=layout,
         seat_suspects=seat_suspects, weapon_rooms=weapon_rooms,
     )
+    if board_rules.randomize_rooms or board_rules.randomize_doors or board_rules.randomize_passages:
+        layout_rng = random.Random()
+        layout_rng.setstate(rng.getstate())
+        board = replace(board, layout=randomize_board_layout(
+            layout, layout_rng, rooms=board_rules.randomize_rooms,
+            doors=board_rules.randomize_doors, passages=board_rules.randomize_passages,
+            passage_count=board_rules.passage_count,
+        ))
     state = deal(rng, num_players)
     state.current_player = board.first_player
     state.board = BoardTurn(board)

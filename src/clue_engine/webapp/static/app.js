@@ -18,15 +18,22 @@ const activeGameKey = "clue-engine-active-game";
 const $ = (id) => document.getElementById(id);
 let currentState = null;
 let replayMode = false;
+let replayPlaying = false;
+let replayTimer = null;
+let replayPlaybackGeneration = 0;
 let refreshTimer = null;
 let advancing = false;
 let submitting = false;
+let starting = false;
+let mainMenuBusy = false;
 let refreshing = false;
 let requestVersion = 0;
 let lastError = "";
 let desktopThemeWrite = Promise.resolve();
 let desktopFullscreen = false;
 let fullscreenBusy = false;
+let showCardIndicators = true;
+let showBoardIndicators = true;
 let cardView = "hand";
 let lastActivityKey = null;
 let lastRenderedState = null;
@@ -36,6 +43,13 @@ let lastNotebookMarks = null;
 let lastNotebookDraft = null;
 let lastClauseFingerprint = null;
 let lastReplayDeductionFingerprint = null;
+let lastReplayKnowledgeFingerprint = null;
+let replayMarkerType = "envelope";
+let replayMarkerPlayer = "all";
+let replayKnowledgeSort = "total";
+let replayKnowledgeAscending = false;
+const replayKnowledgeColumns = ["total", "suspect", "weapon", "room", "envelope"];
+const replayKnowledgeVisible = new Set(replayKnowledgeColumns);
 let lastDebugFingerprint = null;
 let lastNotebookPerspective = null;
 let selectedClause = null;
@@ -45,6 +59,13 @@ let notebookQueue = Promise.resolve();
 let pendingNotebookEdits = [];
 let lastBoardState = null;
 let lastBoardLayout = null;
+let lastBoardMoment = null;
+let lastDiceState = null;
+let lastCardAnimation = null;
+let suggestionFlights = [];
+let cardActivityReadUntil = 0;
+const cardActivityReadTime = 800;
+const cardPassReadTime = 1200;
 let lastSuggestionRoom = null;
 let hadReveal = false;
 let hadBoardResponse = false;
@@ -67,6 +88,8 @@ function showError(message) {
   lastError = message;
   $("error-message").textContent = message;
   $("error-message").hidden = !message;
+  $("game-options-error").textContent = message;
+  $("game-options-error").hidden = !message;
 }
 
 function confirmAction(message, { title = "Confirm action", confirmLabel = "Continue" } = {}) {
@@ -108,34 +131,40 @@ async function requestJson(path, { method = "GET", body } = {}) {
 }
 
 async function startGame(event) {
-  event.preventDefault();
-  const debug = $("debug").checked;
-  if (debug && !await confirmAction("Debug mode reveals every hand, the solution, and private events. Continue?")) {
-    $("debug").checked = false;
-    return;
-  }
-  notebookGeneration++;
-  notebookQueue = Promise.resolve();
-  pendingNotebookEdits = [];
-  const version = ++requestVersion;
-  showError("");
-  clearSelectedCards();
-  cardView = "hand";
-  lastActivityKey = null;
-  lastRenderedState = null;
-  lastNotebookFingerprint = null;
-  lastNotebookStructureFingerprint = null;
-  lastNotebookMarks = null;
-  lastNotebookDraft = null;
-  lastClauseFingerprint = null;
-  selectedClause = null;
-  clauseDraft = null;
-  lastBoardState = null;
-  lastSuggestionRoom = null;
-  hadReveal = false;
-  hadBoardResponse = false;
+  event?.preventDefault();
+  if (starting) return;
+  starting = true;
   try {
-    const setup = window.setupWizard.payload();
+    const debug = $("debug").checked;
+    if (debug && !await confirmAction("Debug mode reveals every hand, the solution, and private events. Continue?")) {
+      $("debug").checked = false;
+      return;
+    }
+    notebookGeneration++;
+    notebookQueue = Promise.resolve();
+    pendingNotebookEdits = [];
+    const version = ++requestVersion;
+    showError("");
+    clearSelectedCards();
+    cardView = "hand";
+    lastActivityKey = null;
+    lastRenderedState = null;
+    lastNotebookFingerprint = null;
+    lastNotebookStructureFingerprint = null;
+    lastNotebookMarks = null;
+    lastNotebookDraft = null;
+    lastClauseFingerprint = null;
+    selectedClause = null;
+    clauseDraft = null;
+    lastBoardState = null;
+    lastBoardMoment = null;
+    lastDiceState = null;
+    lastCardAnimation = null;
+    clearSuggestionFlights();
+    lastSuggestionRoom = null;
+    hadReveal = false;
+    hadBoardResponse = false;
+    const setup = window.setupWizard.resolveBotSeats(window.setupWizard.payload());
     const state = await requestJson("/api/game", {
       method: "POST",
       body: setup,
@@ -146,6 +175,8 @@ async function startGame(event) {
     activateGame(state);
   } catch (error) {
     showError(error.message);
+  } finally {
+    starting = false;
   }
 }
 
@@ -157,6 +188,7 @@ function activateGame(state) {
   document.body.classList.toggle("manual-notebook-active", state.notebook_mode === "manual");
   $("game-toolbar").append($("header-tools"));
   configureBoardWorkspace(Boolean(state.board));
+  $("main-menu").hidden = true;
   $("setup-screen").hidden = true;
   $("game-screen").hidden = false;
   $("error-message").hidden = true;
@@ -224,7 +256,8 @@ function acceptState(state) {
 }
 
 async function refreshState() {
-  if (refreshing || submitting || replayMode || $("confirm-dialog").open) return;
+  if (refreshing || submitting || replayMode || $("confirm-dialog").open
+    || $("game-options-dialog").open) return;
   refreshing = true;
   const version = requestVersion;
   try {
@@ -236,15 +269,22 @@ async function refreshState() {
       await advanceBot(false);
     }
   } catch (error) {
-    if (error.status === 404) clearInterval(refreshTimer);
-    showError(error.message);
+    if (version === requestVersion) {
+      if (error.status === 404) clearInterval(refreshTimer);
+      showError(error.message);
+    }
   } finally {
     refreshing = false;
   }
 }
 
 function shouldAdvance(state) {
-  return !advancing && !submitting && !$("confirm-dialog").open && canAdvanceBot(state);
+  return !advancing && !submitting && !cardActivityPending()
+    && !$("confirm-dialog").open && canAdvanceBot(state);
+}
+
+function cardActivityPending() {
+  return suggestionFlights.length > 0 || performance.now() < cardActivityReadUntil;
 }
 
 function canAdvanceBot(state) {
@@ -266,7 +306,7 @@ function renderState(state) {
       && document.activeElement?.hasAttribute("data-board-move"))
   );
   let focusCards = false;
-  if (state.board) {
+  if (state.board && !replayMode) {
     if (hasBoardResponse && !hadBoardResponse) {
       switchBoardTab("cards");
     } else if (fixedRoom !== null && fixedRoom !== lastSuggestionRoom) {
@@ -291,13 +331,13 @@ function renderState(state) {
   if (hasReveal && !hadReveal) cardView = "hand";
   hadReveal = hasReveal;
   setText("game-status", displayPlayerText(state.status));
-  $("game-meta").textContent =
+  $("game-progress-meta").textContent =
     `Actions: ${state.steps} · Player 1 turns: ${state.player0_turns}`
     + (state.paused ? " · Paused" : "")
     + (state.waiting_for_turn ? " · Waiting for next turn" : "")
     + ((state.board_rules && Object.entries(state.board_rules).some(([key, value]) =>
       ["move_suspect", "move_weapon", "summoned_suggestion", "secret_passages"].includes(key)
-        ? !value : (key === "early_end" ? !value : value)))
+        ? !value : (key === "early_end" ? !value : key === "passage_count" ? false : value)))
       || (state.game_rules && Object.values(state.game_rules).some(Boolean))
       ? " · House rules active" : "");
   $("pause-button").textContent = state.paused ? "Resume" : "Pause";
@@ -308,11 +348,12 @@ function renderState(state) {
   const turnButton = $("turn-button");
   turnButton.hidden = replayMode || (!state.waiting_for_turn && !state.legal.end_turn);
   turnButton.textContent = state.waiting_for_turn ? "Next turn" : "End turn";
-  $("next-button").hidden = !(state.paused && canAdvanceBot(state));
+  $("next-button").hidden = replayMode || !(state.paused && canAdvanceBot(state));
   $("viewer-select").value = String(state.selected_player);
   $("viewer-field").hidden = state.mode !== "spectate";
   renderBoard(state);
-  renderHand(state);
+  updateKnowledgeIndicators(state);
+  if (!replayMode) renderHand(state);
   renderCardInteraction(state);
   renderNotebook(state);
   renderHistory(state.events);
@@ -395,9 +436,10 @@ function directionalMoves(state, dx, dy) {
 function boardInstruction(state) {
   const board = state.board;
   if (state.is_over || state.limit_reached) return displayPlayerText(state.status);
+  if (state.waiting_for_turn) return "Review the completed turn, then select Next turn.";
   if (state.to_move !== board.turn_player) {
     return state.to_move === state.human_player
-      ? "Respond to the suggestion in Cards & actions."
+      ? "Respond to the suggestion in Actions."
       : `Player ${state.to_move + 1} is responding to Player ${board.turn_player + 1}'s suggestion.`;
   }
   if (state.to_move !== state.human_player) {
@@ -412,7 +454,7 @@ function boardInstruction(state) {
       + (legal.passage ? ", or take the passage." : ".");
   }
   if (legal.suggest) {
-    return `In ${cardName(legal.suggest_room)}: choose a suspect and weapon in Cards & actions`
+    return `In ${cardName(legal.suggest_room)}: choose a suspect and weapon in Actions`
       + (legal.end_turn ? ", or end your turn." : ".");
   }
   if (legal.moves.length) {
@@ -420,7 +462,7 @@ function boardInstruction(state) {
   }
   if (legal.roll) {
     return legal.passage
-      ? "Roll to move, or take the secret passage to the opposite corner."
+      ? "Roll to move, or take the secret passage to another room."
       : "Roll both dice to begin moving.";
   }
   if (legal.end_turn) return "Movement or the suggestion is complete. End your turn when ready.";
@@ -467,10 +509,14 @@ function buildBoardBase(layout, map = $("board-map"), dynamicId = "board-dynamic
       x: center, dy: index ? .48 : 0,
     }, part)));
     base.append(label);
-    if (layout.passages.some((pair) => pair.includes(room.id))) {
-      base.append(svgElement("text", {
-        x: bounds.maxX + .65, y: bounds.minY + .65, class: "board-passage-mark",
-      }, "↗"));
+    const passageIndex = layout.passages.findIndex((pair) => pair.includes(room.id));
+    if (passageIndex !== -1) {
+      const x = bounds.maxX + .55;
+      const y = bounds.minY + .55;
+      const badge = svgElement("g", { class: "board-passage-mark", "data-passage": passageIndex });
+      badge.append(svgElement("circle", { cx: x, cy: y, r: .4 }));
+      badge.append(svgElement("text", { x, y: y + .17 }, String.fromCharCode(65 + passageIndex)));
+      base.append(badge);
     }
   }
   map.append(base, svgElement("g", { id: dynamicId }));
@@ -478,8 +524,10 @@ function buildBoardBase(layout, map = $("board-map"), dynamicId = "board-dynamic
 
 function appendPawn(group, pawn, state, x, y, active, radius) {
   const style = pawnStyles[pawn.id];
-  const description = `${pawn.name}, ${pawnController(pawn, state)}, ${boardLocation(pawn.location)}`;
+  const description = `${pawn.name}, ${pawnController(pawn, state)}, ${boardLocation(pawn.location)}`
+    + (active ? (state.waiting_for_turn ? ", turn under review" : ", current turn") : "");
   const marker = svgElement("g", { role: "img", "aria-label": description });
+  marker.dataset.pawnId = String(pawn.id);
   marker.append(svgElement("title", {}, description));
   marker.append(svgElement("circle", {
     cx: x, cy: y, r: radius, fill: style.color,
@@ -491,15 +539,39 @@ function appendPawn(group, pawn, state, x, y, active, radius) {
   group.append(marker);
 }
 
-function renderDice(dice) {
+function renderDice(dice, animate = false) {
   const total = dice ? dice[0] + dice[1] : null;
   $("board-dice").setAttribute("aria-label", dice
     ? `Dice: ${dice[0]} and ${dice[1]}, total ${total}` : "Dice not rolled");
   $("board-dice").querySelectorAll(".die").forEach((die, index) => {
-    die.textContent = dice ? String(dice[index]) : "–";
+    die.dataset.value = dice ? String(dice[index]) : "0";
+    if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      die.getAnimations().forEach((animation) => animation.cancel());
+      const direction = index ? -1 : 1;
+      die.animate([
+        { transform: `translateY(-8px) rotate(${direction * -65}deg) scale(.8)`, opacity: .5 },
+        { transform: `translateY(2px) rotate(${direction * 20}deg) scale(1.05)`, opacity: 1, offset: .7 },
+        { transform: "translateY(0) rotate(0) scale(1)", opacity: 1 },
+      ], { duration: 480, easing: "ease-out" });
+    }
   });
-  $("board-dice-total").hidden = total === null;
-  setText("board-dice-total", total === null ? "" : `Total ${total}`);
+  setText("board-dice-total", total === null ? "–" : String(total));
+}
+
+function isDiceRoll(board, previous, forward) {
+  return Boolean(forward && board.dice && previous
+    && (!previous.dice || previous.turn !== board.turn_player
+      || board.dice.some((value, index) => value !== previous.dice[index])));
+}
+
+function boardAnimationOffset(dx, dy, matrix) {
+  if (!matrix) return null;
+  const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+  if (!determinant) return null;
+  return {
+    x: (dx * matrix.d - dy * matrix.c) / determinant,
+    y: (dy * matrix.a - dx * matrix.b) / determinant,
+  };
 }
 
 function renderBoard(state) {
@@ -507,33 +579,58 @@ function renderBoard(state) {
   panel.hidden = !state.board;
   if (!state.board) {
     lastBoardState = null;
+    lastBoardMoment = null;
+    lastDiceState = null;
     return;
   }
   const board = state.board;
-  const key = JSON.stringify([board, state.legal, state.to_move, state.human_player, state.is_over, state.limit_reached]);
+  panel.classList.toggle("board-no-turn-actions", state.mode !== "play");
+  const moment = state.is_replay ? state.position : state.steps;
+  const forward = lastBoardMoment !== null && lastBoardMoment.replay === Boolean(state.is_replay)
+    && moment > lastBoardMoment.position;
+  const adjacent = lastBoardMoment !== null && lastBoardMoment.replay === Boolean(state.is_replay)
+    && Math.abs(moment - lastBoardMoment.position) === 1;
+  lastBoardMoment = { replay: Boolean(state.is_replay), position: moment };
+  const turnFocus = state.notebook_focus?.turn ?? null;
+  const key = JSON.stringify([board, state.legal, state.to_move, state.human_player, state.is_over,
+    state.limit_reached, state.waiting_for_turn, turnFocus]);
   if (key === lastBoardState) return;
   lastBoardState = key;
   const activeElement = document.activeElement;
   const restoreMoveFocus = panel.contains(activeElement) && activeElement?.hasAttribute("data-board-move");
   const actor = board.suspects.find((pawn) => pawn.seat === board.turn_player);
-  setText("board-turn", actor ? `P${board.turn_player + 1} · ${actor.name}` : "Board");
+  const focusedPawn = turnFocus === null ? null : board.suspects.find((pawn) => pawn.seat === turnFocus);
+  setText("board-turn-label", state.waiting_for_turn ? "Turn review" : "Current turn");
+  setText("board-turn", focusedPawn ? `P${turnFocus + 1} · ${focusedPawn.name}` : "Board");
+  setText("board-turn-marker", focusedPawn ? `P${turnFocus + 1}` : "–");
+  $("board-turn-marker").style.backgroundColor = focusedPawn ? pawnStyles[focusedPawn.id].color : "";
+  $("board-turn-marker").style.color = focusedPawn ? pawnStyles[focusedPawn.id].ink : "";
   setText("board-instruction", boardInstruction(state));
   setText("board-remaining", board.phase === "move"
     ? `${board.remaining} step${board.remaining === 1 ? "" : "s"} left`
     : board.dice ? "Movement complete" : "Not rolled");
-  renderDice(board.dice);
+  renderDice(board.dice, isDiceRoll(board, lastDiceState, forward));
+  lastDiceState = { dice: board.dice ? [...board.dice] : null, turn: board.turn_player };
   $("board-roll-button").hidden = !state.legal.roll;
   $("board-passage-button").hidden = !state.legal.passage;
 
   const displayLayout = state.board_rules && !state.board_rules.secret_passages
     ? { ...board.layout, passages: [] } : board.layout;
   const layoutKey = JSON.stringify(displayLayout);
+  const animatePawns = adjacent && layoutKey === lastBoardLayout
+    && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const previousPawns = new Map(animatePawns
+    ? [...$("board-dynamic").querySelectorAll("[data-pawn-id]")].map((pawn) => {
+      const bounds = pawn.getBoundingClientRect();
+      return [pawn.dataset.pawnId, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }];
+    }) : []);
   if (layoutKey !== lastBoardLayout) {
     buildBoardBase(displayLayout);
     lastBoardLayout = layoutKey;
   }
   const dynamic = $("board-dynamic");
   dynamic.replaceChildren();
+  dynamic.append(svgElement("g", { id: "board-room-notes" }));
   for (const square of board.visited) {
     dynamic.append(svgElement("rect", {
       x: square.x, y: square.y, width: 1, height: 1, class: "board-visited",
@@ -562,7 +659,7 @@ function renderBoard(state) {
     const baseY = bounds.minY + Math.max(1.7, (bounds.maxY - bounds.minY + 1) / 2 + .35);
     pawns.forEach((pawn, index) => appendPawn(
       dynamic, pawn, state, center + (index % 3 - 1) * .75, baseY + Math.floor(index / 3) * .72,
-      pawn.seat === board.turn_player, .34,
+      turnFocus !== null && pawn.seat === turnFocus, .34,
     ));
     const weapons = board.weapons.filter((weapon) => weapon.room_id === room.id);
     if (weapons.length) {
@@ -574,7 +671,22 @@ function renderBoard(state) {
   for (const pawn of board.suspects) {
     if (pawn.location.kind === "hallway") {
       appendPawn(dynamic, pawn, state, pawn.location.x + .5, pawn.location.y + .5,
-        pawn.seat === board.turn_player, .42);
+        turnFocus !== null && pawn.seat === turnFocus, .42);
+    }
+  }
+  if (animatePawns) {
+    const matrix = dynamic.getScreenCTM();
+    for (const pawn of dynamic.querySelectorAll("[data-pawn-id]")) {
+      const previous = previousPawns.get(pawn.dataset.pawnId);
+      if (!previous) continue;
+      const bounds = pawn.getBoundingClientRect();
+      const dx = previous.x - (bounds.x + bounds.width / 2);
+      const dy = previous.y - (bounds.y + bounds.height / 2);
+      const offset = boardAnimationOffset(dx, dy, matrix);
+      if (offset && (Math.abs(dx) > .1 || Math.abs(dy) > .1)) pawn.animate(
+        [{ transform: `translate(${offset.x}px, ${offset.y}px)` }, { transform: "translate(0, 0)" }],
+        { duration: 300, easing: "ease-out" }
+      );
     }
   }
   for (const move of state.legal.moves) {
@@ -621,14 +733,15 @@ function renderBoard(state) {
     const pawnNames = board.suspects.filter((pawn) =>
       pawn.location.kind === "room" && pawn.location.room_id === room.id).map((pawn) => pawn.name);
     const weaponNames = board.weapons.filter((weapon) => weapon.room_id === room.id).map((weapon) => weapon.name);
-    const passage = displayLayout.passages.find((pair) => pair.includes(room.id));
+    const passageIndex = displayLayout.passages.findIndex((pair) => pair.includes(room.id));
+    const passage = displayLayout.passages[passageIndex];
     const item = document.createElement("li");
     const title = document.createElement("strong");
     title.textContent = `${room.name}: `;
     const contents = [
       pawnNames.length ? pawnNames.join(", ") : "no suspects",
       weaponNames.length ? weaponNames.join(", ") : "no weapons",
-      ...(passage ? [`passage to ${cardName(passage.find((id) => id !== room.id))}`] : []),
+      ...(passage ? [`passage ${String.fromCharCode(65 + passageIndex)} to ${cardName(passage.find((id) => id !== room.id))}`] : []),
     ];
     item.append(title, document.createTextNode(contents.join(" · ")));
     roomList.append(item);
@@ -647,6 +760,7 @@ function renderBoard(state) {
 function renderHand(state) {
   const container = $("hand-cards");
   container.replaceChildren();
+  const notes = cardNoteContext(state);
   const viewLabels = {
     hand: "Cards in hand", suspect: "Suspect cards", weapon: "Weapon cards",
     room: "Room cards", all: "All cards",
@@ -669,6 +783,7 @@ function renderHand(state) {
       button: true,
       disabled: canReveal ? !revealable : !canCompose,
       pressed: selectedCardIds[card.type] === card.id,
+      notes,
     });
     face.addEventListener("click", () => selectCard(card.id));
     container.append(face);
@@ -684,7 +799,115 @@ function renderHand(state) {
   }
 }
 
-function createCardFace(card, { button = false, mini = false, disabled = false, pressed = false } = {}) {
+function cardNoteContext(state) {
+  return {
+    hand: new Set(state.hand),
+    marks: new Map(notebookDisplayMatrix(state).map((card) => [card.id, card.marks])),
+    player: state.selected_player,
+    human: state.mode === "play" && !state.is_replay && state.selected_player === state.human_player,
+    players: state.num_players,
+  };
+}
+
+function positiveKnowledge(marks) {
+  const holders = marks ? marks.flatMap((mark, holder) => mark === "+" ? [holder] : []) : [];
+  return { holder: holders.length === 1 ? holders[0] : null, conflict: holders.length > 1 };
+}
+
+function updateKnowledgeIndicators(state) {
+  const notes = cardNoteContext(state);
+  const conflicts = notebookDisplayMatrix(state)
+    .filter((card) => positiveKnowledge(card.marks).conflict).map((card) => card.name);
+  const warning = conflicts.length
+    ? `Conflicting + marks — check notebook: ${conflicts.join(", ")} · ` : "";
+  setText("knowledge-conflicts", warning);
+  $("game-meta").title = warning ? warning.slice(0, -3) : "";
+  $("board-indicators-option").hidden = !state.board;
+  if (!state.board) return;
+  const layer = $("board-room-notes");
+  if (!layer) return;
+  layer.replaceChildren();
+  if (!showBoardIndicators) return;
+  for (const room of state.board.layout.rooms) {
+    const knowledge = positiveKnowledge(notes.marks.get(room.id));
+    const badges = [];
+    if (notes.hand.has(room.id)) badges.push({
+      text: "Hand", kind: "hand", description: notes.human ? "In your hand" : `In Player ${notes.player + 1}'s hand`,
+    });
+    if (knowledge.holder !== null) {
+      const envelope = knowledge.holder === notes.players;
+      badges.push({
+        text: envelope ? "E+" : `P${knowledge.holder + 1}+`,
+        kind: envelope ? "envelope" : knowledge.holder === notes.player ? "own" : "player",
+        description: envelope ? "Envelope: held" : `Player ${knowledge.holder + 1}: held`,
+      });
+    }
+    if (!badges.length) continue;
+    const bounds = roomBounds(room);
+    const center = (bounds.minX + bounds.maxX + 1) / 2;
+    const group = svgElement("g", {
+      class: "board-room-notes", role: "img", "aria-label": `${room.name}: ${badges.map((badge) => badge.description).join(", ")}`,
+    });
+    group.append(svgElement("title", {}, `${room.name}: ${badges.map((badge) => badge.description).join(", ")}`));
+    badges.forEach((badge, index) => {
+      const x = center + (index - (badges.length - 1) / 2) * 1.3;
+      const y = bounds.minY + 1.3;
+      const item = svgElement("g", { class: `board-note-${badge.kind}` });
+      item.append(svgElement("rect", { x: x - .6, y, width: 1.2, height: .58, rx: .12 }));
+      item.append(svgElement("text", { x, y: y + .42 }, badge.text));
+      group.append(item);
+    });
+    layer.append(group);
+  }
+}
+
+function renderCardNotes(face, card, notes) {
+  const knowledge = positiveKnowledge(notes.marks.get(card.id));
+  const inHand = showCardIndicators && notes.hand.has(card.id);
+  const handDescription = notes.human ? "In your hand" : `In Player ${notes.player + 1}'s hand`;
+  const annotations = document.createElement("div");
+  annotations.className = "card-annotations";
+  annotations.setAttribute("aria-hidden", "true");
+  if (inHand) {
+    const badge = document.createElement("span");
+    badge.className = "card-hand-badge";
+    badge.textContent = notes.human ? "In hand" : `P${notes.player + 1} hand`;
+    annotations.append(badge);
+  }
+  let description = "";
+  if (showCardIndicators && knowledge.holder !== null) {
+    const holder = knowledge.holder;
+    const envelope = holder === notes.players;
+    const owner = envelope ? "Envelope" : `Player ${holder + 1}`;
+    description = `${owner}: held`;
+    const badge = document.createElement("span");
+    badge.className = `card-note-mark ${envelope ? "card-note-envelope"
+      : holder === notes.player ? "card-note-own" : "card-note-player"}`;
+    badge.textContent = `${envelope ? "E" : `P${holder + 1}`}+`;
+    badge.title = description;
+    annotations.append(badge);
+  }
+  const previous = face.querySelector(".card-annotations");
+  if (previous) previous.remove();
+  face.querySelector(".card-topline").prepend(annotations);
+  face.dataset.cardNoteId = String(card.id);
+  const label = [`${card.name}, ${card.type}`, ...(inHand ? [handDescription] : []),
+    ...(description ? [`Notebook: ${description}`] : [])].join(". ");
+  face.setAttribute("aria-label", label);
+  face.title = label;
+}
+
+function updateCardNotes(state, cardId = null) {
+  const notes = cardNoteContext(state);
+  const selector = cardId === null ? "#cards-panel [data-card-note-id]"
+    : `#cards-panel [data-card-note-id="${cardId}"]`;
+  for (const face of document.querySelectorAll(selector)) {
+    renderCardNotes(face, cardsById.get(Number(face.dataset.cardNoteId)), notes);
+  }
+  updateKnowledgeIndicators(state);
+}
+
+function createCardFace(card, { button = false, mini = false, disabled = false, pressed = false, notes } = {}) {
   const face = document.createElement(button ? "button" : "article");
   if (button) {
     face.type = "button";
@@ -697,13 +920,10 @@ function createCardFace(card, { button = false, mini = false, disabled = false, 
 
   const header = document.createElement("div");
   header.className = "card-topline";
-  const number = document.createElement("span");
-  number.className = "card-number";
-  number.textContent = `ID ${card.id}`;
   const category = document.createElement("span");
   category.className = "card-category";
   category.textContent = card.type;
-  header.append(number, category);
+  header.append(category);
 
   const art = document.createElement("div");
   art.className = "card-art";
@@ -713,6 +933,7 @@ function createCardFace(card, { button = false, mini = false, disabled = false, 
   name.className = "playing-card-name";
   name.textContent = card.name;
   face.append(header, art, name);
+  if (notes) renderCardNotes(face, card, notes);
   return face;
 }
 
@@ -748,8 +969,115 @@ function clearSelectedCards() {
   selectedCardIds.room = null;
 }
 
+function clearSuggestionFlights() {
+  cardActivityReadUntil = 0;
+  for (const flight of suggestionFlights) {
+    flight.animation.cancel();
+    flight.node.remove();
+  }
+  suggestionFlights = [];
+}
+
+function cardActivity(state) {
+  const activity = state.activity;
+  const latest = state.events[0];
+  if (latest?.kind === "pass" && activity
+      && ["suggest", "refute", "reveal"].includes(activity.kind)) {
+    return {
+      kind: "pass", actor: latest.actor, cards: activity.cards,
+      suggestion_actor: activity.kind === "suggest" ? activity.actor : activity.suggestion_actor,
+    };
+  }
+  return activity;
+}
+
+function renderActivityPasses(state) {
+  const suggestionIndex = state.events.findIndex((event) => event.kind === "suggest" || event.kind === "accuse");
+  const suggestion = state.events[suggestionIndex];
+  const responses = suggestion?.kind === "suggest" ? state.events.slice(0, suggestionIndex) : [];
+  const ends = responses.filter((event) => event.kind === "end_turn");
+  const current = !ends.length || (state.waiting_for_turn && ends.length === 1
+    && ends[0].actor === suggestion.actor);
+  const passed = current ? responses.filter((event) => event.kind === "pass").reverse() : [];
+  const summary = passed.length
+    ? `Passed: ${passed.map((event) => `P${event.actor + 1}`).join(" · ")}` : "";
+  setText("activity-passes", summary);
+  $("activity-passes").title = summary;
+}
+
+function cardAnimationKind(state) {
+  const activity = cardActivity(state);
+  const eventKind = activity?.kind === "reveal" ? "show" : activity?.kind;
+  const event = state.events.find((item) => item.kind === eventKind);
+  const eventNumber = activity?.kind === "pass" ? event?.number : state.activity_event_number ?? event?.number;
+  const key = activity ? JSON.stringify([eventNumber, activity]) : null;
+  const perspective = `${Boolean(state.is_replay)}:${state.selected_player}`;
+  const previous = lastCardAnimation;
+  lastCardAnimation = { key, perspective, step: state.steps };
+  if (key !== previous?.key || perspective !== previous?.perspective || state.steps < previous?.step) {
+    clearSuggestionFlights();
+  }
+  if (!activity || !["suggest", "reveal", "pass"].includes(activity.kind)) return null;
+  if (previous && (previous.key === key || previous.perspective !== perspective
+    || state.steps <= previous.step)) return null;
+  cardActivityReadUntil = performance.now()
+    + (activity.kind === "pass" ? cardPassReadTime : cardActivityReadTime);
+  if (activity.kind === "pass" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
+  return activity.kind;
+}
+
+function animateSuggestionFromBoard(state, container) {
+  const actor = state.board?.suspects?.find((pawn) => pawn.seat === state.activity.actor);
+  if (!actor) return;
+  const pawn = $("board-dynamic").querySelector(`[data-pawn-id="${actor.id}"]`);
+  if (!pawn || !pawn.getClientRects().length) return;
+  const origin = pawn.getBoundingClientRect();
+  for (const [index, card] of [...container.children].entries()) {
+    if (!card.getClientRects().length) continue;
+    const target = card.getBoundingClientRect();
+    if (!target.width || !target.height) continue;
+    const clone = card.cloneNode(true);
+    clone.classList.add("suggestion-flight");
+    clone.setAttribute("aria-hidden", "true");
+    Object.assign(clone.style, {
+      left: `${target.left}px`, top: `${target.top}px`,
+      width: `${target.width}px`, height: `${target.height}px`, minWidth: "0", minHeight: "0",
+    });
+    document.body.append(clone);
+    const dx = origin.left + origin.width / 2 - (target.left + target.width / 2);
+    const dy = origin.top + origin.height / 2 - (target.top + target.height / 2);
+    const duration = 850;
+    const delay = index * 100;
+    const animation = clone.animate([
+      { transform: `translate(${dx}px, ${dy}px) scale(.25)`, opacity: .35 },
+      { transform: "translate(0, 0) scale(1)", opacity: 1 },
+    ], { duration, delay, easing: "ease-in-out", fill: "backwards" });
+    card.animate([
+      { opacity: 0, offset: 0 }, { opacity: 0, offset: .8 }, { opacity: 1, offset: 1 },
+    ], { duration, delay, fill: "backwards" });
+    const flight = { node: clone, animation };
+    suggestionFlights.push(flight);
+    animation.finished.then(() => {
+      clone.remove();
+      const active = suggestionFlights.includes(flight);
+      suggestionFlights = suggestionFlights.filter((item) => item !== flight);
+      if (active && !suggestionFlights.length) {
+        cardActivityReadUntil = performance.now() + cardActivityReadTime;
+      }
+    }, () => {
+      clone.remove();
+      suggestionFlights = suggestionFlights.filter((item) => item !== flight);
+    });
+  }
+}
+
 function renderCardInteraction(state) {
   const legal = state.legal;
+  const notes = cardNoteContext(state);
+  const activity = cardActivity(state);
+  renderActivityPasses(state);
+  const animationKind = cardAnimationKind(state);
+  const animateReveal = animationKind === "reveal";
   const focusCards = $("focus-cards");
   const selectedCards = $("selected-cards");
   focusCards.replaceChildren();
@@ -763,22 +1091,21 @@ function renderCardInteraction(state) {
 
   if (legal.reveals.length) {
     $("card-interaction-title").textContent = "Respond to suggestion";
-    const actor = state.activity?.suggestion_actor ?? state.activity?.actor;
-    renderActivityMeta(actor === undefined ? null : { kind: "suggest", actor });
-    $("card-interaction-hint").textContent = actor === undefined
-      ? "Click one of your matching cards to reveal it."
-      : `Player ${actor + 1} suggested these cards. Click a matching card you hold to reveal it.`;
-    renderMiniCards(focusCards, state.activity?.cards || []);
+    const actor = activity?.suggestion_actor ?? activity?.actor;
+    renderActivityMeta(activity?.kind === "pass" ? activity
+      : actor === undefined ? null : { kind: "suggest", actor });
+    renderMiniCards(focusCards, activity?.cards || [], notes);
+    if (animationKind === "suggest") animateSuggestionFromBoard(state, focusCards);
   } else if (humanTurn && (legal.suggest || legal.accuse)) {
-    const activity = state.activity;
     const revealIsActive = activity?.kind === "reveal"
       && state.events.find((event) => event.kind === "show" || event.kind === "end_turn")?.kind === "show";
-    if (revealIsActive) {
-      $("card-interaction-title").textContent = "Latest reveal";
+    const passIsActive = activity?.kind === "pass";
+    const responseIsActive = revealIsActive || passIsActive;
+    if (responseIsActive) {
+      $("card-interaction-title").textContent = revealIsActive ? "Latest reveal" : "Latest pass";
       renderActivityMeta(activity);
-      $("card-interaction-hint").textContent = activity.public
-        ? "Shown to everyone." : `Shown to Player ${activity.recipient + 1}.`;
-      renderMiniCards(focusCards, [activity.card_id], activity.card_id);
+      renderMiniCards(focusCards, passIsActive ? activity.cards : [activity.card_id],
+        notes, activity.card_id, animateReveal);
     } else {
       $("card-interaction-title").textContent = legal.suggest
         ? "Build a suggestion"
@@ -786,62 +1113,45 @@ function renderCardInteraction(state) {
       if (activity?.kind === "refute") {
         renderActivityMeta(activity);
       }
-      $("card-interaction-hint").textContent = legal.suggest_room !== null
-        ? `Suggestions must name ${cardName(legal.suggest_room)}. Accusations may name any room.`
-        : "Select one suspect, weapon, and room from any card view.";
     }
     for (const type of ["suspect", "weapon", "room"]) {
       const card = cardsById.get(selectedCardIds[type]);
       if (card) {
-        if (revealIsActive) {
+        if (responseIsActive) {
           const chip = document.createElement("span");
           chip.className = `card-reference ${type}`;
           chip.textContent = card.name;
           selectedCards.append(chip);
         } else {
-          selectedCards.append(createCardFace(card, { mini: true }));
+          selectedCards.append(createCardFace(card, { mini: true, notes }));
         }
-      } else if (!revealIsActive) {
+      } else if (!responseIsActive) {
         const slot = document.createElement("div");
         slot.className = `selection-slot ${type}`;
         slot.textContent = type[0].toUpperCase() + type.slice(1);
         selectedCards.append(slot);
       }
     }
-    if (revealIsActive) selectedCards.classList.add("reveal-selection");
+    if (responseIsActive) selectedCards.classList.add("reveal-selection");
     const hasCombination = Object.values(selectedCardIds).every((id) => id !== null);
     const matchesRoom = legal.suggest_room === null || selectedCardIds.room === legal.suggest_room;
-    $("card-suggest-button").hidden = !legal.suggest || (revealIsActive && !hasCombination);
-    $("card-accuse-button").hidden = !legal.accuse || (revealIsActive && !hasCombination);
+    $("card-suggest-button").hidden = !legal.suggest || (responseIsActive && !hasCombination);
+    $("card-accuse-button").hidden = !legal.accuse || (responseIsActive && !hasCombination);
     $("card-suggest-button").disabled = !hasCombination || !matchesRoom;
     $("card-accuse-button").disabled = !hasCombination;
     $("use-room-button").hidden = !legal.suggest || legal.suggest_room === null || matchesRoom;
     $("clear-cards-button").hidden = !Object.values(selectedCardIds).some((id) => id !== null);
     return;
   } else {
-    const activity = state.activity;
     $("card-interaction-title").textContent = activity?.kind === "reveal"
-      ? "Latest reveal"
+      ? "Latest reveal" : activity?.kind === "pass" ? "Latest pass"
       : "Table activity";
     renderActivityMeta(activity);
-    let hint = "No suggestion, accusation, or refutation has been made yet.";
-    if (activity?.kind === "suggest") {
-      hint = `Player ${activity.actor + 1} suggested these cards.`;
-    } else if (activity?.kind === "accuse") {
-      hint = `Player ${activity.actor + 1} accused this combination.`;
-    } else if (activity?.kind === "refute") {
-      hint = `Player ${activity.actor + 1} refuted Player ${activity.suggestion_actor + 1}'s suggestion.`;
-    } else if (activity?.kind === "reveal") {
-      hint = activity.public ? "Shown to everyone." : `Shown to Player ${activity.recipient + 1}.`;
-    }
-    if (humanTurn && legal.pass && !legal.reveals.length) {
-      hint += " You have no matching card; select Pass below.";
-    }
-    $("card-interaction-hint").textContent = hint;
     if (activity?.kind === "reveal") {
-      renderMiniCards(focusCards, [activity.card_id], activity.card_id);
+      renderMiniCards(focusCards, [activity.card_id], notes, activity.card_id, animateReveal);
     } else {
-      renderMiniCards(focusCards, activity?.cards || []);
+      renderMiniCards(focusCards, activity?.cards || [], notes);
+      if (animationKind === "suggest") animateSuggestionFromBoard(state, focusCards);
     }
   }
 
@@ -851,30 +1161,39 @@ function renderCardInteraction(state) {
   $("card-accuse-button").disabled = true;
   $("use-room-button").hidden = true;
   $("clear-cards-button").hidden = true;
-  if (!humanTurn && state.mode !== "spectate" && !state.is_over && !state.limit_reached) {
-    $("card-interaction-hint").textContent += " Waiting for your turn.";
-  }
 }
 
 function renderActivityMeta(activity) {
   const labels = {
     suggest: "Suggestion",
+    pass: "Pass",
     accuse: "Accusation",
     refute: "Refutation",
     reveal: "Reveal",
   };
   if (!activity || !labels[activity.kind]) return;
   $("activity-kind").textContent = labels[activity.kind];
-  $("activity-player").textContent = `Player ${activity.actor + 1}`;
+  let context = "";
+  if (activity.kind === "pass" || activity.kind === "refute") {
+    context = ` · suggestion P${activity.suggestion_actor + 1}`;
+  } else if (activity.kind === "reveal") {
+    context = activity.public ? " · public" : ` · to P${activity.recipient + 1}`;
+  }
+  const player = $("activity-player");
+  player.textContent = `Player ${activity.actor + 1}${context}`;
+  player.title = player.textContent;
   $("activity-meta").hidden = false;
 }
 
-function renderMiniCards(container, cardIds, shownCardId = null) {
+function renderMiniCards(container, cardIds, notes, shownCardId = null, animateReveal = false) {
   for (const id of cardIds) {
     const card = cardsById.get(id);
     if (!card) continue;
-    const face = createCardFace(card, { mini: true });
-    if (id === shownCardId) face.classList.add("shown-card");
+    const face = createCardFace(card, { mini: true, notes });
+    if (id === shownCardId) {
+      face.classList.add("shown-card");
+      if (animateReveal) face.classList.add("reveal-enter");
+    }
     container.append(face);
   }
 }
@@ -1260,6 +1579,7 @@ function changeNotebook(cardId, holder) {
   const edit = { cardId, holder, mark };
   pendingNotebookEdits.push(edit);
   renderNotebook(currentState);
+  updateCardNotes(currentState, cardId);
   const generation = notebookGeneration;
   notebookQueue = notebookQueue.then(async () => {
     if (generation !== notebookGeneration || !currentState) return;
@@ -1273,16 +1593,21 @@ function changeNotebook(cardId, holder) {
       currentState.notebook_clauses = result.notebook_clauses;
       currentState.notebook_revision = result.notebook_revision;
       renderNotebook(currentState);
+      updateCardNotes(currentState, cardId);
       renderClauses(currentState);
       lastRenderedState = JSON.stringify(currentState);
     } else {
       renderNotebook(currentState);
+      updateCardNotes(currentState, cardId);
     }
     if (lastError.startsWith("Could not save notebook:")) showError("");
   }).catch((error) => {
     if (generation === notebookGeneration) {
       pendingNotebookEdits = pendingNotebookEdits.filter((pending) => pending !== edit);
-      if (currentState) renderNotebook(currentState);
+      if (currentState) {
+        renderNotebook(currentState);
+        updateCardNotes(currentState, cardId);
+      }
       showError(`Could not save notebook: ${error.message}`);
     }
   });
@@ -1384,6 +1709,15 @@ function confirmClauseEntry() {
 function openClauses() {
   if (currentState?.board) switchBoardTab("clauses");
   else switchInsightsTab("clauses");
+}
+
+function clearClauseSelection() {
+  if (selectedClause === null) return;
+  selectedClause = null;
+  if (currentState) {
+    renderNotebook(currentState);
+    renderClauses(currentState);
+  }
 }
 
 function updateClausePerspective(state) {
@@ -1519,6 +1853,7 @@ function saveClause(method, clauseId, body, onSuccess = null, onFailure = null) 
       currentState.notebook_revision = result.notebook_revision;
       updateClausePerspective(currentState);
       renderNotebook(currentState);
+      updateCardNotes(currentState);
       renderClauses(currentState);
       lastRenderedState = JSON.stringify(currentState);
     }
@@ -1722,7 +2057,9 @@ function useTurnButton() {
 }
 
 function newGame() {
+  stopReplayPlayback();
   replayMode = false;
+  setReplayPresentation(false);
   renderDebug(null);
   $("replay-controls").hidden = true;
   document.body.classList.remove("replay-active");
@@ -1746,6 +2083,10 @@ function newGame() {
   clauseDraft = null;
   lastBoardState = null;
   lastBoardLayout = null;
+  lastBoardMoment = null;
+  lastDiceState = null;
+  lastCardAnimation = null;
+  clearSuggestionFlights();
   lastSuggestionRoom = null;
   hadReveal = false;
   hadBoardResponse = false;
@@ -1756,12 +2097,24 @@ function newGame() {
   $("board-zoom-button").setAttribute("aria-pressed", "false");
   showError("");
   $("game-screen").hidden = true;
+  showMainMenu();
+}
+
+function showMainMenu() {
+  $("setup-screen").hidden = true;
+  $("main-menu").hidden = false;
+  $("main-menu-title").focus();
+}
+
+function showSetup() {
+  $("main-menu").hidden = true;
   $("setup-screen").hidden = false;
   window.setupWizard.beginFresh();
+  $("setup-game-title").focus();
 }
 
 async function loadReplay() {
-  if (!replayMode) return;
+  if (!replayMode) return false;
   const version = ++requestVersion;
   const params = new URLSearchParams({
     position: $("replay-position").value,
@@ -1771,42 +2124,298 @@ async function loadReplay() {
   });
   try {
     const state = await requestJson(`/api/replay/state?${params}`);
-    if (version !== requestVersion || !replayMode) return;
+    if (version !== requestVersion || !replayMode) return false;
     currentState = state;
     $("replay-position").max = String(state.positions - 1);
     $("replay-manual").disabled = !state.manual_available;
     if (!state.manual_available) $("replay-manual").checked = false;
-    renderReplayDeductions(state.deduction_timeline);
+    renderReplayMarkers(state);
+    renderReplayKnowledge(state.knowledge_summary);
     renderState(state);
+    updateReplayPlaybackControls();
+    return true;
   } catch (error) {
-    if (version === requestVersion) showError(error.message);
+    if (version === requestVersion) {
+      if (currentState?.is_replay) $("replay-position").value = String(currentState.position);
+      showError(error.message);
+    }
+    return false;
   }
 }
 
-function renderReplayDeductions(deductions) {
-  const fingerprint = JSON.stringify(deductions);
-  if (fingerprint === lastReplayDeductionFingerprint) return;
-  lastReplayDeductionFingerprint = fingerprint;
-  const list = $("replay-deductions");
-  const focused = document.activeElement.closest("[data-replay-deduction]");
-  const focusKey = focused?.dataset.replayDeduction;
-  list.replaceChildren();
-  if (!deductions.length) {
-    list.textContent = "No envelope cards inferred yet.";
-    return;
+function replayMarkerGroups(state) {
+  const type = replayMarkerType;
+  const player = replayMarkerPlayer;
+  const groups = new Map();
+  for (const item of state.deduction_timeline) {
+    const envelope = item.holder === state.num_players;
+    if (type === "none" || (type === "envelope" && !envelope)
+        || (type === "holder" && envelope)
+        || (player !== "all" && Number(player) !== item.player)) continue;
+    if (!groups.has(item.position)) groups.set(item.position, []);
+    groups.get(item.position).push(item);
   }
-  for (const deduction of deductions) {
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+function renderReplayMarkers(state) {
+  const groups = replayMarkerGroups(state);
+  const playerFilter = replayMarkerPlayer;
+  const fingerprint = JSON.stringify([groups, state.positions, playerFilter]);
+  const track = $("replay-markers");
+  if (fingerprint !== lastReplayDeductionFingerprint) {
+    lastReplayDeductionFingerprint = fingerprint;
+    const focused = document.activeElement.closest("[data-replay-position]");
+    const focusPosition = focused?.dataset.replayPosition;
+    track.replaceChildren();
+    for (const [position, deductions] of groups) {
+      const descriptions = deductions.map((item) => {
+        const owner = item.holder === state.num_players ? "the envelope" : `Player ${item.holder + 1}`;
+        return `Player ${item.player + 1} inferred ${cardName(item.card)} in ${owner}`;
+      });
+      const when = deductions[0].step ? `action ${deductions[0].step}` : "start";
+      const description = `${when}: ${descriptions.join("; ")}`;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "replay-marker";
+      button.dataset.replayPosition = String(position);
+      const percent = state.positions > 1 ? position * 100 / (state.positions - 1) : 0;
+      button.style.left = `${percent}%`;
+      button.setAttribute("aria-label", description);
+      button.title = description;
+      const badges = document.createElement("span");
+      badges.className = "replay-marker-badges";
+      badges.style.setProperty("--anchor", `${percent}%`);
+      badges.setAttribute("aria-hidden", "true");
+      const players = [...new Set(deductions.map((item) => item.player))].sort((a, b) => a - b);
+      const byPlayer = players.map((player) => ({
+        player, cards: [...new Set(deductions.filter((item) => item.player === player).map((item) => item.card))],
+      }));
+      const discoveries = [];
+      for (let index = 0; byPlayer.some((entry) => index < entry.cards.length); index++) {
+        for (const entry of byPlayer) {
+          if (index < entry.cards.length) discoveries.push({ player: entry.player, card: entry.cards[index] });
+        }
+      }
+      if (playerFilter === "all") {
+        for (const item of discoveries.slice(0, 5)) {
+          const badge = document.createElement("span");
+          badge.className = "replay-card-badge replay-card-player";
+          badge.style.setProperty("--player-color", replayPlayerColor(item.player));
+          badge.append(cardIllustration(item.card));
+          const number = document.createElement("span");
+          number.textContent = String(item.player + 1);
+          badge.append(number);
+          badges.append(badge);
+        }
+      } else {
+        for (const { card: cardId } of discoveries.slice(0, 5)) {
+          const badge = document.createElement("span");
+          badge.className = `replay-card-badge ${cardsById.get(cardId).type}`;
+          badge.append(cardIllustration(cardId));
+          badges.append(badge);
+        }
+      }
+      const extra = discoveries.length - 5;
+      if (extra > 0) {
+        const more = document.createElement("span");
+        more.className = "replay-player-badge replay-player-more";
+        more.textContent = `+${extra}`;
+        badges.append(more);
+      }
+      button.append(badges);
+      track.append(button);
+    }
+    layoutReplayMarkers();
+    if (focusPosition) {
+      track.querySelector(`[data-replay-position="${focusPosition}"]`)?.focus({ preventScroll: true });
+    }
+  }
+  for (const marker of track.children) {
+    marker.setAttribute("aria-current", String(Number(marker.dataset.replayPosition) === state.position));
+  }
+  $("replay-previous-marker").disabled = !groups.some(([position]) => position < state.position);
+  $("replay-next-marker").disabled = !groups.some(([position]) => position > state.position);
+  $("replay-marker-status").textContent = groups.length
+    ? `${groups.length} flagged ${groups.length === 1 ? "position" : "positions"}` : "No matching flags";
+  const currentMarker = [...track.children].find(
+    (marker) => Number(marker.dataset.replayPosition) === state.position
+  );
+  $("replay-marker-details").textContent = currentMarker?.getAttribute("aria-label")
+    ?? "";
+}
+
+function setReplayMarkerFilter(kind, value) {
+  const isType = kind === "type";
+  if (isType) replayMarkerType = value;
+  else replayMarkerPlayer = value;
+  const container = $(isType ? "replay-marker-types" : "replay-marker-players");
+  for (const button of container.children) {
+    button.setAttribute("aria-pressed", String(
+      (isType ? button.dataset.markerType : button.dataset.markerPlayer) === value
+    ));
+  }
+  if (currentState?.is_replay) renderReplayMarkers(currentState);
+}
+
+function renderReplayPlayerFilters(count) {
+  const container = $("replay-marker-players");
+  container.replaceChildren();
+  for (const player of ["all", ...Array.from({ length: count }, (_, seat) => String(seat))]) {
     const button = document.createElement("button");
     button.type = "button";
-    button.dataset.replayDeduction = `${deduction.player}:${deduction.card}`;
-    button.dataset.replayPosition = String(deduction.position);
-    button.textContent = `Player ${deduction.player + 1}: ${cardName(deduction.card)}`
-      + (deduction.step ? ` · action ${deduction.step}` : " · start");
-    list.append(button);
+    button.dataset.markerPlayer = player;
+    if (player === "all") button.textContent = "All";
+    else {
+      button.setAttribute("aria-label", `Player ${Number(player) + 1}`);
+      const badge = document.createElement("span");
+      badge.className = "replay-player-badge";
+      badge.style.setProperty("--player-color", replayPlayerColor(Number(player)));
+      badge.textContent = String(Number(player) + 1);
+      badge.setAttribute("aria-hidden", "true");
+      button.append(badge);
+    }
+    container.append(button);
   }
-  if (focusKey) {
-    list.querySelector(`[data-replay-deduction="${focusKey}"]`)?.focus({ preventScroll: true });
+}
+
+function layoutReplayMarkers() {
+  const track = $("replay-markers");
+  if (!track.isConnected || !track.getClientRects().length) return;
+  const laneEnds = [-Infinity, -Infinity];
+  const markers = [...track.children].map((marker) => ({
+    marker, bounds: marker.querySelector(".replay-marker-badges").getBoundingClientRect(),
+  })).sort((a, b) => a.bounds.left - b.bounds.left);
+  for (const { marker, bounds } of markers) {
+    let lane = laneEnds.findIndex((end) => bounds.left >= end + 2);
+    if (lane < 0) lane = laneEnds[0] <= laneEnds[1] ? 0 : 1;
+    laneEnds[lane] = Math.max(laneEnds[lane], bounds.right);
+    marker.style.setProperty("--marker-lane", String(lane));
   }
+}
+
+function replayPlayerColor(player) {
+  return `hsl(${(player * 137.508) % 360} 65% 26%)`;
+}
+
+function replayKnowledgeValues(summary) {
+  const categories = ["suspect", "weapon", "room"].map((type) => summary.categories[type]);
+  return {
+    ...summary.categories,
+    total: {
+      located: categories.reduce((sum, item) => sum + item.located, 0),
+      total: categories.reduce((sum, item) => sum + item.total, 0),
+      marks: categories.reduce((sum, item) => sum + item.marks, 0),
+      mark_total: categories.reduce((sum, item) => sum + item.mark_total, 0),
+    },
+    envelope: {
+      located: categories.reduce((sum, item) => sum + item.envelope, 0),
+      total: categories.length,
+      marks: 0,
+    },
+  };
+}
+
+function renderReplayKnowledge(summaries) {
+  const fingerprint = JSON.stringify([
+    summaries, replayKnowledgeSort, replayKnowledgeAscending, [...replayKnowledgeVisible],
+  ]);
+  if (fingerprint === lastReplayKnowledgeFingerprint) return;
+  lastReplayKnowledgeFingerprint = fingerprint;
+  for (const column of ["player", ...replayKnowledgeColumns]) {
+    const header = $(`replay-knowledge-head-${column}`);
+    header.hidden = column !== "player" && !replayKnowledgeVisible.has(column);
+    if (column === replayKnowledgeSort) {
+      header.setAttribute("aria-sort", replayKnowledgeAscending ? "ascending" : "descending");
+    } else header.removeAttribute("aria-sort");
+  }
+  const body = $("replay-knowledge-body");
+  const animate = replayPlaying && !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    && body.getClientRects().length > 0;
+  const previousPositions = new Map(animate
+    ? [...body.children].map((row) => [row.dataset.player, row.getBoundingClientRect().top]) : []);
+  body.replaceChildren();
+  const sorted = [...summaries].sort((a, b) => {
+    const aValue = replayKnowledgeSort === "player"
+      ? { located: a.player, marks: 0 } : replayKnowledgeValues(a)[replayKnowledgeSort];
+    const bValue = replayKnowledgeSort === "player"
+      ? { located: b.player, marks: 0 } : replayKnowledgeValues(b)[replayKnowledgeSort];
+    const order = (aValue.located - bValue.located) || (aValue.marks - bValue.marks);
+    return (replayKnowledgeAscending ? order : -order) || a.player - b.player;
+  });
+  for (const summary of sorted) {
+    const row = document.createElement("tr");
+    row.dataset.player = String(summary.player);
+    const name = document.createElement("th");
+    name.scope = "row";
+    const badge = document.createElement("span");
+    badge.className = "replay-player-badge";
+    badge.style.setProperty("--player-color", replayPlayerColor(summary.player));
+    badge.textContent = String(summary.player + 1);
+    badge.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = `Player ${summary.player + 1}`;
+    name.append(badge, label);
+    row.append(name);
+    const values = replayKnowledgeValues(summary);
+    for (const column of replayKnowledgeColumns) {
+      if (!replayKnowledgeVisible.has(column)) continue;
+      const item = values[column];
+      const cell = document.createElement("td");
+      const located = document.createElement("strong");
+      located.textContent = `${item.located}/${item.total}${column === "envelope" ? "" : " located"}`;
+      cell.append(located);
+      if (column !== "envelope") {
+        const marks = document.createElement("span");
+        marks.textContent = `${item.marks}/${item.mark_total} marks`;
+        cell.append(marks);
+      }
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  if (animate) {
+    for (const row of body.children) {
+      const previous = previousPositions.get(row.dataset.player);
+      if (previous === undefined) continue;
+      const distance = previous - row.getBoundingClientRect().top;
+      if (distance) row.animate(
+        [{ transform: `translateY(${distance}px)` }, { transform: "translateY(0)" }],
+        { duration: Math.min(350, Number($("replay-speed").value) / 2), easing: "ease-out" }
+      );
+    }
+  }
+}
+
+function setReplayKnowledgeSort(column) {
+  if (replayKnowledgeSort === column) replayKnowledgeAscending = !replayKnowledgeAscending;
+  else {
+    replayKnowledgeSort = column;
+    replayKnowledgeAscending = column === "player";
+  }
+  if (currentState?.is_replay) renderReplayKnowledge(currentState.knowledge_summary);
+}
+
+function setReplayKnowledgeColumn(column, visible) {
+  if (visible) replayKnowledgeVisible.add(column);
+  else replayKnowledgeVisible.delete(column);
+  if (!replayKnowledgeVisible.has(replayKnowledgeSort) && replayKnowledgeSort !== "player") {
+    replayKnowledgeSort = replayKnowledgeColumns.find((item) => replayKnowledgeVisible.has(item)) ?? "player";
+    replayKnowledgeAscending = replayKnowledgeSort === "player";
+  }
+  if (currentState?.is_replay) renderReplayKnowledge(currentState.knowledge_summary);
+}
+
+function moveReplayMarker(direction) {
+  if (!currentState?.is_replay) return;
+  const positions = replayMarkerGroups(currentState).map(([position]) => position);
+  const target = direction < 0
+    ? positions.reverse().find((position) => position < currentState.position)
+    : positions.find((position) => position > currentState.position);
+  if (target === undefined) return;
+  stopReplayPlayback();
+  $("replay-position").value = String(target);
+  loadReplay();
 }
 
 async function openReplay() {
@@ -1822,26 +2431,92 @@ async function openReplay() {
   replayMode = true;
   document.body.classList.add("replay-active");
   $("replay-controls").hidden = false;
+  setReplayPresentation(true);
   $("replay-position").value = "0";
   $("replay-player").replaceChildren(...Array.from(
     { length: currentState.num_players }, (_, seat) => option(seat, `Player ${seat + 1}`)
   ));
   $("replay-player").value = String(currentState.selected_player);
+  renderReplayPlayerFilters(currentState.num_players);
+  setReplayMarkerFilter("type", "envelope");
+  setReplayMarkerFilter("player", "all");
+  lastReplayDeductionFingerprint = null;
+  lastReplayKnowledgeFingerprint = null;
   $("replay-manual").checked = false;
   $("replay-omniscient").checked = false;
+  if (currentState.board) switchBoardTab("cards");
   await loadReplay();
 }
 
 async function closeReplay() {
+  stopReplayPlayback();
   replayMode = false;
+  setReplayPresentation(false);
   document.body.classList.remove("replay-active");
   $("replay-controls").hidden = true;
   lastRenderedState = null;
   await refreshState();
 }
 
+function setReplayPresentation(visible) {
+  $("replay-timeline").hidden = !visible;
+  $("replay-knowledge").hidden = !visible;
+  $("card-view-tabs").hidden = visible;
+  $("hand-cards").hidden = visible;
+}
+
+function updateReplayPlaybackControls() {
+  const position = currentState?.is_replay ? currentState.position : 0;
+  const last = currentState?.is_replay ? currentState.positions - 1 : 0;
+  $("replay-play").textContent = replayPlaying ? "Pause" : "Play";
+  $("replay-play").disabled = !replayPlaying && position >= last;
+  $("replay-previous").disabled = $("replay-previous-turn").disabled = position <= 0;
+  $("replay-next").disabled = $("replay-next-turn").disabled = position >= last;
+}
+
+function stopReplayPlayback() {
+  if (replayPlaying) {
+    requestVersion++;
+    if (currentState?.is_replay) $("replay-position").value = String(currentState.position);
+  }
+  replayPlaying = false;
+  replayPlaybackGeneration++;
+  clearTimeout(replayTimer);
+  replayTimer = null;
+  updateReplayPlaybackControls();
+}
+
+function scheduleReplayPlayback(generation, delay = Number($("replay-speed").value)) {
+  replayTimer = setTimeout(async () => {
+    replayTimer = null;
+    if (!replayPlaying || generation !== replayPlaybackGeneration || !currentState?.is_replay) return;
+    if (cardActivityPending()) {
+      const remaining = Math.max(0, cardActivityReadUntil - performance.now());
+      scheduleReplayPlayback(generation, suggestionFlights.length ? 100 : Math.max(1, remaining));
+      return;
+    }
+    $("replay-position").value = String(currentState.position + 1);
+    const loaded = await loadReplay();
+    if (!replayPlaying || generation !== replayPlaybackGeneration) return;
+    if (!loaded || currentState.position >= currentState.positions - 1) stopReplayPlayback();
+    else scheduleReplayPlayback(generation);
+  }, delay);
+}
+
+function toggleReplayPlayback() {
+  if (replayPlaying) {
+    stopReplayPlayback();
+  } else if (currentState?.is_replay && currentState.position < currentState.positions - 1) {
+    replayPlaying = true;
+    const generation = ++replayPlaybackGeneration;
+    updateReplayPlaybackControls();
+    scheduleReplayPlayback(generation);
+  }
+}
+
 function moveReplay(amount, turn = false) {
   if (!currentState?.is_replay) return;
+  stopReplayPlayback();
   const position = currentState.position;
   const max = currentState.positions - 1;
   const target = turn
@@ -1936,6 +2611,7 @@ function switchBoardTab(name) {
   }
   $("insights-panel").hidden = !insightsTabs.includes(name);
   if (insightsTabs.includes(name)) switchInsightsTab(name);
+  if (name !== "clauses") clearClauseSelection();
 }
 
 function updateMode(restoreNotebook = true) {
@@ -1975,17 +2651,16 @@ function switchInsightsTab(name) {
     $(`${item}-panel`).hidden = !active;
     $(`${item}-panel`).setAttribute("aria-labelledby", board ? `board-tab-${item}` : `${item}-tab`);
   }
+  if (name !== "clauses") clearClauseSelection();
 }
 
 function setTheme(theme, persist = false) {
   const isDark = theme === "dark";
   document.documentElement.dataset.theme = isDark ? "dark" : "light";
-  $("theme-icon").textContent = isDark ? "☀" : "☾";
-  $("theme-label").textContent = isDark ? "Light mode" : "Dark mode";
-  $("theme-toggle").setAttribute(
-    "aria-label",
-    isDark ? "Switch to light mode" : "Switch to dark mode"
-  );
+  for (const id of ["theme-toggle", "game-theme-toggle"]) {
+    $(id).textContent = isDark ? "Light mode" : "Dark mode";
+    $(id).setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+  }
   if (persist) {
     if (window.clueOptions.desktop) {
       desktopThemeWrite = desktopThemeWrite
@@ -2005,16 +2680,26 @@ function setTheme(theme, persist = false) {
 
 function showFullscreenState(fullscreen) {
   desktopFullscreen = fullscreen;
-  const button = $("fullscreen-toggle");
-  button.textContent = fullscreen ? "Exit full screen" : "Full screen";
-  button.setAttribute("aria-pressed", String(fullscreen));
+  for (const id of ["fullscreen-toggle", "game-fullscreen"]) {
+    const button = $(id);
+    button.textContent = fullscreen ? "Exit full screen" : "Full screen";
+    button.setAttribute("aria-pressed", String(fullscreen));
+  }
+}
+
+function setFullscreenDisabled(disabled) {
+  for (const id of ["fullscreen-toggle", "game-fullscreen"]) $(id).disabled = disabled;
 }
 
 async function initializeFullscreen() {
-  if (!window.clueOptions.desktop) return;
+  if (!window.clueOptions.desktop) {
+    showFullscreenState(Boolean(document.fullscreenElement));
+    setFullscreenDisabled(!document.fullscreenEnabled);
+    return;
+  }
   try {
     showFullscreenState(await window.pywebview.api.fullscreen_state());
-    $("fullscreen-toggle").disabled = false;
+    setFullscreenDisabled(false);
   } catch (error) {
     showError(`Could not initialize full screen: ${error.message}`);
   }
@@ -2023,15 +2708,21 @@ async function initializeFullscreen() {
 async function toggleDesktopFullscreen() {
   if (fullscreenBusy || $("fullscreen-toggle").disabled) return;
   fullscreenBusy = true;
-  $("fullscreen-toggle").disabled = true;
+  setFullscreenDisabled(true);
   try {
-    showFullscreenState(await window.pywebview.api.toggle_fullscreen());
+    if (window.clueOptions.desktop) {
+      showFullscreenState(await window.pywebview.api.toggle_fullscreen());
+    } else {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+      showFullscreenState(Boolean(document.fullscreenElement));
+    }
     if (lastError.startsWith("Could not change full screen:")) showError("");
   } catch (error) {
     showError(`Could not change full screen: ${error.message}`);
   } finally {
     fullscreenBusy = false;
-    $("fullscreen-toggle").disabled = false;
+    setFullscreenDisabled(false);
   }
 }
 
@@ -2041,10 +2732,15 @@ if (window.clueThemeStorageError) {
 }
 window.addEventListener("pywebviewready", initializeFullscreen);
 if (window.clueOptions.desktop && window.pywebview?.api) initializeFullscreen();
+if (!window.clueOptions.desktop) initializeFullscreen();
+document.addEventListener("fullscreenchange", () => {
+  if (!window.clueOptions.desktop) showFullscreenState(Boolean(document.fullscreenElement));
+});
 $("fullscreen-toggle").addEventListener("click", toggleDesktopFullscreen);
+$("game-fullscreen").addEventListener("click", toggleDesktopFullscreen);
 document.addEventListener("keydown", (event) => {
   if (!window.clueOptions.desktop || event.repeat || event.altKey || event.ctrlKey || event.metaKey
-    || event.shiftKey || $("fullscreen-toggle").disabled || $("confirm-dialog").open) return;
+    || event.shiftKey || $("fullscreen-toggle").disabled || document.querySelector("dialog[open]")) return;
   if (event.key === "F11" || (event.key === "Escape" && desktopFullscreen)) {
     event.preventDefault();
     toggleDesktopFullscreen();
@@ -2057,23 +2753,69 @@ $("confirm-dialog").addEventListener("keydown", (event) => {
   }
 });
 $("setup-form").addEventListener("submit", startGame);
+$("main-setup").addEventListener("click", showSetup);
+$("setup-menu").addEventListener("click", showMainMenu);
+$("main-quick-play").addEventListener("click", async () => {
+  if (mainMenuBusy) return;
+  mainMenuBusy = true;
+  for (const id of ["main-quick-play", "main-setup", "replay-import-button"]) $(id).disabled = true;
+  try {
+    await window.setupWizard.loadQuickplay();
+    window.setupWizard.renderReview($("quickplay-summary"), false);
+    showError("");
+    $("quickplay-dialog").showModal();
+  } catch (error) {
+    showError(`Could not load quickplay defaults: ${error.message}`);
+  } finally {
+    mainMenuBusy = false;
+    for (const id of ["main-quick-play", "main-setup", "replay-import-button"]) $(id).disabled = false;
+  }
+});
+$("quickplay-cancel").addEventListener("click", () => $("quickplay-dialog").close());
+$("main-edit-default").addEventListener("click", () => {
+  $("quickplay-dialog").close();
+  showSetup();
+});
+$("quickplay-start").addEventListener("click", () => {
+  $("quickplay-dialog").close();
+  startGame();
+});
+$("main-quit").addEventListener("click", async () => {
+  try { await window.pywebview.api.quit(); }
+  catch (error) { showError(`Could not quit the desktop app: ${error.message}`); }
+});
+$("game-options-open").addEventListener("click", () => {
+  if (replayMode) stopReplayPlayback();
+  $("game-options-dialog").showModal();
+});
+$("game-options-close").addEventListener("click", () => $("game-options-dialog").close());
+$("show-card-indicators").addEventListener("change", (event) => {
+  showCardIndicators = event.target.checked;
+  if (currentState) updateCardNotes(currentState);
+});
+$("show-board-indicators").addEventListener("change", (event) => {
+  showBoardIndicators = event.target.checked;
+  if (currentState) updateKnowledgeIndicators(currentState);
+});
 $("mode").addEventListener("change", updateMode);
 for (const choice of document.querySelectorAll('input[name="game-type"]')) {
   choice.addEventListener("change", updateGameType);
 }
 $("players").addEventListener("input", updateGameType);
-$("theme-toggle").addEventListener("click", () => {
-  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
-});
+for (const id of ["theme-toggle", "game-theme-toggle"]) {
+  $(id).addEventListener("click", () => {
+    setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
+  });
+}
 $("notebook").addEventListener("click", (event) => {
   const indicator = event.target.closest("[data-clause-card]");
   if (indicator && currentState) {
-    selectedClause = Number(indicator.dataset.clauseId);
     $("clause-actor").value = "all";
     $("clause-kind").value = "all";
+    openClauses();
+    selectedClause = Number(indicator.dataset.clauseId);
     renderNotebook(currentState);
     renderClauses(currentState);
-    openClauses();
     const item = $("clauses").querySelector(`[data-clause-action="select"][data-clause-id="${selectedClause}"]`);
     item?.scrollIntoView({ block: "nearest" });
     item?.focus({ preventScroll: true });
@@ -2246,14 +2988,24 @@ $("pause-button").addEventListener("click", togglePause);
 $("turn-button").addEventListener("click", useTurnButton);
 $("next-button").addEventListener("click", () => advanceBot(true));
 $("new-game-button").addEventListener("click", async (event) => {
-  event.currentTarget.closest("details").open = false;
   if (submitting || advancing) {
     showError("Wait for the current action to finish.");
     return;
   }
-  if (await confirmAction("Start a new game and leave the current game?", {
-    title: "New game", confirmLabel: "New game",
-  })) newGame();
+  if (!await confirmAction("Exit the current game and return to the main menu? Unsaved progress will be lost.", {
+    title: "Exit game", confirmLabel: "Exit game",
+  })) return;
+  submitting = true;
+  requestVersion++;
+  try {
+    await requestJson("/api/game", { method: "DELETE" });
+    $("game-options-dialog").close();
+    newGame();
+  } catch (error) {
+    showError(`Could not exit the game: ${error.message}`);
+  } finally {
+    submitting = false;
+  }
 });
 $("replay-open").addEventListener("click", openReplay);
 $("replay-close").addEventListener("click", closeReplay);
@@ -2264,7 +3016,6 @@ $("replay-import").addEventListener("change", (event) => {
   event.target.value = "";
 });
 $("replay-end").addEventListener("click", async (event) => {
-  event.currentTarget.closest("details").open = false;
   if (submitting || advancing) {
     showError("Wait for the current action to finish.");
     return;
@@ -2272,6 +3023,7 @@ $("replay-end").addEventListener("click", async (event) => {
   if (!await confirmAction("End this game permanently and reveal all private information?", {
     title: "End and reveal", confirmLabel: "End and reveal",
   })) return;
+  $("game-options-dialog").close();
   const version = ++requestVersion;
   submitting = true;
   try {
@@ -2290,14 +3042,53 @@ $("replay-previous").addEventListener("click", () => moveReplay(-1));
 $("replay-next").addEventListener("click", () => moveReplay(1));
 $("replay-previous-turn").addEventListener("click", () => moveReplay(-1, true));
 $("replay-next-turn").addEventListener("click", () => moveReplay(1, true));
-$("replay-deductions").addEventListener("click", (event) => {
+$("replay-play").addEventListener("click", toggleReplayPlayback);
+$("replay-markers").addEventListener("click", (event) => {
   const button = event.target.closest("[data-replay-position]");
   if (!button || !replayMode) return;
+  stopReplayPlayback();
   $("replay-position").value = button.dataset.replayPosition;
   loadReplay();
 });
+for (const name of ["focusin", "mouseover"]) {
+  $("replay-markers").addEventListener(name, (event) => {
+    const marker = event.target.closest("[data-replay-position]");
+    if (marker) $("replay-marker-details").textContent = marker.getAttribute("aria-label");
+  });
+}
+$("replay-previous-marker").addEventListener("click", () => moveReplayMarker(-1));
+$("replay-next-marker").addEventListener("click", () => moveReplayMarker(1));
+$("replay-marker-types").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-marker-type]");
+  if (button) setReplayMarkerFilter("type", button.dataset.markerType);
+});
+$("replay-marker-players").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-marker-player]");
+  if (button) setReplayMarkerFilter("player", button.dataset.markerPlayer);
+});
+$("replay-knowledge-columns").addEventListener("change", (event) => {
+  const input = event.target.closest("[data-knowledge-column]");
+  if (input) setReplayKnowledgeColumn(input.dataset.knowledgeColumn, input.checked);
+});
+$("replay-knowledge-table").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-knowledge-sort]");
+  if (button) setReplayKnowledgeSort(button.dataset.knowledgeSort);
+});
+window.addEventListener("resize", () => {
+  if (replayMode) layoutReplayMarkers();
+});
+$("replay-position").addEventListener("input", () => {
+  const target = $("replay-position").value;
+  stopReplayPlayback();
+  $("replay-position").value = target;
+});
 for (const id of ["replay-position", "replay-player", "replay-manual", "replay-omniscient"]) {
-  $(id).addEventListener("change", loadReplay);
+  $(id).addEventListener("change", () => {
+    const target = $("replay-position").value;
+    stopReplayPlayback();
+    $("replay-position").value = target;
+    loadReplay();
+  });
 }
 for (const id of ["viewer-select", "clause-actor", "clause-kind"]) {
   $(id).addEventListener("change", () => {
@@ -2314,13 +3105,14 @@ for (const name of insightsTabs) {
 $("insights-tabs").addEventListener("keydown", (event) => {
   const tab = event.target.closest("[role='tab']");
   if (!tab) return;
-  const index = insightsTabs.indexOf(tab.id.replace("-tab", ""));
+  const available = insightsTabs;
+  const index = available.indexOf(tab.id.replace("-tab", ""));
   let next = null;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     const offset = event.key === "ArrowDown" ? 1 : -1;
-    next = insightsTabs[(index + offset + insightsTabs.length) % insightsTabs.length];
-  } else if (event.key === "Home") next = insightsTabs[0];
-  else if (event.key === "End") next = insightsTabs[insightsTabs.length - 1];
+    next = available[(index + offset + available.length) % available.length];
+  } else if (event.key === "Home") next = available[0];
+  else if (event.key === "End") next = available[available.length - 1];
   if (!next) return;
   event.preventDefault();
   switchInsightsTab(next);

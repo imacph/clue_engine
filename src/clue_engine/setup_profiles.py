@@ -17,7 +17,7 @@ def validate_setup_profile(value: object) -> None:
     expected = required | board_fields if game_type == "board" else required
     if (
         not expected <= set(value)
-        or set(value) - expected - {"notebook_mode", "game_rules"}
+        or set(value) - expected - {"notebook_mode", "game_rules", "shuffle_bots"}
         or game_type not in {"board", "card_only"}
     ):
         raise ValueError("Invalid setup profile fields or game type.")
@@ -40,6 +40,8 @@ def validate_setup_profile(value: object) -> None:
         raise ValueError("Profile action limit must be non-negative.")
     if type(value["debug"]) is not bool:
         raise ValueError("Profile debug must be true or false.")
+    if "shuffle_bots" in value and type(value["shuffle_bots"]) is not bool:
+        raise ValueError("Profile bot seat shuffle must be true or false.")
     bots = value["bots"]
     if not isinstance(bots, list) or len(bots) != players:
         raise ValueError("Profile requires one bot configuration per seat.")

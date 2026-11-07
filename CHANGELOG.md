@@ -1,5 +1,57 @@
 # Changelog
 
+## Desktop 0.4.1 / App 0.6.0 / API 0.6.2 - 2026-11-07
+
+### Added
+
+- Add a main menu with a quickplay profile preview, configurable defaults,
+  game setup, replay loading, display controls, and Windows app quit.
+  Quickplay defaults to a four-player board game with three randomly assigned
+  bot styles; the setup wizard can also shuffle configured bot seats.
+- Add independent, seed-reproducible board options to shuffle room identities,
+  randomize doors, and generate 0–4 passage pairs. Matching letters on the
+  board and destinations in Locations identify passage links.
+- Add replay timeline flags for inferred envelope and other-player card
+  locations, with player and discovery filters and flag navigation. Add
+  continuous playback and a sortable, configurable player-knowledge table.
+- Show optional actual-hand and positive notebook indicators on cards and
+  board rooms, with independent visibility settings and warnings for
+  conflicting positive marks.
+
+### Changed
+
+- Place replay playback and timeline controls at the bottom of the screen and
+  show player knowledge in place of the card browser during replay.
+- Redesign the board header and dice display; animate dice rolls, pawn
+  movement, suggestions, and card reveals. Respect reduced-motion settings
+  and give automatic passes and reveals more time to be read.
+- Compact cards and table activity, keep card views and action controls in
+  stable positions, and move action guidance to Help. Keep bot configuration
+  cards aligned and quickplay saving in the setup navigation bar.
+- Keep clause indicators within fixed notebook rows, and clear clause
+  selection and highlighting when leaving the Clauses tab.
+- Preserve randomized layouts and rule settings in private replays and board
+  records; expose replay knowledge summaries and activity event identity in
+  web state.
+
+### Fixed
+
+- Correct Player 1 turn counts in replay and synchronize the board's active
+  player with the notebook during turn review.
+- Avoid replaying reveal animations on unrelated steps, and animate the human
+  player's own suggestions from their board position.
+- Prevent the notebook legend and clause control from overlapping, and reduce
+  changes in board, notebook, card, and action layout between phases.
+
+### Notes
+
+- Timeline flags cover the entire replay, including future discoveries and
+  other players' deductions, independently of the selected perspective or
+  Reveal all. Private replay files still contain all hands and the solution.
+- Randomized doors retain each room's door count, with at most one per side
+  and clearance from corners and outside walls. Custom layouts without enough
+  eligible sides cannot use door randomization.
+
 ## Desktop 0.4.0 / App 0.5.2 / API 0.6.1 - 2026-11-07
 
 ### Added

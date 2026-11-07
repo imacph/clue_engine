@@ -42,6 +42,11 @@ class _DesktopWindowApi:
             self._fullscreen = not self._fullscreen
             return self._fullscreen
 
+    def quit(self) -> None:
+        if self._window is None:
+            raise RuntimeError("The desktop window is not available.")
+        self._window.destroy()
+
 
 def _require_webview2() -> None:
     import winreg
