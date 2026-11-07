@@ -31,13 +31,18 @@ let cardView = "hand";
 let lastActivityKey = null;
 let lastRenderedState = null;
 let lastNotebookFingerprint = null;
+let lastNotebookStructureFingerprint = null;
+let lastNotebookMarks = null;
+let lastNotebookDraft = null;
 let lastClauseFingerprint = null;
+let lastReplayDeductionFingerprint = null;
 let lastDebugFingerprint = null;
 let lastNotebookPerspective = null;
-let selectedClauses = [];
+let selectedClause = null;
 let clauseDraft = null;
 let notebookGeneration = 0;
 let notebookQueue = Promise.resolve();
+let pendingNotebookEdits = [];
 let lastBoardState = null;
 let lastBoardLayout = null;
 let lastSuggestionRoom = null;
@@ -111,6 +116,7 @@ async function startGame(event) {
   }
   notebookGeneration++;
   notebookQueue = Promise.resolve();
+  pendingNotebookEdits = [];
   const version = ++requestVersion;
   showError("");
   clearSelectedCards();
@@ -118,8 +124,11 @@ async function startGame(event) {
   lastActivityKey = null;
   lastRenderedState = null;
   lastNotebookFingerprint = null;
+  lastNotebookStructureFingerprint = null;
+  lastNotebookMarks = null;
+  lastNotebookDraft = null;
   lastClauseFingerprint = null;
-  selectedClauses = [];
+  selectedClause = null;
   clauseDraft = null;
   lastBoardState = null;
   lastSuggestionRoom = null;
@@ -1005,17 +1014,96 @@ function cardIllustration(cardId) {
   return svg;
 }
 
+function notebookDisplayMatrix(state) {
+  if (!pendingNotebookEdits.length || state.notebook_mode !== "manual" || state.is_replay) return state.matrix;
+  const pending = new Map();
+  for (const edit of pendingNotebookEdits) pending.set(`${edit.cardId}:${edit.holder}`, edit.mark);
+  return state.matrix.map((card) => ({
+    ...card,
+    marks: card.marks.map((mark, holder) => pending.get(`${card.id}:${holder}`) ?? mark),
+  }));
+}
+
+function updateNotebookMark(button, card, holder, mark, state, draft) {
+  const cell = button.parentElement;
+  cell.classList.remove("mark-held", "mark-not-held", "mark-unknown");
+  cell.classList.add(mark === "+" ? "mark-held" : mark === "-" ? "mark-not-held" : "mark-unknown");
+  const focus = state.notebook_focus || { cards: [] };
+  const roles = [];
+  if (holder === focus.turn) roles.push("turn owner");
+  if (holder === focus.actor) roles.push("acting now");
+  const cardContext = focus.cards.includes(card.id)
+    ? `; ${focus.kind === "accuse" ? "current accusation" : "current suggestion"}` : "";
+  const shown = focus.shown?.holder === holder && focus.shown?.card === card.id;
+  const context = (roles.length ? `; ${roles.join(", ")}` : "")
+    + cardContext + (shown ? "; visibly shown" : "");
+  const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
+  const owner = holder === state.num_players ? "Envelope" : `Player ${holder + 1}`;
+  const selected = draft?.holder === holder && draft.cards[card.type] === card.id;
+  cell.classList.toggle("clause-draft-selected", Boolean(selected));
+  const action = draft ? `${selected ? "Selected" : "Not selected"} for clause. Activate to select.`
+    : "Activate to change.";
+  const label = `${card.name}, ${owner}: ${meaning}${context}. ${action}`;
+  button.textContent = mark;
+  button.setAttribute("aria-label", label);
+  if (draft) button.setAttribute("aria-pressed", String(Boolean(selected)));
+  else button.removeAttribute("aria-pressed");
+  button.title = label;
+}
+
 function renderNotebook(state) {
   const notebook = $("notebook");
   const focus = state.notebook_focus || { cards: [] };
   const focusCards = new Set(focus.cards);
+  const matrix = notebookDisplayMatrix(state);
   updateClauseEntryControls(state);
   const fingerprint = JSON.stringify([
-    state.notebook_mode, state.num_players, state.hand_sizes, state.matrix, state.notebook_clauses,
-    state.notebook_focus, selectedClauses, clauseDraft,
+    state.notebook_mode, state.num_players, state.hand_sizes, matrix, state.notebook_clauses,
+    state.notebook_focus, selectedClause, clauseDraft,
   ]);
   if (fingerprint === lastNotebookFingerprint) return;
+  const structure = JSON.stringify([
+    state.notebook_mode, state.num_players, state.hand_sizes,
+    matrix.map(({ marks, ...card }) => card), state.notebook_clauses,
+    state.notebook_focus, selectedClause, Boolean(clauseDraft),
+  ]);
+  const marks = matrix.map((card) => card.marks.slice());
+  const draft = clauseDraft ? { holder: clauseDraft.holder, cards: { ...clauseDraft.cards } } : null;
+  if (structure === lastNotebookStructureFingerprint && lastNotebookMarks
+      && state.notebook_mode === "manual") {
+    const changes = [];
+    let canUpdate = true;
+    for (const [index, card] of matrix.entries()) {
+      for (const [holder, mark] of card.marks.entries()) {
+        const selected = draft?.holder === holder && draft.cards[card.type] === card.id;
+        const wasSelected = lastNotebookDraft?.holder === holder
+          && lastNotebookDraft.cards[card.type] === card.id;
+        if (mark === lastNotebookMarks[index][holder] && Boolean(selected) === Boolean(wasSelected)) continue;
+        const button = notebook.querySelector(
+          `[data-notebook-card="${card.id}"][data-notebook-holder="${holder}"]`
+        );
+        if (!button || (!card.editable[holder] && !draft)) {
+          canUpdate = false;
+          break;
+        }
+        changes.push([button, card, holder, mark]);
+      }
+      if (!canUpdate) break;
+    }
+    if (canUpdate) {
+      for (const [button, card, holder, mark] of changes) {
+        updateNotebookMark(button, card, holder, mark, state, draft);
+      }
+      lastNotebookFingerprint = fingerprint;
+      lastNotebookMarks = marks;
+      lastNotebookDraft = draft;
+      return;
+    }
+  }
   lastNotebookFingerprint = fingerprint;
+  lastNotebookStructureFingerprint = structure;
+  lastNotebookMarks = marks;
+  lastNotebookDraft = draft;
   const focused = document.activeElement.closest("[data-notebook-card]");
   const focusCard = focused?.dataset.notebookCard;
   const focusHolder = focused?.dataset.notebookHolder;
@@ -1068,7 +1156,7 @@ function renderNotebook(state) {
     title.textContent = type;
     category.append(title);
     body.append(category);
-    for (const card of state.matrix.filter((item) => item.type === type)) {
+    for (const card of matrix.filter((item) => item.type === type)) {
       const row = document.createElement("tr");
       row.dataset.cardId = String(card.id);
       const cardInFocus = focusCards.has(card.id);
@@ -1106,14 +1194,7 @@ function renderNotebook(state) {
           + cardContext + (shown ? "; visibly shown" : "");
         const links = (state.notebook_clauses || []).filter((clause) =>
           clause.holder === holder && clause.active_cards.includes(card.id));
-        const highlighted = links.filter((clause) => selectedClauses.includes(clause.id));
-        if (highlighted.length) {
-          const band = document.createElement("span");
-          band.className = "clause-highlight-band";
-          band.setAttribute("aria-hidden", "true");
-          band.style.setProperty("--clause-colors", clauseGradient(highlighted.map((clause) => clause.id)));
-          cell.append(band);
-        }
+        if (links.some((clause) => clause.id === selectedClause)) cell.classList.add("clause-linked-selected");
         const draftSelected = clauseDraft?.holder === holder && clauseDraft.cards[type] === card.id;
         if (draftSelected) cell.classList.add("clause-draft-selected");
         const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
@@ -1138,16 +1219,22 @@ function renderNotebook(state) {
           cell.append(value);
         }
         if (links.length && !clauseDraft) {
-          const indicator = document.createElement("button");
-          indicator.type = "button";
-          indicator.className = "clause-indicator";
-          indicator.dataset.clauseCard = String(card.id);
-          indicator.dataset.clauseHolder = String(holder);
-          const ids = links.map((clause) => clause.id).join(", ");
-          const description = `View ${links.length === 1 ? "clause" : "clauses"} ${ids} for ${card.name}, ${owner}`;
-          indicator.setAttribute("aria-label", description);
-          indicator.title = description;
-          cell.append(indicator);
+          const indicators = document.createElement("span");
+          indicators.className = "clause-indicators";
+          for (const clause of links) {
+            const indicator = document.createElement("button");
+            indicator.type = "button";
+            indicator.className = "clause-indicator";
+            indicator.dataset.clauseCard = String(card.id);
+            indicator.dataset.clauseId = String(clause.id);
+            indicator.style.setProperty("--clause-color", clauseColor(clause, state.notebook_clauses));
+            const description = `View clause ${clause.id} for ${card.name}, ${owner}`;
+            indicator.setAttribute("aria-label", description);
+            indicator.setAttribute("aria-pressed", String(clause.id === selectedClause));
+            indicator.title = description;
+            indicators.append(indicator);
+          }
+          cell.append(indicators);
         }
         row.append(cell);
       }
@@ -1163,25 +1250,41 @@ function renderNotebook(state) {
 }
 
 function changeNotebook(cardId, holder) {
+  if (!currentState || currentState.is_replay) return;
+  const card = currentState.matrix.find((item) => item.id === cardId);
+  if (!card || !card.editable[holder]) return;
+  const previous = [...pendingNotebookEdits].reverse().find(
+    (edit) => edit.cardId === cardId && edit.holder === holder
+  );
+  const mark = { "?": "+", "+": "-", "-": "?" }[previous?.mark ?? card.marks[holder]];
+  const edit = { cardId, holder, mark };
+  pendingNotebookEdits.push(edit);
+  renderNotebook(currentState);
   const generation = notebookGeneration;
   notebookQueue = notebookQueue.then(async () => {
     if (generation !== notebookGeneration || !currentState) return;
-    const card = currentState.matrix.find((item) => item.id === cardId);
-    if (!card || !card.editable[holder]) return;
-    const next = { "?": "+", "+": "-", "-": "?" }[card.marks[holder]];
     const result = await requestJson("/api/notebook", {
-      method: "PUT", body: { card_id: cardId, holder, mark: next },
+      method: "PUT", body: { card_id: cardId, holder, mark },
     });
     if (generation !== notebookGeneration || !currentState) return;
+    pendingNotebookEdits = pendingNotebookEdits.filter((pending) => pending !== edit);
     if (result.notebook_revision >= currentState.notebook_revision) {
       currentState.matrix = result.matrix;
       currentState.notebook_clauses = result.notebook_clauses;
       currentState.notebook_revision = result.notebook_revision;
-      renderState(currentState);
+      renderNotebook(currentState);
+      renderClauses(currentState);
+      lastRenderedState = JSON.stringify(currentState);
+    } else {
+      renderNotebook(currentState);
     }
     if (lastError.startsWith("Could not save notebook:")) showError("");
   }).catch((error) => {
-    if (generation === notebookGeneration) showError(`Could not save notebook: ${error.message}`);
+    if (generation === notebookGeneration) {
+      pendingNotebookEdits = pendingNotebookEdits.filter((pending) => pending !== edit);
+      if (currentState) renderNotebook(currentState);
+      showError(`Could not save notebook: ${error.message}`);
+    }
   });
 }
 
@@ -1285,42 +1388,30 @@ function openClauses() {
 
 function updateClausePerspective(state) {
   const perspective = `${state.is_replay ? "replay" : "live"}:${state.selected_player}:${state.notebook_mode}`;
-  if (lastNotebookPerspective !== null && perspective !== lastNotebookPerspective) selectedClauses = [];
+  if (lastNotebookPerspective !== null && perspective !== lastNotebookPerspective) selectedClause = null;
   lastNotebookPerspective = perspective;
   const active = new Set((state.notebook_clauses || [])
     .filter((clause) => clause.active_cards.length).map((clause) => clause.id));
-  selectedClauses = selectedClauses.filter((id) => active.has(id));
+  if (!active.has(selectedClause)) selectedClause = null;
 }
 
-function clauseColor(id) {
-  const index = selectedClauses.indexOf(id);
-  return `hsl(${Math.round(index * 360 / selectedClauses.length)} 75% 45%)`;
+function clauseColor(clause, clauses) {
+  const hues = [0, 210, 120, 35, 285, 175, 330, 65, 245, 155, 20, 265];
+  const index = clauses.filter((item) => item.holder === clause.holder && item.id < clause.id).length;
+  const hue = hues[index % hues.length];
+  const lightness = Math.floor(index / hues.length) % 2 ? 65 : 45;
+  return `hsl(${hue} 80% ${lightness}%)`;
 }
 
-function clauseGradient(ids) {
-  const colors = ids.map(clauseColor);
-  return `linear-gradient(to right, ${colors.flatMap((color, index) => [
-    `${color} ${index * 100 / colors.length}%`, `${color} ${(index + 1) * 100 / colors.length}%`,
-  ]).join(", ")})`;
-}
-
-function selectCellClauses(cardId, holder) {
-  selectedClauses = currentState.notebook_clauses
-    .filter((clause) => clause.holder === holder && clause.active_cards.includes(cardId))
-    .map((clause) => clause.id).sort((a, b) => a - b);
-}
-
-function toggleClauseHighlight(id) {
-  selectedClauses = selectedClauses.includes(id)
-    ? selectedClauses.filter((selected) => selected !== id)
-    : [...selectedClauses, id].sort((a, b) => a - b);
+function toggleClauseSelection(id) {
+  selectedClause = selectedClause === id ? null : id;
 }
 
 function renderClauses(state) {
   const clauses = state.notebook_clauses || [];
   const actor = $("clause-actor").value || "all";
   const kind = $("clause-kind").value || "all";
-  const fingerprint = JSON.stringify([clauses, actor, kind, selectedClauses, state.notebook_mode]);
+  const fingerprint = JSON.stringify([clauses, actor, kind, selectedClause, state.notebook_mode, state.is_replay]);
   if (fingerprint === lastClauseFingerprint) return;
   lastClauseFingerprint = fingerprint;
   const list = $("clauses");
@@ -1339,19 +1430,28 @@ function renderClauses(state) {
     const item = document.createElement("article");
     item.className = "clause-item";
     item.tabIndex = -1;
-    const highlighted = selectedClauses.includes(clause.id);
-    if (highlighted) {
-      item.classList.add("clause-selected");
-      item.style.setProperty("--clause-color", clauseColor(clause.id));
-    }
+    const selected = selectedClause === clause.id;
+    if (selected) item.classList.add("clause-selected");
+    item.style.setProperty("--clause-color", clauseColor(clause, clauses));
     item.dataset.clauseItem = String(clause.id);
-    const heading = document.createElement("strong");
+    const heading = document.createElement("button");
+    heading.type = "button";
+    heading.className = "clause-select";
+    heading.dataset.clauseAction = "select";
+    heading.dataset.clauseId = String(clause.id);
+    heading.disabled = !clause.active_cards.length;
+    heading.setAttribute("aria-pressed", String(selected));
     const subject = clause.kind === "refute"
       ? `Player ${clause.holder + 1} holds at least one`
       : "At least one is not in the envelope";
     const source = clause.kind === "accuse" && clause.actor !== null
       ? ` (incorrect accusation by Player ${clause.actor + 1})` : "";
-    heading.textContent = `#${clause.id}: ${subject}${source}`;
+    const swatch = document.createElement("span");
+    swatch.className = "clause-swatch";
+    swatch.setAttribute("aria-hidden", "true");
+    const headingText = document.createElement("span");
+    headingText.textContent = `#${clause.id}: ${subject}${source}`;
+    heading.append(swatch, headingText);
     const description = document.createElement("p");
     description.textContent = clause.cards.map((id) => cardsById.get(id).name).join(", ");
     const status = document.createElement("p");
@@ -1363,7 +1463,6 @@ function renderClauses(state) {
     const actions = document.createElement("div");
     actions.className = "clause-actions";
     for (const [action, label] of [
-      ["highlight", highlighted ? "Clear highlight" : "Highlight"],
       ...(state.notebook_mode === "manual" && !state.is_replay ? [
         ["edit", "Edit"], ["resolve", clause.status === "resolved" ? "Reopen" : "Resolve"],
         ["delete", "Delete"],
@@ -1375,10 +1474,6 @@ function renderClauses(state) {
       button.dataset.clauseAction = action;
       button.dataset.clauseId = String(clause.id);
       button.textContent = label;
-      if (action === "highlight") {
-        button.disabled = !clause.active_cards.length && !highlighted;
-        button.setAttribute("aria-pressed", String(highlighted));
-      }
       button.setAttribute("aria-label", `${label} clause ${clause.id}`);
       actions.append(button);
     }
@@ -1422,7 +1517,10 @@ function saveClause(method, clauseId, body, onSuccess = null, onFailure = null) 
       currentState.matrix = result.matrix;
       currentState.notebook_clauses = result.notebook_clauses;
       currentState.notebook_revision = result.notebook_revision;
-      renderState(currentState);
+      updateClausePerspective(currentState);
+      renderNotebook(currentState);
+      renderClauses(currentState);
+      lastRenderedState = JSON.stringify(currentState);
     }
     if (onSuccess) onSuccess();
     if (lastError.startsWith("Could not save notebook:")) showError("");
@@ -1632,6 +1730,7 @@ function newGame() {
   sessionStorage.removeItem(activeGameKey);
   notebookGeneration++;
   notebookQueue = Promise.resolve();
+  pendingNotebookEdits = [];
   clearInterval(refreshTimer);
   currentState = null;
   clearSelectedCards();
@@ -1639,8 +1738,11 @@ function newGame() {
   lastActivityKey = null;
   lastRenderedState = null;
   lastNotebookFingerprint = null;
+  lastNotebookStructureFingerprint = null;
+  lastNotebookMarks = null;
+  lastNotebookDraft = null;
   lastClauseFingerprint = null;
-  selectedClauses = [];
+  selectedClause = null;
   clauseDraft = null;
   lastBoardState = null;
   lastBoardLayout = null;
@@ -1674,16 +1776,49 @@ async function loadReplay() {
     $("replay-position").max = String(state.positions - 1);
     $("replay-manual").disabled = !state.manual_available;
     if (!state.manual_available) $("replay-manual").checked = false;
+    renderReplayDeductions(state.deduction_timeline);
     renderState(state);
   } catch (error) {
     if (version === requestVersion) showError(error.message);
   }
 }
 
+function renderReplayDeductions(deductions) {
+  const fingerprint = JSON.stringify(deductions);
+  if (fingerprint === lastReplayDeductionFingerprint) return;
+  lastReplayDeductionFingerprint = fingerprint;
+  const list = $("replay-deductions");
+  const focused = document.activeElement.closest("[data-replay-deduction]");
+  const focusKey = focused?.dataset.replayDeduction;
+  list.replaceChildren();
+  if (!deductions.length) {
+    list.textContent = "No envelope cards inferred yet.";
+    return;
+  }
+  for (const deduction of deductions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.replayDeduction = `${deduction.player}:${deduction.card}`;
+    button.dataset.replayPosition = String(deduction.position);
+    button.textContent = `Player ${deduction.player + 1}: ${cardName(deduction.card)}`
+      + (deduction.step ? ` · action ${deduction.step}` : " · start");
+    list.append(button);
+  }
+  if (focusKey) {
+    list.querySelector(`[data-replay-deduction="${focusKey}"]`)?.focus({ preventScroll: true });
+  }
+}
+
 async function openReplay() {
   if (!currentState?.is_over) return;
+  let queued;
+  do {
+    queued = notebookQueue;
+    await queued;
+  } while (queued !== notebookQueue);
+  if (!currentState?.is_over || replayMode) return;
   clauseDraft = null;
-  selectedClauses = [];
+  selectedClause = null;
   replayMode = true;
   document.body.classList.add("replay-active");
   $("replay-controls").hidden = false;
@@ -1933,13 +2068,13 @@ $("theme-toggle").addEventListener("click", () => {
 $("notebook").addEventListener("click", (event) => {
   const indicator = event.target.closest("[data-clause-card]");
   if (indicator && currentState) {
-    selectCellClauses(Number(indicator.dataset.clauseCard), Number(indicator.dataset.clauseHolder));
+    selectedClause = Number(indicator.dataset.clauseId);
     $("clause-actor").value = "all";
     $("clause-kind").value = "all";
-    lastRenderedState = null;
-    renderState(currentState);
+    renderNotebook(currentState);
+    renderClauses(currentState);
     openClauses();
-    const item = $("clauses").querySelector(`[data-clause-item="${selectedClauses[0]}"]`);
+    const item = $("clauses").querySelector(`[data-clause-action="select"][data-clause-id="${selectedClause}"]`);
     item?.scrollIntoView({ block: "nearest" });
     item?.focus({ preventScroll: true });
     return;
@@ -1963,10 +2098,10 @@ $("clauses").addEventListener("click", async (event) => {
   const clause = currentState.notebook_clauses.find((item) => item.id === Number(button.dataset.clauseId));
   if (!clause) return;
   const action = button.dataset.clauseAction;
-  if (action === "highlight") {
-    toggleClauseHighlight(clause.id);
-    lastRenderedState = null;
-    renderState(currentState);
+  if (action === "select") {
+    toggleClauseSelection(clause.id);
+    renderNotebook(currentState);
+    renderClauses(currentState);
   } else if (action === "edit") {
     startClauseEntry(clause);
   } else if (action === "resolve") {
@@ -1987,7 +2122,7 @@ $("clauses").addEventListener("click", async (event) => {
       title: "Delete clause", confirmLabel: "Delete clause",
     })) return;
     saveClause("DELETE", clause.id, undefined, () => {
-      selectedClauses = selectedClauses.filter((id) => id !== clause.id);
+      if (selectedClause === clause.id) selectedClause = null;
       renderNotebook(currentState);
       renderClauses(currentState);
     });
@@ -2155,6 +2290,12 @@ $("replay-previous").addEventListener("click", () => moveReplay(-1));
 $("replay-next").addEventListener("click", () => moveReplay(1));
 $("replay-previous-turn").addEventListener("click", () => moveReplay(-1, true));
 $("replay-next-turn").addEventListener("click", () => moveReplay(1, true));
+$("replay-deductions").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-replay-position]");
+  if (!button || !replayMode) return;
+  $("replay-position").value = button.dataset.replayPosition;
+  loadReplay();
+});
 for (const id of ["replay-position", "replay-player", "replay-manual", "replay-omniscient"]) {
   $(id).addEventListener("change", loadReplay);
 }

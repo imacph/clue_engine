@@ -50,8 +50,14 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
         contains: (value) => classes.has(value),
         toggle(value, enabled) { if (enabled) classes.add(value); else classes.delete(value); },
       },
-      append(...children) { this.children.push(...children); },
-      replaceChildren(...children) { this.children = children; },
+      append(...children) {
+        for (const child of children) child.parentElement = this;
+        this.children.push(...children);
+      },
+      replaceChildren(...children) {
+        for (const child of children) child.parentElement = this;
+        this.children = children;
+      },
       contains() { return false; },
       focus() {},
       setAttribute(name, value) { this[name] = value; },
@@ -132,7 +138,7 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
         currentState = {
           notebook_mode: "manual", notebook_revision: 0, matrix: [],
           notebook_clauses: [{ id: 1, kind: "refute", holder: 1, cards: [0, 7, 12],
-            status: "unresolved", excluded_cards: [] }],
+            active_cards: [0, 7, 12], status: "unresolved", excluded_cards: [] }],
         };
         renderState = () => {};
         globalThis.fetch = async (path, options) => {
@@ -145,7 +151,9 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
         };
         changeClause(1, (latest) => ({ excluded_cards: [...latest.excluded_cards, 0] }));
         changeClause(1, (latest) => ({ excluded_cards: [...latest.excluded_cards, 7] }));
-        notebookQueue.then(() => currentState.notebook_clauses[0].excluded_cards);
+        notebookQueue.then(() => ({
+          excluded: currentState.notebook_clauses[0].excluded_cards, error: $("error-message").textContent,
+        }));
       `, context);
     },
     async fullscreen(api) {
@@ -324,8 +332,174 @@ test("in-app confirmation accepts, cancels and refuses overlapping dialogs", asy
 });
 
 test("queued clause edits apply to the latest notebook state", async () => {
-  const excluded = await frontend().queueExclusions();
-  assert.deepEqual(Array.from(excluded), [0, 7]);
+  const result = await frontend().queueExclusions();
+  assert.deepEqual(Array.from(result.excluded), [0, 7]);
+  assert.equal(result.error, "");
+});
+
+test("clause draft selection updates cells without rebuilding the notebook", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9], notebook_clauses: [],
+    matrix: [
+      { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "?", "?"], editable: [true, true, true] },
+      { id: 7, name: "Dagger", type: "weapon", marks: ["?", "?", "?"], editable: [true, true, true] },
+      { id: 12, name: "Kitchen", type: "room", marks: ["?", "?", "?"], editable: [true, true, true] },
+    ],
+  };
+  ui.renderNotebook(state);
+  ui.evaluate("currentState = state; startClauseEntry()");
+  const notebook = ui.element("notebook");
+  function descendants(node) { return [node, ...node.children.flatMap(descendants)]; }
+  notebook.querySelector = (selector) => {
+    const match = selector.match(/data-notebook-card="(\d+)".*data-notebook-holder="(\d+)"/);
+    return match && descendants(notebook).find((node) =>
+      node.dataset.notebookCard === match[1] && node.dataset.notebookHolder === match[2]);
+  };
+  const find = (card, holder) => notebook.querySelector(
+    `[data-notebook-card="${card}"][data-notebook-holder="${holder}"]`
+  );
+  const table = notebook.children[0];
+  const oldCell = find(0, 1);
+  const newCell = find(0, 2);
+  ui.evaluate("selectClauseCell(0, 1)");
+  assert.equal(oldCell["aria-pressed"], "true");
+  assert.match(oldCell["aria-label"], /Selected for clause/);
+  assert.ok(oldCell.parentElement.classList.contains("clause-draft-selected"));
+  ui.evaluate("selectClauseCell(7, 2)");
+  assert.equal(oldCell["aria-pressed"], "false");
+  assert.equal(newCell["aria-pressed"], "true");
+  assert.equal(find(7, 2)["aria-pressed"], "true");
+  assert.ok(!oldCell.parentElement.classList.contains("clause-draft-selected"));
+  assert.equal(notebook.children[0], table);
+});
+
+test("manual notebook updates cells immediately and saves rapid edits in order", async () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9], notebook_revision: 0,
+    matrix: [{ id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "?", "?"],
+      editable: [true, true, true] }],
+    notebook_clauses: [],
+    notebook_focus: { turn: 1, actor: 1, kind: "suggest", cards: [0], shown: { holder: 1, card: 0 } },
+  };
+  ui.renderNotebook(state);
+  ui.evaluate("currentState = state");
+  const notebook = ui.element("notebook");
+  function descendants(node) {
+    return [node, ...node.children.flatMap(descendants)];
+  }
+  notebook.querySelector = (selector) => {
+    const match = selector.match(/data-notebook-card="(\d+)".*data-notebook-holder="(\d+)"/);
+    return match && descendants(notebook).find((node) =>
+      node.dataset.notebookCard === match[1] && node.dataset.notebookHolder === match[2]);
+  };
+  const button = notebook.querySelector('[data-notebook-card="0"][data-notebook-holder="1"]');
+  const table = notebook.children[0];
+  const result = await ui.evaluate(`(async () => {
+    const calls = [];
+    let release;
+    let serverMark = "?";
+    globalThis.fetch = async (path, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body.mark);
+      if (calls.length === 1) await new Promise((resolve) => { release = resolve; });
+      serverMark = body.mark;
+      return { ok: true, json: async () => ({
+        matrix: [{ ...state.matrix[0], marks: ["?", serverMark, "?"] }],
+        notebook_clauses: [], notebook_revision: calls.length,
+      }) };
+    };
+    changeNotebook(0, 1);
+    const first = notebookDisplayMatrix(currentState)[0].marks[1];
+    changeNotebook(0, 1);
+    changeNotebook(0, 1);
+    const immediate = notebookDisplayMatrix(currentState)[0].marks[1];
+    await Promise.resolve();
+    const beforeRelease = calls.length;
+    release();
+    await notebookQueue;
+    return { first, immediate, beforeRelease, calls, saved: currentState.matrix[0].marks[1] };
+  })()`);
+  assert.equal(result.first, "+");
+  assert.equal(result.immediate, "?");
+  assert.equal(result.beforeRelease, 1);
+  assert.deepEqual(Array.from(result.calls), ["+", "-", "?"]);
+  assert.equal(result.saved, "?");
+  assert.equal(notebook.children[0], table);
+  assert.equal(notebook.querySelector('[data-notebook-card="0"][data-notebook-holder="1"]'), button);
+  assert.equal(button.textContent, "?");
+  assert.match(button["aria-label"], /unknown; turn owner, acting now; current suggestion; visibly shown/);
+});
+
+test("failed notebook save reverts the optimistic mark and reports the error", async () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9], notebook_revision: 0,
+    matrix: [{ id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "?", "?"],
+      editable: [true, true, true] }],
+    notebook_clauses: [],
+  };
+  ui.renderNotebook(state);
+  const result = await ui.evaluate(`(async () => {
+    currentState = state;
+    let release;
+    globalThis.fetch = async () => {
+      await new Promise((resolve) => { release = resolve; });
+      throw new Error("offline");
+    };
+    changeNotebook(0, 1);
+    const optimistic = notebookDisplayMatrix(currentState)[0].marks[1];
+    await Promise.resolve();
+    release();
+    await notebookQueue;
+    return { optimistic, reverted: notebookDisplayMatrix(currentState)[0].marks[1],
+      error: $("error-message").textContent, pending: pendingNotebookEdits.length };
+  })()`);
+  assert.equal(result.optimistic, "+");
+  assert.equal(result.reverted, "?");
+  assert.equal(result.pending, 0);
+  assert.match(result.error, /offline/);
+});
+
+test("pending notebook edits remain visible across refreshes and failed earlier saves", async () => {
+  const ui = frontend();
+  const result = await ui.evaluate(`(async () => {
+    const matrix = [{ id: 0, marks: ["?", "?", "?"], editable: [true, true, true] }];
+    currentState = { notebook_mode: "manual", notebook_revision: 0, matrix, notebook_clauses: [] };
+    let releaseFirst;
+    let releaseSecond;
+    let calls = 0;
+    globalThis.fetch = async (path, options) => {
+      const body = JSON.parse(options.body);
+      calls++;
+      if (calls === 1) {
+        await new Promise((resolve) => { releaseFirst = resolve; });
+        throw new Error("offline");
+      }
+      await new Promise((resolve) => { releaseSecond = resolve; });
+      return { ok: true, json: async () => ({
+        matrix: [{ ...matrix[0], marks: ["?", body.mark, "?"] }],
+        notebook_clauses: [], notebook_revision: 1,
+      }) };
+    };
+    changeNotebook(0, 1);
+    changeNotebook(0, 1);
+    await Promise.resolve();
+    acceptState({ notebook_mode: "manual", notebook_revision: 0, matrix, notebook_clauses: [] });
+    const afterRefresh = notebookDisplayMatrix(currentState)[0].marks[1];
+    releaseFirst();
+    while (!releaseSecond) await Promise.resolve();
+    const afterFailure = notebookDisplayMatrix(currentState)[0].marks[1];
+    const error = $("error-message").textContent;
+    releaseSecond();
+    await notebookQueue;
+    return { afterRefresh, afterFailure, error, saved: currentState.matrix[0].marks[1] };
+  })()`);
+  assert.equal(result.afterRefresh, "-");
+  assert.equal(result.afterFailure, "-");
+  assert.match(result.error, /offline/);
+  assert.equal(result.saved, "-");
 });
 
 test("board workspace tabs leave the board and notebook independent", () => {
@@ -428,39 +602,35 @@ test("clause entry selects notebook cells, validates, saves and preserves exclus
   ]);
 });
 
-test("clause highlighting can select overlapping clauses and clear them independently", () => {
+test("clause selection replaces the previous selection and can be cleared", () => {
   const ui = frontend();
   const values = ui.evaluate(`(() => {
-    currentState = { notebook_clauses: [
-      { id: 1, holder: 1, active_cards: [0, 7] },
-      { id: 2, holder: 1, active_cards: [0, 12] },
-      { id: 3, holder: 0, active_cards: [0] },
-    ] };
-    const result = [Array.from(selectedClauses)];
-    selectCellClauses(0, 1); result.push(Array.from(selectedClauses));
-    toggleClauseHighlight(1); result.push(Array.from(selectedClauses));
-    toggleClauseHighlight(2); result.push(Array.from(selectedClauses));
+    const result = [selectedClause];
+    toggleClauseSelection(1); result.push(selectedClause);
+    toggleClauseSelection(2); result.push(selectedClause);
+    toggleClauseSelection(2); result.push(selectedClause);
     return result;
   })()`);
-  assert.deepEqual(Array.from(values, (value) => Array.from(value)), [[], [1, 2], [2], []]);
+  assert.deepEqual(Array.from(values), [null, 1, 2, null]);
 });
 
-test("clause highlights do not carry into another perspective or resolved clause", () => {
+test("clause selection does not carry into another perspective or resolved clause", () => {
   const ui = frontend();
   const values = ui.evaluate(`(() => {
     const state = { selected_player: 0, notebook_mode: "automatic", notebook_clauses: [
       { id: 1, active_cards: [0] }, { id: 2, active_cards: [7] },
     ] };
     updateClausePerspective(state);
-    selectedClauses = [1, 2];
+    selectedClause = 1;
     state.notebook_clauses[0].active_cards = [];
     updateClausePerspective(state);
-    const remaining = Array.from(selectedClauses);
+    const remaining = selectedClause;
+    selectedClause = 2;
     state.selected_player = 1;
     updateClausePerspective(state);
-    return [remaining, Array.from(selectedClauses)];
+    return [remaining, selectedClause];
   })()`);
-  assert.deepEqual(Array.from(values, (value) => Array.from(value)), [[2], []]);
+  assert.deepEqual(Array.from(values), [null, null]);
 });
 
 test("request errors retain HTTP status for JSON, HTML, and empty responses", async () => {
@@ -577,21 +747,82 @@ test("notebook renders overlapping clause references without replacing marks", (
     [4, 4, 4],
   );
   const links = all.filter((node) => node.dataset.clauseCard);
-  assert.equal(links.length, 2);
-  assert.match(links[0]["aria-label"], /clauses 1, 2/);
+  assert.equal(links.length, 3);
+  assert.match(links[0]["aria-label"], /clause 1/);
+  assert.match(links[1]["aria-label"], /clause 2/);
+  assert.notEqual(links[0].style["--clause-color"], links[1].style["--clause-color"]);
+  assert.equal(links[0].style["--clause-color"], links[2].style["--clause-color"]);
+  assert.equal(links[0]["aria-pressed"], "false");
   const mark = all.find((node) => node.dataset.notebookCard === "0" && node.dataset.notebookHolder === "1");
   assert.equal(mark.textContent, "+");
-  ui.evaluate("selectedClauses = [1, 2]");
+  ui.evaluate("selectedClause = 1");
   ui.renderNotebook(notebookState);
-  const bands = descendants(ui.element("notebook")).filter((node) => node.className === "clause-highlight-band");
-  assert.equal(bands.length, 2);
-  assert.match(bands[0].style["--clause-colors"], /hsl\(0 75% 45%\).*hsl\(180 75% 45%\)/);
-  assert.match(bands[1].style["--clause-colors"], /hsl\(0 75% 45%\)/);
+  const selected = descendants(ui.element("notebook"));
+  const selectedLinks = selected.filter((node) => node.dataset.clauseCard);
+  assert.equal(selectedLinks[0]["aria-pressed"], "true");
+  assert.equal(selectedLinks[1]["aria-pressed"], "false");
+  assert.equal(selectedLinks[0].style["--clause-color"], links[0].style["--clause-color"]);
+  assert.equal(selected.filter((node) => node.classList.contains("clause-linked-selected")).length, 2);
   notebookState.notebook_clauses[0].active_cards = [];
   ui.renderNotebook(notebookState);
   const remaining = descendants(ui.element("notebook")).filter((node) => node.dataset.clauseCard);
   assert.equal(remaining.length, 1);
   assert.match(remaining[0]["aria-label"], /clause 2/);
+  assert.equal(remaining[0].style["--clause-color"], links[1].style["--clause-color"]);
+});
+
+test("clause list colors match notebook colors and selection survives filtering", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9],
+    matrix: [{ id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "?", "?"],
+      editable: [true, true, true] }],
+    notebook_clauses: [
+      { id: 7, holder: 1, actor: 0, kind: "refute", cards: [0], active_cards: [0], excluded_cards: [], status: "unresolved" },
+      { id: 3, holder: 1, actor: 1, kind: "refute", cards: [0], active_cards: [0], excluded_cards: [], status: "unresolved" },
+      { id: 2, holder: 0, actor: 0, kind: "refute", cards: [0], active_cards: [], excluded_cards: [], status: "resolved" },
+    ],
+  };
+  ui.renderNotebook(state);
+  ui.evaluate("selectedClause = 7");
+  ui.evaluate("renderClauses(state)");
+  const items = ui.element("clauses").children;
+  assert.ok(items[0].classList.contains("clause-selected"));
+  assert.equal(items[0].children[0]["aria-pressed"], "true");
+  assert.equal(items[2].children[0].disabled, true);
+  const colors = items.map((item) => item.style["--clause-color"]);
+  const notebookColors = ui.element("notebook").children[0].children[1].children[1].children[2]
+    .children[1].children.map((indicator) => indicator.style["--clause-color"]);
+  assert.deepEqual(notebookColors, colors.slice(0, 2));
+  assert.notEqual(colors[0], colors[1]);
+  assert.equal(colors[1], colors[2]);
+  ui.element("clause-actor").value = "0";
+  ui.evaluate("renderClauses(state)");
+  assert.equal(ui.element("clauses").children[0].style["--clause-color"], colors[0]);
+  assert.equal(ui.evaluate("selectedClause"), 7);
+});
+
+test("clause colors stay distinct for the first two palette cycles in a column", () => {
+  const ui = frontend();
+  const colors = ui.evaluate(`(() => {
+    const clauses = Array.from({ length: 24 }, (_, id) => ({ id, holder: 0 }));
+    return clauses.map((clause) => clauseColor(clause, clauses));
+  })()`);
+  assert.equal(new Set(colors).size, 24);
+});
+
+test("replay deduction entries name the player, card and jump position", () => {
+  const ui = frontend();
+  ui.evaluate(`renderReplayDeductions([
+    { player: 0, card: 0, step: 0, position: 0 },
+    { player: 1, card: 7, step: 4, position: 6 },
+  ])`);
+  const items = ui.element("replay-deductions").children;
+  assert.equal(items[0].textContent, "Player 1: Miss Scarlet · start");
+  assert.equal(items[1].textContent, "Player 2: Dagger · action 4");
+  assert.equal(items[1].dataset.replayPosition, "6");
+  ui.evaluate("renderReplayDeductions([])");
+  assert.equal(ui.element("replay-deductions").textContent, "No envelope cards inferred yet.");
 });
 
 test("notebook highlights turn, actor, cards and visible reveal without disturbing clauses", () => {

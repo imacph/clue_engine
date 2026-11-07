@@ -30,7 +30,13 @@ from ..models import (
     Reveal,
     Suggest,
 )
-from ..observations import EventKind, PlayerView, is_incorrect_accusation
+from ..observations import (
+    Event,
+    EventKind,
+    PlayerView,
+    is_incorrect_accusation,
+    view_for,
+)
 from ..policies import POLICY_NAMES, CustomPolicy, make_policy, policies_for_players
 from ..presentation import (
     format_clauses,
@@ -62,6 +68,9 @@ class WebGame:
     notebook_history: list[dict[str, Any]] = field(default_factory=list)
     abandoned: bool = False
     imported_replay: Replay | None = None
+    replay_deduction_step: int = -1
+    replay_deduction_events: tuple[Event, ...] = ()
+    replay_deductions: list[dict[str, int]] = field(default_factory=list)
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -322,6 +331,48 @@ def _board_payload(turn: BoardTurn, turn_player: int | None) -> dict[str, Any]:
     }
 
 
+def _initial_notebook_mark(view: PlayerView, holder: int, card_id: int) -> str:
+    if holder == view.player:
+        return "+" if card_id in view.own_hand else "-"
+    return "-" if card_id in view.own_hand else "?"
+
+
+def _replay_deductions(
+    game: WebGame, replay: Replay, timeline: list[tuple[int, int]], target_step: int,
+) -> list[dict[str, int]]:
+    positions: dict[int, int] = {}
+    for position, (step, _) in enumerate(timeline):
+        positions.setdefault(step, position)
+    if game.replay_deduction_step < 0:
+        game.replay_deduction_events = tuple(
+            Event(EventKind.EXPOSE, seat, card_id=card)
+            for seat, card in enumerate(replay.initial.public_cards)
+        )
+    relevant = {EventKind.PASS, EventKind.REFUTE, EventKind.SHOW, EventKind.EXPOSE,
+                EventKind.ACCUSE, EventKind.END_TURN}
+    sizes = tuple(len(hand) for hand in replay.initial.player_hands)
+    for step in range(game.replay_deduction_step + 1, target_step + 1):
+        events = replay.history[step - 1].events if step else ()
+        replay_events = game.replay_deduction_events + events
+        deductions = list(game.replay_deductions)
+        if step == 0 or any(event.kind in relevant for event in events):
+            for player, hand in enumerate(replay.initial.player_hands):
+                view = view_for(replay_events, player, hand, hand_sizes=sizes)
+                knowledge = knowledge_for(view, len(sizes))
+                for card_id in CARDS_BY_ID:
+                    if (knowledge.mark_of(knowledge.envelope, card_id) is Mark.HELD
+                            and not any(item["player"] == player and item["card"] == card_id
+                                        for item in deductions)):
+                        deductions.append({
+                            "player": player, "card": card_id,
+                            "step": step, "position": positions[step],
+                        })
+        game.replay_deduction_events = replay_events
+        game.replay_deductions = deductions
+        game.replay_deduction_step = step
+    return [item for item in game.replay_deductions if item["step"] <= target_step]
+
+
 def _serialize_state(
     game: WebGame, query: Any, *, replay_snapshot: Any = None, replay_player: int | None = None,
 ) -> dict[str, Any]:
@@ -352,11 +403,9 @@ def _serialize_state(
     def card_mark(holder: int, card_id: int) -> str:
         if knowledge is not None:
             return marks[knowledge.mark_of(holder, card_id)]
-        if holder == view.player:
-            return "+" if card_id in view.own_hand else "-"
-        if card_id in view.own_hand:
-            return "-"
-        return game.notebook_marks.get((holder, card_id), "?")
+        return game.notebook_marks.get(
+            (holder, card_id), _initial_notebook_mark(view, holder, card_id),
+        )
 
     matrix = [
         {
@@ -364,11 +413,7 @@ def _serialize_state(
             "name": card.name,
             "type": card_type.name.lower(),
             "marks": [card_mark(holder, card.id) for holder in range(snapshot.num_players + 1)],
-            "editable": [
-                game.notebook_mode == "manual"
-                and holder != view.player and card.id not in view.own_hand
-                for holder in range(snapshot.num_players + 1)
-            ],
+            "editable": [game.notebook_mode == "manual" for _ in range(snapshot.num_players + 1)],
         }
         for card_type, cards in CARDS.items()
         for card in cards
@@ -930,6 +975,10 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                     status=f"Replay: action {step} of {len(replay.history)}.",
                     board_rules=asdict(engine.state.board_rules) if engine.state.board else None,
                     game_rules=asdict(engine.state.game_rules),
+                    deduction_timeline=[
+                        item for item in _replay_deductions(game, replay, timeline, step)
+                        if show_all or item["player"] == player
+                    ],
                 )
                 for card in result["matrix"]:
                     card["editable"] = [False] * len(card["editable"])
@@ -967,11 +1016,10 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 return jsonify(error="A manual notebook requires a player view."), 409
             if not 0 <= holder <= snapshot.num_players:
                 return jsonify(error="Holder must identify a player or the envelope."), 400
-            if holder == view.player or card_id in view.own_hand:
-                return jsonify(error="Facts from your hand cannot be edited."), 409
             key = (holder, card_id)
-            if game.notebook_marks.get(key, "?") != mark:
-                if mark == "?":
+            initial = _initial_notebook_mark(view, holder, card_id)
+            if game.notebook_marks.get(key, initial) != mark:
+                if mark == initial:
                     game.notebook_marks.pop(key, None)
                 else:
                     game.notebook_marks[key] = mark

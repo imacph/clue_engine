@@ -1,5 +1,28 @@
 # Changelog
 
+## Desktop 0.4.0 / App 0.5.2 / API 0.6.1 - 2026-11-07
+
+### Added
+
+- Show inferred envelope discoveries in replay, with links to their first
+  positions and player-perspective privacy unless Reveal all is enabled.
+
+### Changed
+
+- Give each clause colored notebook indicators and a matching list marker;
+  select one clause at a time to emphasize its linked cells.
+- Allow every manual notebook cell to be edited while retaining hand-derived
+  initial marks, including in exported and imported replay notes.
+- Reduce control movement between phases and enlarge clause indicator targets.
+
+### Fixed
+
+- Update notebook marks immediately while saving in order, preserving focus
+  and avoiding unnecessary notebook and card-panel redraws. Report and revert
+  failed edits unless superseded by a later edit.
+- Update clause draft selections in place and avoid unrelated panel redraws
+  when selecting or saving clauses.
+
 ## Desktop 0.4.0 / App 0.5.1 / API 0.6.0 - 2026-11-07
 
 ### Added

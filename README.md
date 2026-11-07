@@ -14,8 +14,8 @@ No license granting redistribution rights is provided.
 ## Versions
 
 <!-- component-versions:start -->
-The game API and Python distribution are **0.6.0**, the shared browser/desktop
-frontend is **0.5.1**, and the Windows desktop wrapper is **0.4.0**.
+The game API and Python distribution are **0.6.1**, the shared browser/desktop
+frontend is **0.5.2**, and the Windows desktop wrapper is **0.4.0**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -290,11 +290,12 @@ with `turn` progression. When `waiting_for_turn` is true in a state response,
 acknowledges the completed turn without executing another game action.
 
 The browser and Windows player setup defaults to a **Manual** detective
-notebook. Facts from your own hand are filled in and cannot be changed; every
-other cell begins unknown. Activate a cell with the mouse, touch, Enter, or
+notebook. Facts from your own hand are filled in initially; every
+other cell begins unknown. Any cell can be changed. Activate it with the mouse, touch, Enter, or
 Space to cycle through unknown (`?`), held (`+`), and not held (`-`). Record
 shown cards and other deductions yourself; arrow keys move between editable
-cells. Your notes do not affect the bots.
+cells. Marks appear immediately while they save; a failed save is reported and
+reverted unless a later edit supersedes it. Your notes do not affect the bots.
 The right-side **Help** tab summarizes notebook and clause controls.
 In the browser and Windows app, the notebook highlights the turn owner's column
 in blue, the acting player's column in gold, and the cards in the current
@@ -312,12 +313,13 @@ column instead for an incorrect accusation, where at least one card is not in
 the envelope. Selecting a different column moves the whole clause to that
 holder; selecting a different card of the same type replaces the previous card.
 Select **Confirm** to save, or **Cancel** to discard the draft. Cell
-marks do not change while entering a clause, and even fixed hand cells can be
-selected. A small dot marks each cell linked to a clause without changing the
-row height. Select the dot to open the **Clauses** tab and highlight every clause
-linked to that cell. Different colors distinguish overlapping clauses, and
-matching colored bars appear on their linked cells and list entries. Use
-**Highlight** or **Clear highlight** in the list to control each clause.
+marks do not change while entering a clause, and any cell can be selected.
+Colored dots identify the clauses linked to each cell, with separate
+dots for overlapping clauses and matching dots in the list. Colors distinguish
+clauses within a column and do not depend on selection or list filters. Select
+a dot to open its clause in the **Clauses** tab, or select a clause heading to
+emphasize its linked cells. Only one clause is selected at a time; select its
+heading again to clear the selection.
 Clause numbers are notebook numbers, not history event numbers.
 You can edit clauses using the same notebook interaction, resolve, reopen, or
 delete them, and independently exclude
@@ -408,6 +410,12 @@ automatic deductions based only on what that player had observed at that point.
 For a human manual notebook, **Original notes** shows the marks and clauses
 actually recorded, including intermediate edits. **Reveal all** additionally
 shows the solution, all hands, and private events. Replay is read-only.
+**Inferred envelope discoveries so far** lists the first replay position at
+which automatic deduction identified each envelope card for the selected player.
+Switch players to review their discoveries, or enable **Reveal all** to show
+everyone's. Select an entry to jump there. These are deductions available from that player's
+observations, not a record of what a human or bot actually noticed; future
+discoveries stay hidden until the replay reaches them.
 
 To reveal an unfinished or action-limited game, open **Game options**, choose
 **End and reveal**, and confirm. **New game** is also in this menu and requires

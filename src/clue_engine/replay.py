@@ -115,8 +115,7 @@ def decode_replay(payload: object) -> Replay:
                 holder, card = _int(note["holder"]), _int(note["card"])
                 if (
                     not 0 <= holder <= len(initial.player_hands)
-                    or holder == human or card not in CARDS_BY_ID
-                    or card in initial.player_hands[human] or note["mark"] not in ("?", "+", "-")
+                    or card not in CARDS_BY_ID or note["mark"] not in ("?", "+", "-")
                 ):
                     raise ValueError("invalid notebook mark")
             elif kind == "clause":

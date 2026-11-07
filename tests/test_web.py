@@ -185,6 +185,49 @@ def test_private_replay_captures_perspectives_and_manual_history(client, monkeyp
     assert post(client, token, "/api/replay/import", record).status_code == 400
 
 
+def test_replay_deduction_timeline_tracks_visible_information_and_hides_future(client, monkeypatch):
+    def scripted(num_players, seed, policy_name):
+        return make_engine(), (
+            ScriptedPolicy(), ScriptedPolicy(Pass()), ScriptedPolicy(Pass()), ScriptedPolicy(Pass()),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step", "notebook_mode": "manual",
+    })
+    assert client.put(
+        "/api/notebook", json={"card_id": 1, "holder": 0, "mark": "?"},
+        headers={"X-CSRF-Token": token},
+    ).status_code == 200
+    assert post(client, token, "/api/action", {
+        "action": "suggest", "suspect_id": 0, "weapon_id": 6, "room_id": 12,
+    }).status_code == 200
+    for _ in range(3):
+        assert post(client, token, "/api/advance", {"step": True}).status_code == 200
+    post(client, token, "/api/replay/end", {"confirmed": True})
+
+    initial = client.get("/api/replay/state?position=0&player=0").get_json()
+    initial_items = initial["deduction_timeline"]
+    assert {"player": 0, "card": 0, "step": 0, "position": 0} in initial_items
+    assert all(item["step"] == 0 for item in initial_items)
+    final = client.get("/api/replay/state?position=5&player=0").get_json()
+    discoveries = final["deduction_timeline"]
+    assert {"player": 0, "card": 6, "step": 4, "position": 5} in discoveries
+    assert {"player": 0, "card": 12, "step": 4, "position": 5} in discoveries
+    player2 = client.get("/api/replay/state?position=5&player=2").get_json()
+    assert all(item["player"] == 2 for item in player2["deduction_timeline"])
+    omniscient = client.get("/api/replay/state?position=5&player=2&omniscient=1").get_json()
+    assert all(item in omniscient["deduction_timeline"] for item in discoveries)
+    assert client.get("/api/replay/state?position=0&player=0").get_json()[
+        "deduction_timeline"
+    ] == initial_items
+    record = client.get("/api/replay/export").get_json()
+    assert post(client, token, "/api/replay/import", record).status_code == 200
+    restored = client.get("/api/replay/state?position=5&player=0").get_json()
+    assert restored["deduction_timeline"] == discoveries
+
+
 @pytest.mark.parametrize("public", [False, True])
 def test_multi_response_activity_and_replay_with_face_up_cards(client, monkeypatch, public):
     def scripted(num_players, seed, policy_name, *, game_rules):
@@ -330,8 +373,8 @@ def test_manual_notebook_starts_with_only_hand_facts_and_persists(client, game_t
         assert row["marks"][0] == ("+" if in_hand else "-")
         for holder in range(1, players + 1):
             assert row["marks"][holder] == ("-" if in_hand else "?")
-            assert row["editable"][holder] == (not in_hand)
-        assert row["editable"][0] is False
+            assert row["editable"][holder] is True
+        assert row["editable"][0] is True
     card_id = next(row["id"] for row in state["matrix"] if row["id"] not in hand)
     edit = {"card_id": card_id, "holder": players, "mark": "+"}
     response = client.put("/api/notebook", json=edit, headers=headers)
@@ -415,13 +458,46 @@ def test_notebook_rejects_invalid_edits_and_preserves_legacy_auto_mode(client):
         {"card_id": free_card, "holder": 1, "mark": "+", "extra": True},
     ):
         assert client.put("/api/notebook", json=invalid, headers=headers).status_code == 400
-    for locked in (
-        {"card_id": free_card, "holder": 0, "mark": "+"},
-        {"card_id": state["hand"][0], "holder": 1, "mark": "+"},
-    ):
-        assert client.put("/api/notebook", json=locked, headers=headers).status_code == 409
     assert client.put("/api/notebook", json=edit).status_code == 403
     assert client.get("/api/state").get_json()["notebook_revision"] == 0
+
+
+def test_manual_notebook_hand_facts_can_be_overridden_and_replayed(client, monkeypatch):
+    def scripted(num_players, seed, policy_name):
+        return make_engine(), (
+            ScriptedPolicy(), ScriptedPolicy(), ScriptedPolicy(), ScriptedPolicy(),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    headers = {"X-CSRF-Token": token}
+    state = post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step", "notebook_mode": "manual",
+    }).get_json()
+    assert all(all(row["editable"]) for row in state["matrix"])
+    assert state["matrix"][1]["marks"] == ["+", "-", "-", "-", "-"]
+    assert state["matrix"][0]["marks"][0] == "-"
+    changes = [(1, 0, "?"), (1, 1, "+"), (0, 0, "?"), (1, 0, "+")]
+    for card, holder, mark in changes:
+        response = client.put(
+            "/api/notebook", json={"card_id": card, "holder": holder, "mark": mark},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert response.get_json()["matrix"][card]["marks"][holder] == mark
+    assert response.get_json()["notebook_revision"] == len(changes)
+    assert post(client, token, "/api/replay/end", {"confirmed": True}).status_code == 200
+    first = client.get("/api/replay/state?position=1&player=0&manual=1").get_json()
+    assert first["matrix"][1]["marks"][0] == "?"
+    last = client.get("/api/replay/state?position=4&player=0&manual=1").get_json()
+    assert last["matrix"][1]["marks"][:2] == ["+", "+"]
+    assert last["matrix"][0]["marks"][0] == "?"
+    record = client.get("/api/replay/export").get_json()
+    assert post(client, token, "/api/replay/import", record).status_code == 200
+    restored = client.get("/api/replay/state?position=3&player=0&manual=1").get_json()
+    assert restored["matrix"][1]["marks"][:2] == ["?", "+"]
+    assert restored["matrix"][0]["marks"][0] == "?"
+    assert not any(restored["matrix"][1]["editable"])
 
 
 def test_manual_notebooks_are_isolated_between_sessions():
