@@ -74,6 +74,7 @@ def decode_replay(payload: object) -> Replay:
                 ],
                 current_player=_int(raw_initial["current_player"]),
                 game_rules=GameRules(**_object(raw_initial.get("game_rules", {}))),
+                public_cards=tuple(_int(card) for card in _array(raw_initial.get("public_cards", []))),
             )
         solution = (initial.solution.suspect_id, initial.solution.weapon_id, initial.solution.room_id)
         if any(card not in CARDS_BY_ID for card in solution) or tuple(

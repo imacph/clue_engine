@@ -72,8 +72,9 @@ enters a room; and `UsePassage()` takes an available passage instead of
 rolling. Entering a room costs one movement step and stops movement; the door
 is not an extra square. The engine enforces blockers, no hallway revisits,
 no same-turn room re-entry, room-specific suggestions, token relocation, and
-summoned-player turns. If movement cannot continue, the player may end at the
-last reachable square. Public board state, rolls, and movements are included in
+summoned-player turns. Players may stop movement before using the entire roll.
+If movement cannot continue, the player may end at the last reachable square.
+Public board state, rolls, and movements are included in
 player views and session snapshots, without exposing future dice or other
 players' hands.
 
@@ -339,9 +340,12 @@ protection as notebook mark edits. State responses include unfiltered
 existing textual `clauses` field remains available.
 
 The wizard offers per-bot presets and custom strategy controls, plus categorized
-optional rules. Reverse refutation order applies to both game types; other new
-movement, suggestion, and accusation options apply only to board games. The
-strategy toolkit score describes the
+optional rules. In either game type, enable face-up starting cards, public
+refutations, responses from every other player, or reverse response order in
+any combination. Face-up mode exposes one randomly selected card per player
+and requires each player to have at least one card. Board games also offer
+suggesting without moving when starting a turn in a room and other movement,
+relocation, and accusation options. The strategy toolkit score describes the
 enabled techniques; it is not a predicted win rate. See the
 [board rules contract](docs/board-rules.md) for rule defaults and effects.
 

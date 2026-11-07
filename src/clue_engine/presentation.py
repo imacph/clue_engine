@@ -41,10 +41,16 @@ def format_event(event: Event, previous: Event | None = None) -> str:
         case EventKind.SHOW:
             if event.card_id is None or event.private_to is None:
                 raise ValueError("SHOW event without a card or recipient")
+            if event.public:
+                return f"{actor} publicly showed {CARDS_BY_ID[event.card_id].name}."
             return (
                 f"{actor} showed {CARDS_BY_ID[event.card_id].name} "
                 f"to Player {event.private_to}."
             )
+        case EventKind.EXPOSE:
+            if event.card_id is None:
+                raise ValueError("EXPOSE event without a card")
+            return f"{actor} started with {CARDS_BY_ID[event.card_id].name} face up."
         case EventKind.END_TURN:
             if previous is not None and (
                 previous.kind is EventKind.ACCUSE and previous.actor == event.actor

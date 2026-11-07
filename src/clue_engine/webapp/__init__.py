@@ -234,18 +234,18 @@ def _activity_payload(events: tuple[Any, ...]) -> dict[str, Any] | None:
             "kind": "reveal" if event.kind is EventKind.SHOW else "refute",
             "actor": event.actor,
             "suggestion_actor": suggestion.actor,
+            "cards": [
+                suggestion.combo.suspect_id,
+                suggestion.combo.weapon_id,
+                suggestion.combo.room_id,
+            ],
         }
         if event.kind is EventKind.SHOW:
             if event.card_id is None or event.private_to is None:
                 raise ValueError("SHOW event without a card or recipient")
             activity["card_id"] = event.card_id
             activity["recipient"] = event.private_to
-        else:
-            activity["cards"] = [
-                suggestion.combo.suspect_id,
-                suggestion.combo.weapon_id,
-                suggestion.combo.room_id,
-            ]
+            activity["public"] = event.public
         return activity
     return None
 

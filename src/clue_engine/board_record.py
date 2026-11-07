@@ -43,12 +43,17 @@ def write_board_record(
         })
     initial = asdict(initial_state)
     board_rules = initial["board_rules"]
-    new_rules = ("early_end", "revisit_hallways", "optional_suggestion", "accuse_in_room")
-    extended = any(board_rules[key] for key in new_rules) or initial_state.game_rules.reverse_refutation
+    new_rules = (
+        "early_end", "revisit_hallways", "optional_suggestion", "accuse_in_room", "stay_to_suggest",
+    )
+    extended = any(board_rules[key] for key in new_rules) or any(
+        asdict(initial_state.game_rules).values()
+    )
     if not extended:
         for key in new_rules:
             del board_rules[key]
         del initial["game_rules"]
+        del initial["public_cards"]
     payload = {
         "version": 3 if extended else 2, "private": True, "initial_state": initial, "history": records,
     }
@@ -180,8 +185,12 @@ def _initial_state(value: object, version: int) -> GameState:
         player_hands=[frozenset(_int(card) for card in _array(hand)) for hand in _array(data["player_hands"])],
         current_player=_int(data["current_player"]),
         board=board_turn,
-        board_rules=BoardRules(**_object(data["board_rules"])) if version >= 2 else BoardRules(),
+        board_rules=(
+            BoardRules(**({"early_end": False} | _object(data["board_rules"])))
+            if version >= 2 else BoardRules(early_end=False)
+        ),
         game_rules=GameRules(**_object(data["game_rules"])) if version >= 3 else GameRules(),
+        public_cards=tuple(_int(card) for card in _array(data.get("public_cards", []))),
     )
 
 
@@ -212,6 +221,9 @@ def _action(value: object) -> Action:
 
 def _event(value: object) -> Event:
     data = _object(value)
+    public = data.get("public", False)
+    if type(public) is not bool:
+        raise ValueError("event public must be true or false")
     return Event(
         kind=EventKind[_str(data["kind"])],
         actor=_int(data["actor"]),
@@ -222,6 +234,7 @@ def _event(value: object) -> Event:
         location=None if data["location"] is None else _location(data["location"]),
         suspect_id=_optional_int(data["suspect_id"]),
         weapon_id=_optional_int(data["weapon_id"]),
+        public=public,
     )
 
 

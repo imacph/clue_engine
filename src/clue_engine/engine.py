@@ -48,6 +48,14 @@ class Engine:
             raise ValueError("a game requires at least two players")
         if not 0 <= state.current_player < len(state.player_hands):
             raise ValueError("current_player must identify an existing player")
+        if state.game_rules.face_up_card:
+            if len(state.public_cards) != len(state.player_hands) or any(
+                card not in state.player_hands[seat]
+                for seat, card in enumerate(state.public_cards)
+            ):
+                raise ValueError("one public card from each hand is required")
+        elif state.public_cards:
+            raise ValueError("public cards require the face-up card rule")
         if state.board is not None:
             if len(state.board.board.seat_suspects) != len(state.player_hands):
                 raise ValueError("board seats must match the player count")
@@ -55,7 +63,10 @@ class Engine:
                 raise ValueError("board games require a separate dice RNG")
         self.state = state
         self._dice_rng = dice_rng
-        self.log: tuple[Event, ...] = ()
+        self.log: tuple[Event, ...] = tuple(
+            Event(EventKind.EXPOSE, seat, card_id=card)
+            for seat, card in enumerate(state.public_cards)
+        )
         self.history: tuple[ActionRecord, ...] = ()
 
     @property
@@ -75,7 +86,10 @@ class Engine:
         """The player who must act next: a pending responder, else the turn owner."""
         if self.is_over:
             return None
-        response = pending(self.log, self.num_players, self.state.game_rules.reverse_refutation)
+        response = pending(
+            self.log, self.num_players, self.state.game_rules.reverse_refutation,
+            self.state.game_rules.all_refute,
+        )
         return response.player if response is not None else self.state.current_player
 
     def legal_actions(self) -> tuple[Action, ...]:
@@ -90,6 +104,7 @@ class Engine:
         return view_for(
             self.log, player, self.state.player_hands[player], self.state.board,
             self.state.game_rules.reverse_refutation, self.state.board_rules,
+            self.state.game_rules.all_refute,
         )
 
     def step(self, action: Action) -> tuple[Event, ...]:
@@ -115,7 +130,9 @@ class Engine:
             case Reveal(card_id=card_id):
                 index = last_suggest_index(self.log)
                 assert index is not None
-                return refutation_events(player, card_id, self.log[index])
+                return refutation_events(
+                    player, card_id, self.log[index], public=self.state.game_rules.public_refutations,
+                )
             case Accuse(combination=combo):
                 accusation = Event(EventKind.ACCUSE, player, combo=combo)
                 if combo == self.state.solution:

@@ -91,10 +91,10 @@ def test_seeded_board_game_reproduces_rolls_independently_of_bot_rng():
     assert first.step(Roll()) == second.step(Roll())
 
 
-def test_exact_roll_orthogonal_steps_and_no_revisits():
+def test_roll_allows_early_stop_and_disallows_revisits():
     engine, _ = make_engine()
     engine.step(Roll())
-    assert EndTurn() not in engine.legal_actions()
+    assert EndTurn() in engine.legal_actions()
     assert Move(Square(8, 25)) not in engine.legal_actions()
     engine.step(Move(Square(7, 25)))
     assert Move(Square(7, 26)) not in engine.legal_actions()

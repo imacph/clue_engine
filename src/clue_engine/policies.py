@@ -49,7 +49,13 @@ class RandomPolicy:
             return self._board_reveal(view, reveals)
         suggestions = tuple(action for action in options if isinstance(action, Suggest))
         if suggestions:
-            return self._board_suggestion(view, knowledge, suggestions)
+            room_id = suggestions[0].combination.room_id
+            recent = self._recent_rooms(view)
+            if not (
+                view.board_rules.stay_to_suggest and Roll() in options
+                and recent and recent[-1] == room_id
+            ):
+                return self._board_suggestion(view, knowledge, suggestions)
         moves = tuple(action for action in options if isinstance(action, Move))
         if moves:
             return self._board_move(view, knowledge, moves)
@@ -280,7 +286,7 @@ class StrategicPolicy(ProbingPolicy):
                 direction = -1 if view.reverse_refutation else 1
                 seat = (view.player + direction * offset) % knowledge.num_players
                 marks = tuple(knowledge.mark_of(seat, card) for card in cards)
-                if Mark.HELD in marks:
+                if Mark.HELD in marks and not view.all_refute:
                     break
                 unknown = tuple(card for card, mark in zip(cards, marks, strict=True) if mark is Mark.UNKNOWN)
                 if unknown:

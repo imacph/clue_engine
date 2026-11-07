@@ -45,12 +45,10 @@
           <p class="eyebrow">Get started</p>
           <h2>New game</h2>
         </div>
+        <button id="replay-import-button" class="button button-quiet" type="button">Import replay</button>
+        <input id="replay-import" type="file" accept=".json,application/json" hidden>
       </div>
       <form id="setup-form" novalidate>
-        <div class="form-actions">
-          <button id="replay-import-button" class="button button-quiet" type="button">Import private replay</button>
-          <input id="replay-import" type="file" accept=".json,application/json" hidden>
-        </div>
         <nav class="wizard-progress" aria-label="New game steps">
           <button type="button" data-setup-step="0">1. Game</button>
           <button type="button" data-setup-step="1">2. Seats</button>
@@ -188,8 +186,13 @@
         <section class="setup-step" data-step="3" aria-labelledby="setup-rules-title" hidden>
           <h3 id="setup-rules-title" tabindex="-1">Rules</h3>
           <fieldset>
-            <legend>Refutation</legend>
-            <label class="check-row"><input type="checkbox" id="rule-reverse-refutation"><span><strong>Reverse response order</strong><small>Responses proceed in reverse seat order; the first player able to refute must still show one card.</small></span></label>
+            <legend>Information and refutation</legend>
+            <div class="setup-rules-grid">
+              <label class="check-row"><input type="checkbox" id="rule-face-up"><span><strong>Face-up starting cards</strong><small>Each player starts with one randomly chosen card visible to everyone.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-public-refutations"><span><strong>Public refutations</strong><small>Every shown refutation card is visible to all players.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-all-refute"><span><strong>Everyone responds</strong><small>Every other player responds, even after someone refutes. Each must show one matching card if able.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-reverse-refutation"><span><strong>Reverse response order</strong><small>Players respond in reverse seat order.</small></span></label>
+            </div>
           </fieldset>
           <p id="card-rules-note" class="hint">The remaining house rules apply to board games only.</p>
           <fieldset id="board-rules-fields">
@@ -206,21 +209,27 @@
             </div>
             <h4>Movement</h4>
             <div class="setup-rules-grid">
-              <label class="check-row"><input type="checkbox" id="rule-early-end"><span><strong>Stop movement early</strong><small>End a turn before using all movement steps.</small></span></label>
-              <label class="check-row"><input type="checkbox" id="rule-revisit"><span><strong>Revisit hallway squares</strong><small>Allow revisiting a hallway square on the same turn.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-passages" checked><span><strong>Allow secret passages</strong><small>Disabling passages may leave players blocked and reach the action limit.</small></span></label>
             </div>
             <h4>Suggestions and relocation</h4>
             <div class="setup-rules-grid">
-              <label class="check-row"><input type="checkbox" id="rule-optional-suggestion"><span><strong>Optional room suggestions</strong><small>End the turn without suggesting after entering a room.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-stay-suggest"><span><strong>Suggest without moving</strong><small>Start a turn in a room and suggest there instead of rolling or taking a passage.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-move-suspect" checked><span><strong>Move named suspect</strong><small>Move the named token to the suggestion room, including unassigned and eliminated characters.</small></span></label>
-              <label class="check-row"><input type="checkbox" id="rule-move-weapon" checked><span><strong>Move named weapon</strong><small>Move the named weapon to the suggestion room.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-summoned" checked><span><strong>Summoned players may suggest</strong><small>A player moved by a suggestion can suggest there on their next turn. Requires suspect movement.</small></span></label>
             </div>
             <h4>Accusations</h4>
             <div class="setup-rules-grid">
               <label class="check-row"><input type="checkbox" id="rule-accuse-room"><span><strong>Accuse from a room only</strong><small>Accusations may name any room, but must be made while in a room.</small></span></label>
             </div>
+            <details class="setup-advanced">
+              <summary>Other board options</summary>
+              <div class="setup-rules-grid">
+                <label class="check-row"><input type="checkbox" id="rule-early-end" checked><span><strong>Stop movement early</strong><small>End a turn before using all movement steps. Enabled by default.</small></span></label>
+                <label class="check-row"><input type="checkbox" id="rule-revisit"><span><strong>Revisit hallway squares</strong><small>Allow revisiting a hallway square on the same turn.</small></span></label>
+                <label class="check-row"><input type="checkbox" id="rule-optional-suggestion"><span><strong>Optional room suggestions</strong><small>End the turn without suggesting after entering a room.</small></span></label>
+                <label class="check-row"><input type="checkbox" id="rule-move-weapon" checked><span><strong>Move named weapon</strong><small>Move the named weapon to the suggestion room.</small></span></label>
+              </div>
+            </details>
           </fieldset>
         </section>
         <section class="setup-step" data-step="4" aria-labelledby="setup-review-title" hidden>

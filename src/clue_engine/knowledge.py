@@ -59,7 +59,7 @@ def knowledge_for(view: PlayerView, num_players: int) -> Knowledge:
                     _set(knowledge, event.actor, card_id, Mark.NOT_HELD)
             case EventKind.REFUTE:
                 knowledge.clauses.append(Clause(event.actor, _require_suggestion(suggested)))
-            case EventKind.SHOW:
+            case EventKind.SHOW | EventKind.EXPOSE:
                 if event.card_id is None:
                     raise ValueError("SHOW event without a card")
                 _set(knowledge, event.actor, event.card_id, Mark.HELD)

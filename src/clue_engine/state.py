@@ -24,6 +24,7 @@ class GameState:
     board: BoardTurn | None = None
     board_rules: BoardRules = DEFAULT_BOARD_RULES
     game_rules: GameRules = DEFAULT_GAME_RULES
+    public_cards: tuple[int, ...] = ()
 
 def deal(rng: random.Random, num_players: int) -> GameState:
     if num_players < 2:

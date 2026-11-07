@@ -18,7 +18,7 @@ reproduced. Card-only mode keeps its current rules and remains the default.
   default assignments must include Miss Scarlet as an active player.
 - **BR-04 — Cards:** Randomly choose one suspect, weapon, and room for the
   solution; deal all remaining cards as evenly as possible. Players keep their
-  hands private.
+  hands private unless an information variant is enabled.
 - **BR-05 — Board:** Use nine rooms, hallways, doors and passages between
   diagonally opposite corner rooms. Use original or appropriately licensed
   artwork and document any topology differences from the reference edition.
@@ -26,8 +26,9 @@ reproduced. Card-only mode keeps its current rules and remains the default.
 ## Movement and suggestions
 
 - **BR-06 — Roll:** On a normal movement turn, roll two dice and move
-  orthogonally through hallway squares, using the rolled total unless entering
-  a room ends movement early. The engine generates and records the roll.
+  orthogonally through hallway squares, up to the rolled total. A player may
+  stop early, and entering a room ends movement. The engine generates and
+  records the roll.
 - **BR-07 — Paths:** A token cannot enter an occupied hallway square, visit the
   same square twice during one turn, or re-enter a room it left during that
   turn. A door is an opening, not an additional square. Entering a room costs
@@ -77,28 +78,38 @@ Any edition-specific display aliases must not change card IDs or old traces.
 
 ## Optional house rules
 
-The standard configuration implements BR-01–16. Board games can opt into
-independent settings for suspect relocation, weapon relocation, summoned-player
-suggestions, secret passages, stopping movement early, revisiting hallway
-squares in one turn, optional room suggestions, and restricting accusations
-to players currently in a room. Room-only accusations may still name any
-room. Disabling suspect relocation leaves all
+The standard configuration implements BR-01–16. Either game type can combine
+these independent information and refutation variants:
+
+- **Face-up starting cards:** One randomly selected card from each player's
+  hand is public from the beginning. Every player must have at least one card.
+- **Public refutations:** Each shown refutation card is visible to everyone.
+- **Everyone responds:** Every other player responds, even after a refutation,
+  and must show one matching card if able; otherwise they pass.
+- **Reverse response order:** Responders proceed in reverse seat order.
+
+Without these variants, starting hands and shown cards are private and the
+first player able to refute ends the response sequence. The automatic notebook
+uses the public information; in manual mode players record their own notes.
+
+Board games can also opt into suggesting from a room at the start of a turn
+instead of moving. Other independent options control suspect relocation,
+weapon relocation, summoned-player suggestions, secret passages, requiring the
+full movement roll, revisiting hallway squares, optional room suggestions, and
+restricting accusations to players currently in a room. Room-only accusations
+may still name any room. Disabling suspect relocation leaves all
 suspect tokens in place, including unassigned and eliminated tokens, and also
 requires summoned-player suggestions to be disabled. Disabling weapon
 relocation leaves weapon tokens in place. Disabling summoned-player suggestions
 still moves suspects but requires the affected player to move normally on their
 next turn. Disabling passages removes passage actions and may leave a player
-blocked until the game's action limit. In either board or card-only games,
-reverse refutation order makes responders proceed in reverse seat order. The
-first player able to refute must still privately show one matching card;
-passing remains mandatory only when no card matches. Standard rules keep the
-original order. Card dealing and private information are unchanged.
+blocked until the game's action limit. Passing remains mandatory only when no
+card matches.
 
 The browser and Windows wizard offer Standard and No relocation presets as well
 as custom settings. Rules are fixed when a game starts and are included in
 version-2 private board records. Extended variants are saved in version-3 board
-records. Version-1 records are replayed with standard rules; version-2 records
-use their original rules and standard defaults for the newer options.
+records. Older board records preserve their recorded movement defaults.
 
 ## Implemented board engine
 

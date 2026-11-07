@@ -163,7 +163,7 @@ function buildPlayerFilters(state) {
   historyKind.replaceChildren(option("all", "All types"));
   for (const [value, label] of [
     ["suggest", "Suggestion"], ["pass", "Pass"], ["refute", "Refutation"],
-    ["show", "Shown card"], ["accuse", "Accusation"], ["end_turn", "End turn"],
+    ["show", "Shown card"], ["expose", "Face-up card"], ["accuse", "Accusation"], ["end_turn", "End turn"],
     ...(state.board ? [
       ["roll", "Dice roll"], ["move", "Movement"], ["passage", "Passage"],
       ["suspect_moved", "Suspect moved"], ["weapon_moved", "Weapon moved"],
@@ -264,7 +264,8 @@ function renderState(state) {
     + (state.waiting_for_turn ? " · Waiting for next turn" : "")
     + ((state.board_rules && Object.entries(state.board_rules).some(([key, value]) =>
       ["move_suspect", "move_weapon", "summoned_suggestion", "secret_passages"].includes(key)
-        ? !value : value)) || state.game_rules?.reverse_refutation
+        ? !value : (key === "early_end" ? !value : value)))
+      || (state.game_rules && Object.values(state.game_rules).some(Boolean))
       ? " · House rules active" : "");
   $("pause-button").textContent = state.paused ? "Resume" : "Pause";
   $("pause-button").disabled = state.is_over || state.limit_reached;
@@ -369,7 +370,10 @@ function boardInstruction(state) {
   }
   const legal = state.legal;
   if (legal.suggest && legal.roll) {
-    return `You were summoned to ${cardName(legal.suggest_room)}. Suggest there, roll to leave`
+    const location = board.summoned_seats.includes(board.turn_player)
+      ? `You were summoned to ${cardName(legal.suggest_room)}.`
+      : `You are in ${cardName(legal.suggest_room)}.`;
+    return `${location} Suggest there, roll to leave`
       + (legal.passage ? ", or take the passage." : ".");
   }
   if (legal.suggest) {
@@ -738,7 +742,8 @@ function renderCardInteraction(state) {
     if (revealIsActive) {
       $("card-interaction-title").textContent = "Latest reveal";
       renderActivityMeta(activity);
-      $("card-interaction-hint").textContent = `Shown to Player ${activity.recipient + 1}.`;
+      $("card-interaction-hint").textContent = activity.public
+        ? "Shown to everyone." : `Shown to Player ${activity.recipient + 1}.`;
       renderMiniCards(focusCards, [activity.card_id], activity.card_id);
     } else {
       $("card-interaction-title").textContent = legal.suggest
@@ -793,7 +798,7 @@ function renderCardInteraction(state) {
     } else if (activity?.kind === "refute") {
       hint = `Player ${activity.actor + 1} refuted Player ${activity.suggestion_actor + 1}'s suggestion.`;
     } else if (activity?.kind === "reveal") {
-      hint = `Shown to Player ${activity.recipient + 1}.`;
+      hint = activity.public ? "Shown to everyone." : `Shown to Player ${activity.recipient + 1}.`;
     }
     if (humanTurn && legal.pass && !legal.reveals.length) {
       hint += " You have no matching card; select Pass below.";

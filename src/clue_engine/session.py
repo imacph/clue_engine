@@ -20,6 +20,17 @@ from .policies import Policy, make_policy, policies_for_players
 from .state import GameState, deal, deal_board
 
 
+def _configure_rules(state: GameState, seed: int, game_rules: GameRules) -> None:
+    if not isinstance(game_rules, GameRules):
+        raise TypeError("game_rules must be GameRules")
+    state.game_rules = game_rules
+    if game_rules.face_up_card:
+        if any(not hand for hand in state.player_hands):
+            raise ValueError("Face-up cards require at least one card per player.")
+        rng = random.Random(f"{seed}:face-up")
+        state.public_cards = tuple(rng.choice(sorted(hand)) for hand in state.player_hands)
+
+
 @dataclass(frozen=True)
 class DebugInfo:
     solution: Combination
@@ -50,7 +61,7 @@ def create_game(
 ) -> tuple[Engine, tuple[Policy, ...]]:
     names = policies_for_players(policy_name, num_players)
     state = deal(random.Random(seed), num_players)
-    state.game_rules = game_rules
+    _configure_rules(state, seed, game_rules)
     engine = Engine(state)
     policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
     return engine, policies
@@ -73,7 +84,7 @@ def create_board_game(
         random.Random(seed), num_players, layout=layout,
         seat_suspects=seat_suspects, weapon_rooms=weapon_rooms, board_rules=board_rules,
     )
-    state.game_rules = game_rules
+    _configure_rules(state, seed, game_rules)
     engine = Engine(state, dice_rng=random.Random(f"{seed}:movement"))
     policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
     return engine, policies

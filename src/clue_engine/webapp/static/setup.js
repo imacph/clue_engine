@@ -36,10 +36,16 @@ window.setupWizard = (() => {
     summoned_suggestion: "rule-summoned", secret_passages: "rule-passages",
     early_end: "rule-early-end", revisit_hallways: "rule-revisit",
     optional_suggestion: "rule-optional-suggestion", accuse_in_room: "rule-accuse-room",
+    stay_to_suggest: "rule-stay-suggest",
+  };
+  const gameRuleIds = {
+    reverse_refutation: "rule-reverse-refutation", public_refutations: "rule-public-refutations",
+    all_refute: "rule-all-refute", face_up_card: "rule-face-up",
   };
   const standardRules = {
     move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true,
-    early_end: false, revisit_hallways: false, optional_suggestion: false, accuse_in_room: false,
+    early_end: true, revisit_hallways: false, optional_suggestion: false, accuse_in_room: false,
+    stay_to_suggest: false,
   };
   const storageKey = "clue-engine-setup-profiles";
   const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
@@ -307,7 +313,9 @@ window.setupWizard = (() => {
       players: count, seat: Number($("seat").value), seed: Number($("seed").value),
       bots: copy(bots.slice(0, count)), progress: $("progress").value,
       max_steps: Number($("max-steps").value), debug: $("debug").checked,
-      game_rules: { reverse_refutation: $("rule-reverse-refutation").checked },
+      game_rules: Object.fromEntries(
+        Object.entries(gameRuleIds).map(([key, id]) => [key, $(id).checked])
+      ),
     };
     if (isBoard()) {
       value.seat_suspects = characters.slice(0, count);
@@ -342,7 +350,9 @@ window.setupWizard = (() => {
         .map(([key, value]) => `${key.replaceAll("_", " ")} ${value ? "on" : "off"}`);
       add("Board rules", changed.length ? changed.join(", ") : "Standard");
     }
-    if (data.game_rules.reverse_refutation) add("Refutation", "Reverse response order");
+    const gameChanges = Object.entries(data.game_rules).filter(([, value]) => value)
+      .map(([key]) => key.replaceAll("_", " "));
+    if (gameChanges.length) add("Game rules", gameChanges.join(", "));
     const progression = { auto: "Automatic", turn: "Turn-by-turn", step: "Step-by-step" };
     add("Progression", `${progression[data.progress]} · action limit ${data.max_steps}`);
     if (data.debug) add("Warning", "Omniscient debug reveals hidden information.");
@@ -377,7 +387,9 @@ window.setupWizard = (() => {
     $("debug").checked = data.debug;
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
     bots = copy(data.bots);
-    $("rule-reverse-refutation").checked = data.game_rules?.reverse_refutation === true;
+    for (const [key, id] of Object.entries(gameRuleIds)) {
+      $(id).checked = data.game_rules?.[key] === true;
+    }
     if (data.board_rules) setRules(data.board_rules);
     updateMode(false);
     updateGameType();
@@ -429,7 +441,7 @@ window.setupWizard = (() => {
     }
     if (data.game_rules !== undefined && (!data.game_rules || typeof data.game_rules !== "object"
       || Array.isArray(data.game_rules) || Object.keys(data.game_rules).some(
-        (key) => key !== "reverse_refutation" || typeof data.game_rules[key] !== "boolean"
+        (key) => !Object.hasOwn(gameRuleIds, key) || typeof data.game_rules[key] !== "boolean"
       ))) throw new Error("Invalid game rules in setup profile.");
   }
 
@@ -567,7 +579,7 @@ window.setupWizard = (() => {
     });
   });
   $("reset-rules").addEventListener("click", () => {
-    $("rule-reverse-refutation").checked = false;
+    for (const id of Object.values(gameRuleIds)) $(id).checked = false;
     setRules(standardRules);
   });
   for (const id of Object.values(ruleIds)) {

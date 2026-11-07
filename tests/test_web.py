@@ -4,7 +4,7 @@ import pytest
 
 from clue_engine.engine import Engine
 from clue_engine.knowledge import Mark, knowledge_for
-from clue_engine.models import Accuse, Combination, EndTurn, Reveal, Suggest
+from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.state import GameState
 from clue_engine.webapp import _automatic_clauses, create_app
 
@@ -131,6 +131,49 @@ def test_private_replay_captures_perspectives_and_manual_history(client, monkeyp
     assert len(restored["notebook_clauses"]) == 1
     record["history"][0]["actor"] = 3
     assert post(client, token, "/api/replay/import", record).status_code == 400
+
+
+@pytest.mark.parametrize("public", [False, True])
+def test_multi_response_activity_and_replay_with_face_up_cards(client, monkeypatch, public):
+    def scripted(num_players, seed, policy_name, *, game_rules):
+        state = make_engine().state
+        state.game_rules = game_rules
+        state.public_cards = (2, 8, 14, 17)
+        return Engine(state), (
+            ScriptedPolicy(Suggest(Combination(0, 7, 13))),
+            ScriptedPolicy(Reveal(7)), ScriptedPolicy(), ScriptedPolicy(Pass()),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    response = post(client, token, "/api/game", {
+        "players": 4, "seat": 2, "progress": "step", "notebook_mode": "manual",
+        "game_rules": {
+            "public_refutations": public, "all_refute": True, "face_up_card": True,
+        },
+    })
+    assert response.status_code == 201
+    assert response.get_json()["game_rules"] == {
+        "reverse_refutation": False, "public_refutations": public,
+        "all_refute": True, "face_up_card": True,
+    }
+    assert len([event for event in response.get_json()["events"] if event["kind"] == "expose"]) == 4
+    assert post(client, token, "/api/advance", {"step": True}).status_code == 200
+    state = post(client, token, "/api/advance", {"step": True}).get_json()
+    assert state["to_move"] == 2
+    assert state["activity"]["cards"] == [0, 7, 13]
+    assert [card["id"] for card in state["legal"]["reveals"]] == [13]
+    assert state["activity"]["kind"] == ("reveal" if public else "refute")
+    assert post(client, token, "/api/action", {"action": "reveal", "card_id": 13}).status_code == 200
+    assert post(client, token, "/api/replay/end", {"confirmed": True}).status_code == 200
+    record = client.get("/api/replay/export").get_json()
+    assert post(client, token, "/api/replay/import", record).status_code == 200
+    initial = client.get("/api/replay/state?position=0&player=3").get_json()
+    assert len([event for event in initial["events"] if event["kind"] == "expose"]) == 4
+    replay = client.get("/api/replay/state?position=3&player=3").get_json()
+    assert len([event for event in replay["events"] if event["kind"] == "show"]) == (
+        2 if public else 0
+    )
 
 
 def test_replay_unlocks_on_game_over_but_not_action_limit(client, monkeypatch):
@@ -512,6 +555,8 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
         "suggestion_actor": 0,
         "card_id": 7,
         "recipient": 0,
+        "cards": [0, 7, 13],
+        "public": False,
     }
     assert "debug_info" in public_state and public_state["debug_info"] is None
     assert "solution" not in public_state

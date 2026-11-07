@@ -43,8 +43,8 @@ def test_structured_board_setup_and_validation():
     state = response.get_json()
     assert state["board"]["turn_player"] == 1
     assert state["board_rules"] == {
-        **config["board_rules"], "early_end": False, "revisit_hallways": False,
-        "optional_suggestion": False, "accuse_in_room": False,
+        **config["board_rules"], "early_end": True, "revisit_hallways": False,
+        "optional_suggestion": False, "accuse_in_room": False, "stay_to_suggest": False,
     }
     assert state["board"]["suspects"][2]["seat"] == 0
 

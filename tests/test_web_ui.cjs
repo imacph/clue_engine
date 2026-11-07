@@ -17,6 +17,22 @@ const setupSource = fs.readFileSync(
 const startup = source.indexOf("\nsetTheme(document.documentElement.dataset.theme);");
 assert.notEqual(startup, -1, "Could not find frontend initialization");
 
+test("room-start suggestion explains whether the player was summoned", () => {
+  const start = source.indexOf("function boardInstruction(state)");
+  const end = source.indexOf("\nfunction roomBounds(", start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({ cardName: () => "Kitchen" });
+  vm.runInContext(source.slice(start, end), context);
+  const state = {
+    board: { turn_player: 0, summoned_seats: [] },
+    human_player: 0, to_move: 0,
+    legal: { suggest: true, roll: true, suggest_room: 12, passage: false },
+  };
+  assert.match(context.boardInstruction(state), /^You are in Kitchen/);
+  state.board.summoned_seats = [0];
+  assert.match(context.boardInstruction(state), /^You were summoned to Kitchen/);
+});
+
 function frontend({ notebook = false, workspace = false, history = false } = {}) {
   const elements = new Map();
   function element() {
@@ -203,6 +219,9 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
       players: { value: "6" }, seat: { value: "0" }, seed: { value: "42" },
       progress: { value: "turn" }, "max-steps": { value: "10000" }, debug: { checked: false },
       "rule-reverse-refutation": { checked: false },
+      "rule-public-refutations": { checked: false },
+      "rule-all-refute": { checked: false },
+      "rule-face-up": { checked: false },
     },
   });
   vm.runInContext(`
@@ -215,6 +234,10 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
     const syncSeats = () => { syncCount++; while (bots.length < Number(fields.players.value)) bots.push("random"); };
     const copy = (value) => JSON.parse(JSON.stringify(value));
     const rules = () => ({ secret_passages: true });
+    const gameRuleIds = {
+      reverse_refutation: "rule-reverse-refutation", public_refutations: "rule-public-refutations",
+      all_refute: "rule-all-refute", face_up_card: "rule-face-up",
+    };
     ${setupSource.slice(start, end)}
   `, context);
   const result = vm.runInContext("payload()", context);

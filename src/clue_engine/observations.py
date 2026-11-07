@@ -20,6 +20,7 @@ class EventKind(Enum):
     PASSAGE = auto()
     SUSPECT_MOVED = auto()
     WEAPON_MOVED = auto()
+    EXPOSE = auto()
 
 @dataclass(frozen=True)
 class Event:
@@ -32,6 +33,7 @@ class Event:
     location: Square | RoomPosition | None = None
     suspect_id: int | None = None
     weapon_id: int | None = None
+    public: bool = False
 
 @dataclass(frozen=True)
 class PlayerView:
@@ -41,11 +43,15 @@ class PlayerView:
     board: BoardTurn | None = None
     reverse_refutation: bool = False
     board_rules: BoardRules = DEFAULT_BOARD_RULES
+    all_refute: bool = False
 
-def refutation_events(refuter: int, refutation_card_id: int, suggest: Event ) -> tuple[Event, ...]:
+def refutation_events(
+    refuter: int, refutation_card_id: int, suggest: Event, *, public: bool = False,
+) -> tuple[Event, ...]:
     return (
         Event(kind=EventKind.REFUTE, actor=refuter),
-        Event(kind=EventKind.SHOW, actor=refuter, card_id=refutation_card_id, private_to=suggest.actor),
+        Event(kind=EventKind.SHOW, actor=refuter, card_id=refutation_card_id,
+              private_to=suggest.actor, public=public),
     )
 
 def view_for(
@@ -53,6 +59,7 @@ def view_for(
     board: BoardTurn | None = None,
     reverse_refutation: bool = False,
     board_rules: BoardRules = DEFAULT_BOARD_RULES,
+    all_refute: bool = False,
 ) -> PlayerView:
     return PlayerView(
         player=player,
@@ -61,15 +68,16 @@ def view_for(
         board=board,
         reverse_refutation=reverse_refutation,
         board_rules=board_rules,
+        all_refute=all_refute,
     )
 
 def visible_to(event: Event, player: int) -> bool:
-    return event.private_to is None or player in (event.private_to, event.actor)
+    return event.public or event.private_to is None or player in (event.private_to, event.actor)
 
 
 def public_events(log: tuple[Event, ...]) -> tuple[Event, ...]:
     """Return only events visible without a player identity."""
-    return tuple(event for event in log if event.private_to is None)
+    return tuple(event for event in log if event.private_to is None or event.public)
 
 
 def is_incorrect_accusation(events: tuple[Event, ...], index: int) -> bool:
@@ -92,6 +100,7 @@ class Pending:
 
 def pending(
     log: tuple[Event, ...], num_players: int, reverse_refutation: bool = False,
+    all_refute: bool = False,
 ) -> Pending | None:
     """Return the next seat that must refute or pass, or None if no response is due.
 
@@ -104,10 +113,13 @@ def pending(
     tail = log[last_suggest + 1:]
     suggester = log[last_suggest].actor
 
-    if any(event.kind is EventKind.REFUTE for event in tail):
+    if not all_refute and any(event.kind is EventKind.REFUTE for event in tail):
         return None
 
-    passed = {event.actor for event in tail if event.kind is EventKind.PASS}
+    passed = {
+        event.actor for event in tail
+        if event.kind is EventKind.PASS or (all_refute and event.kind is EventKind.REFUTE)
+    }
     for offset in range(1, num_players):
         seat = (suggester + (-offset if reverse_refutation else offset)) % num_players
         if seat not in passed:

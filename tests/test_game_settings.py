@@ -41,12 +41,12 @@ def test_suggestion_relocation_can_be_disabled_and_recorded(tmp_path):
     assert engine.state.board.board.weapons == before.weapons
     path = tmp_path / "custom.json"
     write_board_record(path, initial, engine.history)
-    assert json.loads(path.read_text())["version"] == 2
+    assert json.loads(path.read_text())["version"] == 3
     assert read_board_record(path).state == engine.state
 
 
 def test_version_one_board_record_uses_standard_rules(tmp_path):
-    engine = positioned_game(BoardRules())
+    engine = positioned_game(BoardRules(early_end=False))
     initial = deepcopy(engine.state)
     engine.step(Roll())
     engine.step(Move(RoomPosition(12)))

@@ -30,7 +30,10 @@ def legal_actions(state: GameState, log: tuple[Event, ...], player: int) -> tupl
     if is_over(state, log):
         return ()
 
-    response = pending(log, len(state.player_hands), state.game_rules.reverse_refutation)
+    response = pending(
+        log, len(state.player_hands), state.game_rules.reverse_refutation,
+        state.game_rules.all_refute,
+    )
     if response is not None:
         return _response_actions(state, log, player) if response.player == player else ()
 

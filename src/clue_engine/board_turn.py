@@ -93,7 +93,9 @@ def legal_board_actions(
         if isinstance(location, RoomPosition):
             if rules.secret_passages and turn.board.layout.passage_from(location.room_id) is not None:
                 actions += (UsePassage(),)
-            if rules.summoned_suggestion and player in turn.summoned_seats:
+            if rules.stay_to_suggest or (
+                rules.summoned_suggestion and player in turn.summoned_seats
+            ):
                 actions += _ROOM_SUGGESTIONS[location.room_id]
         return actions + accusations
     if turn.phase is BoardPhase.MOVE:
