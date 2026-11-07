@@ -15,7 +15,7 @@ No license granting redistribution rights is provided.
 
 <!-- component-versions:start -->
 The game API and Python distribution are **0.6.0**, the shared browser/desktop
-frontend is **0.6.0**, and the Windows desktop wrapper is **0.4.0**.
+frontend is **0.5.1**, and the Windows desktop wrapper is **0.4.0**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -271,6 +271,8 @@ Profiles are stored in browser local storage or, for Windows, in
 In browser and Windows player games, a completed bot turn waits for **Next
 turn**, giving you time to review its suggestion and responses. Your own
 **End turn** action starts the next seat without another confirmation.
+These actions share the same button, which changes its label when a bot turn
+is ready for review.
 Passes and reveals within a suggestion do not start a new turn; respond when
 prompted. A pending turn confirmation remains in effect if you pause or resume.
 
@@ -298,7 +300,8 @@ In the browser and Windows app, the notebook highlights the turn owner's column
 in blue, the acting player's column in gold, and the cards in the current
 suggestion or accusation.
 An underlined cell marks a card visibly shown to the selected perspective.
-Highlights follow the current turn and replay position without revealing
+While a bot turn awaits **Next turn**, its column and suggestion rows remain
+highlighted for review. Highlights follow the current turn and replay position without revealing
 another player's private cards. During private responses, the acting column is
 highlighted only for the suggester or responder; public and omniscient views
 can highlight it for everyone. The legacy Tk notebook highlights the card rows
@@ -406,8 +409,9 @@ For a human manual notebook, **Original notes** shows the marks and clauses
 actually recorded, including intermediate edits. **Reveal all** additionally
 shows the solution, all hands, and private events. Replay is read-only.
 
-To reveal an unfinished or action-limited game, choose **End and reveal** and
-confirm. This permanently ends that game; an action limit alone does not unlock
+To reveal an unfinished or action-limited game, open **Game options**, choose
+**End and reveal**, and confirm. **New game** is also in this menu and requires
+confirmation. Ending permanently ends that game; an action limit alone does not unlock
 its secrets. **Save private replay** downloads a JSON file, and **Import private
 replay** on the setup screen opens a saved record. Replay files contain every
 hand and the solution even if **Reveal all** was not selected: do not share

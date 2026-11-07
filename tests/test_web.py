@@ -61,7 +61,7 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     assert b'id="action-dialog"' not in response.data
     assert b'id="action-menu-button"' not in response.data
     assert b'id="card-action-buttons"' in response.data
-    assert b'id="end-button"' in response.data
+    assert b'id="turn-button"' in response.data
     assert b'id="pass-button"' in response.data
     assert b'class="game-dashboard"' in response.data
     assert b'data-card-view="all"' in response.data

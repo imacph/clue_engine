@@ -134,7 +134,9 @@ def test_desktop_fullscreen_api_tracks_window_state_and_reports_errors():
 @pytest.mark.parametrize("fail", [False, True])
 def test_desktop_server_is_local_and_stops_after_window(tmp_path, monkeypatch, fail):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    host_platform = sys.platform
+    monkeypatch.setattr(desktop, "sys", SimpleNamespace(platform="win32"))
+    assert sys.platform == host_platform
     monkeypatch.setattr(desktop, "_require_webview2", lambda: None)
     result = {}
 
@@ -184,14 +186,14 @@ def test_release_self_check_exercises_packaged_application():
 
 
 def test_release_self_check_requires_packaged_window_backend(monkeypatch):
-    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(desktop, "sys", SimpleNamespace(frozen=True))
     monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(create_window=None))
     with pytest.raises(RuntimeError, match="window backend"):
         desktop._release_self_check()
 
 
 def test_missing_local_app_data_is_reported(monkeypatch):
-    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(desktop, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(desktop, "_require_webview2", lambda: None)
     monkeypatch.setitem(sys.modules, "webview", SimpleNamespace())
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
@@ -210,7 +212,7 @@ def test_startup_error_reports_the_actual_cause(monkeypatch, reason):
         raise RuntimeError(reason)
 
     monkeypatch.setattr(desktop, "run_desktop", fail)
-    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(desktop, "sys", SimpleNamespace(platform="win32", argv=sys.argv))
     monkeypatch.setattr(desktop.ctypes, "windll", SimpleNamespace(
         user32=SimpleNamespace(MessageBoxW=lambda _owner, message, *_args: messages.append(message)),
     ), raising=False)

@@ -255,11 +255,16 @@
         </div>
         <div id="game-toolbar" class="toolbar">
           <button id="pause-button" class="button button-secondary" type="button">Pause</button>
-          <button id="next-turn-button" class="button button-primary" type="button" hidden>Next turn</button>
+          <button id="turn-button" class="button button-primary" type="button" hidden>Next turn</button>
           <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
           <button id="replay-open" class="button button-secondary" type="button" hidden>Replay</button>
-          <button id="replay-end" class="button button-quiet" type="button">End and reveal</button>
-          <button id="new-game-button" class="button button-quiet" type="button">New game</button>
+          <details class="game-options">
+            <summary class="button button-quiet">Game options</summary>
+            <div class="game-options-menu">
+              <button id="new-game-button" class="button button-quiet" type="button">New game</button>
+              <button id="replay-end" class="button button-danger" type="button">End and reveal</button>
+            </div>
+          </details>
         </div>
       </div>
       <div id="replay-controls" class="replay-controls" hidden>
@@ -317,7 +322,6 @@
             <div class="board-turn-actions">
               <button id="board-roll-button" class="button button-primary" type="button" hidden>Roll dice</button>
               <button id="board-passage-button" class="button button-secondary" type="button" hidden>Take passage</button>
-              <button id="board-end-button" class="button button-secondary" type="button" hidden>End turn</button>
             </div>
           </div>
           <p id="board-instruction" class="board-instruction" aria-live="polite"></p>
@@ -356,7 +360,6 @@
               <div id="card-action-buttons" class="card-action-buttons">
                 <button id="card-suggest-button" class="button button-primary" type="button" disabled>Suggest</button>
                 <button id="card-accuse-button" class="button button-danger" type="button" disabled>Accuse</button>
-                <button id="end-button" class="button button-secondary" type="button" hidden>End turn</button>
                 <button id="pass-button" class="button button-secondary" type="button" hidden>Pass</button>
                 <button id="use-room-button" class="button button-quiet" type="button" hidden>Use current room</button>
                 <button id="clear-cards-button" class="button button-quiet" type="button" hidden>Clear</button>
@@ -450,5 +453,15 @@
     <span class="footer-note">Clue Engine runs on this computer. Do not enable debug mode during a fair game.</span>
     <span class="app-versions">App {{ frontend_version }} · Game API {{ api_version }}{% if desktop_mode %} · Desktop {{ desktop_version }}{% endif %}</span>
   </footer>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <form method="dialog">
+      <h2 id="confirm-title">Confirm action</h2>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button class="button button-secondary" type="submit" value="cancel" autofocus>Cancel</button>
+        <button id="confirm-accept" class="button button-primary" type="submit" value="confirm">Continue</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

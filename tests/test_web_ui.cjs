@@ -298,6 +298,31 @@ test("setup profiles validate and persist in browser and desktop storage", async
   assert.equal(result.calls[1].options.method, "PUT");
 });
 
+test("in-app confirmation accepts, cancels and refuses overlapping dialogs", async () => {
+  const ui = frontend();
+  const dialog = ui.element("confirm-dialog");
+  dialog.open = false;
+  dialog.addEventListener = (name, callback) => { dialog.onclose = callback; };
+  dialog.showModal = () => { dialog.open = true; };
+  dialog.close = (value) => {
+    dialog.open = false;
+    dialog.returnValue = value;
+    dialog.onclose();
+  };
+  const pending = ui.evaluate('confirmAction("Delete it?", { title: "Delete", confirmLabel: "Delete" })');
+  assert.equal(dialog.open, true);
+  assert.equal(ui.element("confirm-title").textContent, "Delete");
+  assert.equal(ui.element("confirm-message").textContent, "Delete it?");
+  assert.equal(ui.element("confirm-accept").textContent, "Delete");
+  assert.equal(await ui.evaluate('confirmAction("Other")'), false);
+  dialog.close("cancel");
+  assert.equal(await pending, false);
+  const accepted = ui.evaluate('confirmAction("Continue?")');
+  dialog.close("confirm");
+  assert.equal(await accepted, true);
+  assert.doesNotMatch(source + setupSource, /\b(?:alert|confirm|prompt)\s*\(/);
+});
+
 test("queued clause edits apply to the latest notebook state", async () => {
   const excluded = await frontend().queueExclusions();
   assert.deepEqual(Array.from(excluded), [0, 7]);
@@ -666,6 +691,37 @@ function state(overrides = {}) {
     ...overrides,
   };
 }
+
+test("one turn button changes action and stays hidden when unavailable", () => {
+  const ui = frontend();
+  const legal = { ...state().legal, end_turn: true };
+  ui.render(state({ legal }));
+  const button = ui.element("turn-button");
+  assert.equal(button.hidden, false);
+  assert.equal(button.textContent, "End turn");
+  ui.render(state({ waiting_for_turn: true, legal: { ...legal, end_turn: false } }));
+  assert.equal(button.hidden, false);
+  assert.equal(button.textContent, "Next turn");
+  ui.render(state({ legal: { ...legal, end_turn: false } }));
+  assert.equal(button.hidden, true);
+});
+
+test("turn button submits the appropriate action for each state", () => {
+  const ui = frontend();
+  const calls = ui.evaluate(`(() => {
+    const calls = [];
+    nextTurn = () => calls.push("next");
+    submitAction = (action) => calls.push(action.action);
+    currentState = { waiting_for_turn: false, legal: { end_turn: true } };
+    useTurnButton();
+    currentState = { waiting_for_turn: true, legal: { end_turn: false } };
+    useTurnButton();
+    currentState = { waiting_for_turn: false, legal: { end_turn: false } };
+    useTurnButton();
+    return calls;
+  })()`);
+  assert.deepEqual(Array.from(calls), ["end_turn", "next"]);
+});
 
 test("a previous-turn reveal does not hide a new room suggestion", () => {
   const ui = frontend();

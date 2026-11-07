@@ -64,6 +64,19 @@ function showError(message) {
   $("error-message").hidden = !message;
 }
 
+function confirmAction(message, { title = "Confirm action", confirmLabel = "Continue" } = {}) {
+  const dialog = $("confirm-dialog");
+  if (dialog.open) return Promise.resolve(false);
+  $("confirm-title").textContent = title;
+  $("confirm-message").textContent = message;
+  $("confirm-accept").textContent = confirmLabel;
+  dialog.returnValue = "";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+    dialog.showModal();
+  });
+}
+
 async function requestJson(path, { method = "GET", body } = {}) {
   const options = { method, headers: {} };
   if (method !== "GET") {
@@ -91,6 +104,11 @@ async function requestJson(path, { method = "GET", body } = {}) {
 
 async function startGame(event) {
   event.preventDefault();
+  const debug = $("debug").checked;
+  if (debug && !await confirmAction("Debug mode reveals every hand, the solution, and private events. Continue?")) {
+    $("debug").checked = false;
+    return;
+  }
   notebookGeneration++;
   notebookQueue = Promise.resolve();
   const version = ++requestVersion;
@@ -107,11 +125,6 @@ async function startGame(event) {
   lastSuggestionRoom = null;
   hadReveal = false;
   hadBoardResponse = false;
-  const debug = $("debug").checked;
-  if (debug && !window.confirm("Debug mode reveals every hand, the solution, and private events. Continue?")) {
-    $("debug").checked = false;
-    return;
-  }
   try {
     const setup = window.setupWizard.payload();
     const state = await requestJson("/api/game", {
@@ -202,7 +215,7 @@ function acceptState(state) {
 }
 
 async function refreshState() {
-  if (refreshing || submitting || replayMode) return;
+  if (refreshing || submitting || replayMode || $("confirm-dialog").open) return;
   refreshing = true;
   const version = requestVersion;
   try {
@@ -222,7 +235,7 @@ async function refreshState() {
 }
 
 function shouldAdvance(state) {
-  return !advancing && !submitting && canAdvanceBot(state);
+  return !advancing && !submitting && !$("confirm-dialog").open && canAdvanceBot(state);
 }
 
 function canAdvanceBot(state) {
@@ -283,7 +296,9 @@ function renderState(state) {
   $("replay-open").hidden = !state.is_over || replayMode;
   $("replay-end").hidden = state.is_over || replayMode;
   $("pause-button").hidden = replayMode;
-  $("next-turn-button").hidden = !state.waiting_for_turn;
+  const turnButton = $("turn-button");
+  turnButton.hidden = replayMode || (!state.waiting_for_turn && !state.legal.end_turn);
+  turnButton.textContent = state.waiting_for_turn ? "Next turn" : "End turn";
   $("next-button").hidden = !(state.paused && canAdvanceBot(state));
   $("viewer-select").value = String(state.selected_player);
   $("viewer-field").hidden = state.mode !== "spectate";
@@ -500,7 +515,6 @@ function renderBoard(state) {
   renderDice(board.dice);
   $("board-roll-button").hidden = !state.legal.roll;
   $("board-passage-button").hidden = !state.legal.passage;
-  $("board-end-button").hidden = !state.legal.end_turn;
 
   const displayLayout = state.board_rules && !state.board_rules.secret_passages
     ? { ...board.layout, passages: [] } : board.layout;
@@ -616,7 +630,7 @@ function renderBoard(state) {
     else if (state.legal.suggest) {
       document.querySelector('[data-card-view="suspect"]').focus({ preventScroll: true });
     } else if (state.legal.end_turn) {
-      $("board-end-button").focus({ preventScroll: true });
+      $("turn-button").focus({ preventScroll: true });
     }
   }
 }
@@ -1510,14 +1524,11 @@ function cardName(id) {
 
 function renderActions(state) {
   const legal = state.legal;
-  $("end-button").hidden = !legal.end_turn;
-  $("end-button").disabled = !legal.end_turn;
   $("pass-button").hidden = !legal.pass;
   $("pass-button").disabled = !legal.pass;
   $("card-action-buttons").hidden = [
     "card-suggest-button",
     "card-accuse-button",
-    "end-button",
     "pass-button",
     "use-room-button",
     "clear-cards-button",
@@ -1553,7 +1564,7 @@ async function submitAction(action) {
 }
 
 async function advanceBot(step) {
-  if (advancing || submitting || !currentState) return;
+  if (advancing || submitting || !currentState || $("confirm-dialog").open) return;
   advancing = true;
   const version = ++requestVersion;
   try {
@@ -1591,7 +1602,7 @@ async function nextTurn() {
   if (!currentState?.waiting_for_turn || advancing || submitting) return;
   const version = ++requestVersion;
   submitting = true;
-  $("next-turn-button").disabled = true;
+  $("turn-button").disabled = true;
   try {
     const state = await requestJson(`/api/next-turn?${selectedFilters()}`, {
       method: "POST", body: {},
@@ -1603,8 +1614,13 @@ async function nextTurn() {
     if (version === requestVersion) showError(error.message);
   } finally {
     submitting = false;
-    $("next-turn-button").disabled = false;
+    $("turn-button").disabled = false;
   }
+}
+
+function useTurnButton() {
+  if (currentState?.waiting_for_turn) nextTurn();
+  else if (currentState?.legal.end_turn) submitAction({ action: "end_turn" });
 }
 
 function newGame() {
@@ -1704,8 +1720,9 @@ function moveReplay(amount, turn = false) {
 
 async function importReplay(file) {
   if (!file) return;
-  if (currentState && !window.confirm("Importing a replay replaces the current game. Continue?")) return;
-  if (!window.confirm("This private replay reveals hands, the solution, and private actions. Continue?")) return;
+  const message = (currentState ? "Importing a replay replaces the current game. " : "")
+    + "This private replay contains hands, the solution, and private actions. Continue?";
+  if (!await confirmAction(message, { title: "Import private replay", confirmLabel: "Import replay" })) return;
   try {
     if (file.size > 8 * 1024 * 1024) throw new Error("Replay file exceeds 8 MB.");
     const data = JSON.parse(await file.text());
@@ -1892,10 +1909,16 @@ if (window.clueOptions.desktop && window.pywebview?.api) initializeFullscreen();
 $("fullscreen-toggle").addEventListener("click", toggleDesktopFullscreen);
 document.addEventListener("keydown", (event) => {
   if (!window.clueOptions.desktop || event.repeat || event.altKey || event.ctrlKey || event.metaKey
-    || event.shiftKey || $("fullscreen-toggle").disabled) return;
+    || event.shiftKey || $("fullscreen-toggle").disabled || $("confirm-dialog").open) return;
   if (event.key === "F11" || (event.key === "Escape" && desktopFullscreen)) {
     event.preventDefault();
     toggleDesktopFullscreen();
+  }
+});
+$("confirm-dialog").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    $("confirm-dialog").close("cancel");
   }
 });
 $("setup-form").addEventListener("submit", startGame);
@@ -1934,7 +1957,7 @@ $("clause-entry").addEventListener("click", () => {
   else startClauseEntry();
 });
 $("cancel-clause").addEventListener("click", cancelClauseEntry);
-$("clauses").addEventListener("click", (event) => {
+$("clauses").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-clause-action]");
   if (!button || !currentState) return;
   const clause = currentState.notebook_clauses.find((item) => item.id === Number(button.dataset.clauseId));
@@ -1955,11 +1978,14 @@ $("clauses").addEventListener("click", (event) => {
         ? latest.excluded_cards.filter((id) => id !== card)
         : [...latest.excluded_cards, card],
     }));
-  } else if (action === "delete" && window.confirm(`Delete clause #${clause.id}?`)) {
+  } else if (action === "delete") {
     if (clauseDraft?.id === clause.id) {
       showError("Finish or cancel editing this clause before deleting it.");
       return;
     }
+    if (!await confirmAction(`Delete clause #${clause.id}?`, {
+      title: "Delete clause", confirmLabel: "Delete clause",
+    })) return;
     saveClause("DELETE", clause.id, undefined, () => {
       selectedClauses = selectedClauses.filter((id) => id !== clause.id);
       renderNotebook(currentState);
@@ -1994,10 +2020,12 @@ $("notebook").addEventListener("keydown", (event) => {
 $("card-suggest-button").addEventListener("click", () => {
   submitAction({ action: "suggest", ...selectedCombination() });
 });
-$("card-accuse-button").addEventListener("click", () => {
-  if (window.confirm("An incorrect accusation eliminates you. Continue?")) {
-    submitAction({ action: "accuse", confirmed: true, ...selectedCombination() });
-  }
+$("card-accuse-button").addEventListener("click", async () => {
+  if (submitting || advancing || !currentState?.legal.accuse) return;
+  const combination = selectedCombination();
+  if (await confirmAction("An incorrect accusation eliminates you. Continue?", {
+    title: "Make accusation", confirmLabel: "Accuse",
+  })) submitAction({ action: "accuse", confirmed: true, ...combination });
 });
 $("clear-cards-button").addEventListener("click", () => {
   clearSelectedCards();
@@ -2017,7 +2045,6 @@ $("use-room-button").addEventListener("click", () => {
 });
 $("board-roll-button").addEventListener("click", () => submitAction({ action: "roll" }));
 $("board-passage-button").addEventListener("click", () => submitAction({ action: "passage" }));
-$("board-end-button").addEventListener("click", () => submitAction({ action: "end_turn" }));
 $("board-zoom-button").addEventListener("click", () => {
   const zoomed = $("board-map-shell").classList.toggle("zoomed");
   $("board-zoom-button").setAttribute("aria-pressed", String(zoomed));
@@ -2073,7 +2100,6 @@ $("board-workspace-tabs").addEventListener("keydown", (event) => {
   switchBoardTab(next);
   $(`board-tab-${next}`).focus();
 });
-$("end-button").addEventListener("click", () => submitAction({ action: "end_turn" }));
 $("pass-button").addEventListener("click", () => submitAction({ action: "pass" }));
 $("card-view-tabs").addEventListener("click", (event) => {
   const button = event.target.closest("[data-card-view]");
@@ -2082,9 +2108,18 @@ $("card-view-tabs").addEventListener("click", (event) => {
   renderHand(currentState);
 });
 $("pause-button").addEventListener("click", togglePause);
-$("next-turn-button").addEventListener("click", nextTurn);
+$("turn-button").addEventListener("click", useTurnButton);
 $("next-button").addEventListener("click", () => advanceBot(true));
-$("new-game-button").addEventListener("click", newGame);
+$("new-game-button").addEventListener("click", async (event) => {
+  event.currentTarget.closest("details").open = false;
+  if (submitting || advancing) {
+    showError("Wait for the current action to finish.");
+    return;
+  }
+  if (await confirmAction("Start a new game and leave the current game?", {
+    title: "New game", confirmLabel: "New game",
+  })) newGame();
+});
 $("replay-open").addEventListener("click", openReplay);
 $("replay-close").addEventListener("click", closeReplay);
 $("replay-export").addEventListener("click", saveReplay);
@@ -2093,9 +2128,15 @@ $("replay-import").addEventListener("change", (event) => {
   importReplay(event.target.files[0]);
   event.target.value = "";
 });
-$("replay-end").addEventListener("click", async () => {
-  if (submitting || advancing) return;
-  if (!window.confirm("End this game permanently and reveal all private information?")) return;
+$("replay-end").addEventListener("click", async (event) => {
+  event.currentTarget.closest("details").open = false;
+  if (submitting || advancing) {
+    showError("Wait for the current action to finish.");
+    return;
+  }
+  if (!await confirmAction("End this game permanently and reveal all private information?", {
+    title: "End and reveal", confirmLabel: "End and reveal",
+  })) return;
   const version = ++requestVersion;
   submitting = true;
   try {

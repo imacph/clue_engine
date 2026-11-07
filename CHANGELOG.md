@@ -1,6 +1,6 @@
 # Changelog
 
-## Desktop 0.4.0 / App 0.6.0 / API 0.6.0 - 2026-11-07
+## Desktop 0.4.0 / App 0.5.1 / API 0.6.0 - 2026-11-07
 
 ### Added
 
@@ -15,6 +15,8 @@
   color-linked highlights, including for overlapping clauses.
 - Give cards-only games more notebook space and move omniscient details into
   an expandable panel that does not cover game controls.
+- Use one turn button for ending a turn and continuing after bot turns. Move
+  game-ending options into a separate menu and use in-app confirmations.
 - Clarify board and desktop documentation, historical baseline limitations,
   and the privacy of generated traces. Remove an unused private trace from
   the current tree; it remains in Git history.
@@ -25,6 +27,10 @@
   surface theme-storage failures without disabling the active theme.
 - Clear omniscient details and clause highlights when changing game or
   perspective so stale information does not remain visible.
+- Keep the completed turn's notebook highlights in place until the next turn
+  is confirmed, while preserving private-card visibility.
+- Isolate the simulated Windows platform in desktop tests so it does not
+  interfere with the host's SSL implementation.
 
 ## Desktop 0.4.0 / App 0.5.0 / API 0.6.0 - 2026-11-07
 

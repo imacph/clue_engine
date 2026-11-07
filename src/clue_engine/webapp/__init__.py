@@ -425,16 +425,33 @@ def _serialize_state(
             ],
         }
     activity_events = snapshot.events if snapshot.debug_info is not None else view.events
-    focus_event, focus_show = notebook_activity(activity_events)
+    review_completed_turn = (
+        game.waiting_for_turn and replay_snapshot is None and not game.abandoned
+        and not snapshot.is_over and not snapshot.limit_reached
+    )
+    if review_completed_turn:
+        if not activity_events or activity_events[-1].kind is not EventKind.END_TURN:
+            raise ValueError("Turn confirmation requires a completed turn.")
+        focus_turn = activity_events[-1].actor
+        focus_actor = focus_turn
+        focus_events = activity_events[:-1]
+    else:
+        focus_turn = snapshot.turn_player
+        focus_actor = snapshot.to_move
+        focus_events = activity_events
+    if review_completed_turn and focus_events and focus_events[-1].kind is EventKind.END_TURN:
+        focus_event, focus_show = None, None
+    else:
+        focus_event, focus_show = notebook_activity(focus_events)
     focus_combo = focus_event.combo if focus_event is not None else None
     notebook_focus = {
         "turn": (
-            snapshot.turn_player
+            focus_turn
             if not snapshot.is_over and not snapshot.limit_reached and not game.abandoned else None
         ),
         "actor": notebook_actor(
-            snapshot.turn_player,
-            snapshot.to_move
+            focus_turn,
+            focus_actor
             if not snapshot.is_over and not snapshot.limit_reached and not game.abandoned else None,
             view.player,
             public_refutations=game.game.game_rules.public_refutations,

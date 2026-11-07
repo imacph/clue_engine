@@ -510,7 +510,9 @@ window.setupWizard = (() => {
     try { rollSeed(); showError(""); } catch (error) { showError(error.message); }
   });
   $("copy-seed").addEventListener("click", async () => {
-    if (!window.confirm("The seed can reveal the deal and solution. Copy it anyway?")) return;
+    if (!await confirmAction("The seed can reveal the deal and solution. Copy it anyway?", {
+      title: "Copy seed", confirmLabel: "Copy seed",
+    })) return;
     try {
       await navigator.clipboard.writeText($("seed").value);
       $("profile-status").textContent = "Seed copied.";
@@ -544,15 +546,17 @@ window.setupWizard = (() => {
       renderPreview();
     }
   });
-  $("apply-bots").addEventListener("click", () => {
+  $("apply-bots").addEventListener("click", async () => {
     const human = $("mode").value === "play" ? Number($("seat").value) : -1;
     const count = Number($("players").value);
     if (bots.slice(0, count).some((bot, i) => i !== human && typeof bot !== "string")
-      && !window.confirm("Replace custom settings for all bots?")) return;
+      && !await confirmAction("Replace custom settings for all bots?", {
+        title: "Replace bot settings", confirmLabel: "Replace settings",
+      })) return;
     for (let i = 0; i < count; i++) if (i !== human) bots[i] = $("all-bots").value;
     renderBots();
   });
-  $("bot-list").addEventListener("change", (event) => {
+  $("bot-list").addEventListener("change", async (event) => {
     const target = event.target;
     if (target.dataset.botSeat !== undefined) {
       const i = Number(target.dataset.botSeat);
@@ -566,7 +570,9 @@ window.setupWizard = (() => {
         `Toolkit: ${score(bots[i])}/100`;
     } else if (target.dataset.copySeat !== undefined && target.value !== "") {
       const i = Number(target.dataset.copySeat);
-      if (typeof bots[i] !== "string" && !window.confirm("Replace this bot's custom settings?")) {
+      if (typeof bots[i] !== "string" && !await confirmAction("Replace this bot's custom settings?", {
+        title: "Replace bot settings", confirmLabel: "Replace settings",
+      })) {
         target.value = "";
         return;
       }
@@ -596,7 +602,9 @@ window.setupWizard = (() => {
       if (!profilesReady) throw new Error("Setup profiles were not loaded; reload before saving.");
       const name = $("profile-name").value.trim();
       if (!name || name.length > 80) throw new Error("Enter a profile name of up to 80 characters.");
-      if (Object.hasOwn(profiles, name) && !window.confirm(`Replace profile "${name}"?`)) return;
+      if (Object.hasOwn(profiles, name) && !await confirmAction(`Replace profile "${name}"?`, {
+        title: "Replace profile", confirmLabel: "Replace profile",
+      })) return;
       if (!Object.hasOwn(profiles, name) && Object.keys(profiles).length >= 100) {
         throw new Error("A maximum of 100 profiles can be saved.");
       }
@@ -628,7 +636,9 @@ window.setupWizard = (() => {
       if (!Object.hasOwn(profiles, oldName)) throw new Error("Choose a saved profile to rename.");
       if (!name || name.length > 80) throw new Error("Enter a new profile name of up to 80 characters.");
       if (name === oldName) throw new Error("Enter a different profile name.");
-      if (Object.hasOwn(profiles, name) && !window.confirm(`Replace profile "${name}"?`)) return;
+      if (Object.hasOwn(profiles, name) && !await confirmAction(`Replace profile "${name}"?`, {
+        title: "Replace profile", confirmLabel: "Replace profile",
+      })) return;
       const next = Object.assign(Object.create(null), profiles);
       next[name] = next[oldName];
       delete next[oldName];
@@ -643,7 +653,9 @@ window.setupWizard = (() => {
       if (!profilesReady) throw new Error("Setup profiles were not loaded; reload before deleting.");
       const name = $("profile-select").value;
       if (!Object.hasOwn(profiles, name)) throw new Error("Choose a saved profile.");
-      if (!window.confirm(`Delete profile "${name}"?`)) return;
+      if (!await confirmAction(`Delete profile "${name}"?`, {
+        title: "Delete profile", confirmLabel: "Delete profile",
+      })) return;
       const next = Object.assign(Object.create(null), profiles);
       delete next[name];
       await persistProfiles(next);
