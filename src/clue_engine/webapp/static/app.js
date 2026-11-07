@@ -17,6 +17,7 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 const activeGameKey = "clue-engine-active-game";
 const $ = (id) => document.getElementById(id);
 let currentState = null;
+let replayMode = false;
 let refreshTimer = null;
 let advancing = false;
 let submitting = false;
@@ -191,7 +192,7 @@ function acceptState(state) {
 }
 
 async function refreshState() {
-  if (refreshing || submitting) return;
+  if (refreshing || submitting || replayMode) return;
   refreshing = true;
   const version = requestVersion;
   try {
@@ -261,10 +262,15 @@ function renderState(state) {
     `Actions: ${state.steps} · Player 1 turns: ${state.player0_turns}`
     + (state.paused ? " · Paused" : "")
     + (state.waiting_for_turn ? " · Waiting for next turn" : "")
-    + (state.board_rules && Object.values(state.board_rules).some((value) => !value)
+    + ((state.board_rules && Object.entries(state.board_rules).some(([key, value]) =>
+      ["move_suspect", "move_weapon", "summoned_suggestion", "secret_passages"].includes(key)
+        ? !value : value)) || state.game_rules?.reverse_refutation
       ? " · House rules active" : "");
   $("pause-button").textContent = state.paused ? "Resume" : "Pause";
   $("pause-button").disabled = state.is_over || state.limit_reached;
+  $("replay-open").hidden = !state.is_over || replayMode;
+  $("replay-end").hidden = state.is_over || replayMode;
+  $("pause-button").hidden = replayMode;
   $("next-turn-button").hidden = !state.waiting_for_turn;
   $("next-button").hidden = !(state.paused && canAdvanceBot(state));
   $("viewer-select").value = String(state.selected_player);
@@ -367,7 +373,8 @@ function boardInstruction(state) {
       + (legal.passage ? ", or take the passage." : ".");
   }
   if (legal.suggest) {
-    return `In ${cardName(legal.suggest_room)}: choose a suspect and weapon in Cards & actions.`;
+    return `In ${cardName(legal.suggest_room)}: choose a suspect and weapon in Cards & actions`
+      + (legal.end_turn ? ", or end your turn." : ".");
   }
   if (legal.moves.length) {
     return "Select a square or use arrow keys.";
@@ -1110,7 +1117,7 @@ function changeNotebook(cardId, holder) {
 
 function updateClauseEntryControls(state) {
   const button = $("clause-entry");
-  button.hidden = state.notebook_mode !== "manual";
+  button.hidden = state.notebook_mode !== "manual" || state.is_replay;
   button.textContent = clauseDraft ? "Confirm" : "Clause";
   button.setAttribute("aria-label", clauseDraft ? "Confirm clause" : "Add clause");
   button.setAttribute("aria-pressed", String(Boolean(clauseDraft)));
@@ -1134,7 +1141,7 @@ function updateClauseEntryControls(state) {
 }
 
 function startClauseEntry(clause = null) {
-  if (!currentState || currentState.notebook_mode !== "manual") return;
+  if (!currentState || currentState.notebook_mode !== "manual" || currentState.is_replay) return;
   if (clauseDraft) {
     showError("Finish or cancel the current clause before editing another.");
     return;
@@ -1254,7 +1261,7 @@ function renderClauses(state) {
     actions.className = "clause-actions";
     for (const [action, label] of [
       ["highlight", clause.id === selectedClause ? "Clear highlight" : "Highlight"],
-      ...(state.notebook_mode === "manual" ? [
+      ...(state.notebook_mode === "manual" && !state.is_replay ? [
         ["edit", "Edit"], ["resolve", clause.status === "resolved" ? "Reopen" : "Resolve"],
         ["delete", "Delete"],
       ] : []),
@@ -1273,7 +1280,7 @@ function renderClauses(state) {
       actions.append(button);
     }
     item.append(heading, description, status);
-    if (state.notebook_mode === "manual") {
+    if (state.notebook_mode === "manual" && !state.is_replay) {
       const candidates = document.createElement("div");
       candidates.className = "clause-actions";
       for (const id of clause.cards) {
@@ -1390,7 +1397,7 @@ function renderDebug(debugInfo) {
   panel.replaceChildren();
   if (!debugInfo) return;
   const solution = debugInfo.solution.map(cardName).join(", ");
-  const lines = [`WARNING: omniscient debug mode is enabled.`, `Solution: ${solution}`];
+  const lines = [`WARNING: omniscient information is visible.`, `Solution: ${solution}`];
   debugInfo.hands.forEach((hand, seat) => {
     lines.push(`Player ${seat + 1} hand: ${hand.map(cardName).join(", ") || "(empty)"}`);
   });
@@ -1501,6 +1508,9 @@ async function nextTurn() {
 }
 
 function newGame() {
+  replayMode = false;
+  $("replay-controls").hidden = true;
+  document.body.classList.remove("replay-active");
   requestVersion++;
   sessionStorage.removeItem(activeGameKey);
   notebookGeneration++;
@@ -1529,6 +1539,95 @@ function newGame() {
   $("game-screen").hidden = true;
   $("setup-screen").hidden = false;
   window.setupWizard.beginFresh();
+}
+
+async function loadReplay() {
+  if (!replayMode) return;
+  const version = ++requestVersion;
+  const params = new URLSearchParams({
+    position: $("replay-position").value,
+    player: $("replay-player").value,
+    manual: $("replay-manual").checked ? "1" : "0",
+    omniscient: $("replay-omniscient").checked ? "1" : "0",
+  });
+  try {
+    const state = await requestJson(`/api/replay/state?${params}`);
+    if (version !== requestVersion || !replayMode) return;
+    currentState = state;
+    $("replay-position").max = String(state.positions - 1);
+    $("replay-manual").disabled = !state.manual_available;
+    if (!state.manual_available) $("replay-manual").checked = false;
+    renderState(state);
+  } catch (error) {
+    if (version === requestVersion) showError(error.message);
+  }
+}
+
+async function openReplay() {
+  if (!currentState?.is_over) return;
+  clauseDraft = null;
+  selectedClause = null;
+  replayMode = true;
+  document.body.classList.add("replay-active");
+  $("replay-controls").hidden = false;
+  $("replay-position").value = "0";
+  $("replay-player").replaceChildren(...Array.from(
+    { length: currentState.num_players }, (_, seat) => option(seat, `Player ${seat + 1}`)
+  ));
+  $("replay-player").value = String(currentState.selected_player);
+  $("replay-manual").checked = false;
+  $("replay-omniscient").checked = false;
+  await loadReplay();
+}
+
+async function closeReplay() {
+  replayMode = false;
+  document.body.classList.remove("replay-active");
+  $("replay-controls").hidden = true;
+  lastRenderedState = null;
+  await refreshState();
+}
+
+function moveReplay(amount, turn = false) {
+  if (!currentState?.is_replay) return;
+  const position = currentState.position;
+  const max = currentState.positions - 1;
+  const target = turn
+    ? (amount < 0
+      ? [...currentState.turns].reverse().find((item) => item < position) ?? 0
+      : currentState.turns.find((item) => item > position) ?? max)
+    : Math.max(0, Math.min(max, position + amount));
+  $("replay-position").value = String(target);
+  loadReplay();
+}
+
+async function importReplay(file) {
+  if (!file) return;
+  if (currentState && !window.confirm("Importing a replay replaces the current game. Continue?")) return;
+  if (!window.confirm("This private replay reveals hands, the solution, and private actions. Continue?")) return;
+  try {
+    if (file.size > 8 * 1024 * 1024) throw new Error("Replay file exceeds 8 MB.");
+    const data = JSON.parse(await file.text());
+    await requestJson("/api/replay/import", { method: "POST", body: data });
+    const state = await requestJson("/api/state");
+    sessionStorage.setItem(activeGameKey, "1");
+    activateGame(state);
+    await openReplay();
+  } catch (error) {
+    showError(`Could not import replay: ${error.message}`);
+  }
+}
+
+async function saveReplay() {
+  try {
+    await requestJson("/api/replay/export");
+    const link = document.createElement("a");
+    link.href = "/api/replay/export";
+    link.download = "clue-private-replay.json";
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } catch (error) { showError(error.message); }
 }
 
 function configureBoardWorkspace(isBoard) {
@@ -1887,6 +1986,38 @@ $("pause-button").addEventListener("click", togglePause);
 $("next-turn-button").addEventListener("click", nextTurn);
 $("next-button").addEventListener("click", () => advanceBot(true));
 $("new-game-button").addEventListener("click", newGame);
+$("replay-open").addEventListener("click", openReplay);
+$("replay-close").addEventListener("click", closeReplay);
+$("replay-export").addEventListener("click", saveReplay);
+$("replay-import-button").addEventListener("click", () => $("replay-import").click());
+$("replay-import").addEventListener("change", (event) => {
+  importReplay(event.target.files[0]);
+  event.target.value = "";
+});
+$("replay-end").addEventListener("click", async () => {
+  if (submitting || advancing) return;
+  if (!window.confirm("End this game permanently and reveal all private information?")) return;
+  const version = ++requestVersion;
+  submitting = true;
+  try {
+    await notebookQueue;
+    const state = await requestJson("/api/replay/end", {
+      method: "POST", body: { confirmed: true },
+    });
+    if (version !== requestVersion) return;
+    acceptState(state);
+    renderState(state);
+    await openReplay();
+  } catch (error) { showError(error.message); }
+  finally { submitting = false; }
+});
+$("replay-previous").addEventListener("click", () => moveReplay(-1));
+$("replay-next").addEventListener("click", () => moveReplay(1));
+$("replay-previous-turn").addEventListener("click", () => moveReplay(-1, true));
+$("replay-next-turn").addEventListener("click", () => moveReplay(1, true));
+for (const id of ["replay-position", "replay-player", "replay-manual", "replay-omniscient"]) {
+  $(id).addEventListener("change", loadReplay);
+}
 for (const id of ["viewer-select", "clause-actor", "clause-kind"]) {
   $(id).addEventListener("change", () => {
     if (id !== "viewer-select" && currentState) renderClauses(currentState);

@@ -4,6 +4,7 @@ from enum import Enum, auto
 from .board import Square
 from .board_state import RoomPosition
 from .board_turn import BoardTurn
+from .game_settings import DEFAULT_BOARD_RULES, BoardRules
 from .models import Combination
 
 
@@ -38,6 +39,8 @@ class PlayerView:
     own_hand: frozenset[int]
     events: tuple[Event, ...]
     board: BoardTurn | None = None
+    reverse_refutation: bool = False
+    board_rules: BoardRules = DEFAULT_BOARD_RULES
 
 def refutation_events(refuter: int, refutation_card_id: int, suggest: Event ) -> tuple[Event, ...]:
     return (
@@ -48,12 +51,16 @@ def refutation_events(refuter: int, refutation_card_id: int, suggest: Event ) ->
 def view_for(
     log: tuple[Event, ...], player: int, own_hand: frozenset[int],
     board: BoardTurn | None = None,
+    reverse_refutation: bool = False,
+    board_rules: BoardRules = DEFAULT_BOARD_RULES,
 ) -> PlayerView:
     return PlayerView(
         player=player,
         own_hand=own_hand,
         events=tuple(event for event in log if visible_to(event, player)),
         board=board,
+        reverse_refutation=reverse_refutation,
+        board_rules=board_rules,
     )
 
 def visible_to(event: Event, player: int) -> bool:
@@ -83,7 +90,9 @@ def last_suggest_index(log: tuple[Event, ...]) -> int | None:
 class Pending:
     player: int
 
-def pending(log: tuple[Event, ...], num_players: int) -> Pending | None:
+def pending(
+    log: tuple[Event, ...], num_players: int, reverse_refutation: bool = False,
+) -> Pending | None:
     """Return the next seat that must refute or pass, or None if no response is due.
 
     None means no suggestion has been made, or it was refuted or passed by everyone.
@@ -100,7 +109,7 @@ def pending(log: tuple[Event, ...], num_players: int) -> Pending | None:
 
     passed = {event.actor for event in tail if event.kind is EventKind.PASS}
     for offset in range(1, num_players):
-        seat = (suggester + offset) % num_players
+        seat = (suggester + (-offset if reverse_refutation else offset)) % num_players
         if seat not in passed:
             return Pending(seat)
     return None

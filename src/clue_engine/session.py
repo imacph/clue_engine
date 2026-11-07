@@ -2,16 +2,22 @@
 
 import random
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 
 from .board import DEFAULT_BOARD, BoardLayout
 from .board_turn import BoardTurn
-from .engine import Engine
-from .game_settings import DEFAULT_BOARD_RULES, BoardRules
+from .engine import ActionRecord, Engine
+from .game_settings import (
+    DEFAULT_BOARD_RULES,
+    DEFAULT_GAME_RULES,
+    BoardRules,
+    GameRules,
+)
 from .models import Action, Combination
 from .observations import Event, EventKind, PlayerView, public_events
 from .policies import Policy, make_policy, policies_for_players
-from .state import deal, deal_board
+from .state import GameState, deal, deal_board
 
 
 @dataclass(frozen=True)
@@ -39,9 +45,13 @@ class SessionSnapshot:
     turn_player: int | None = None
 
 
-def create_game(num_players: int, seed: int, policy_name: str) -> tuple[Engine, tuple[Policy, ...]]:
+def create_game(
+    num_players: int, seed: int, policy_name: str, *, game_rules: GameRules = DEFAULT_GAME_RULES,
+) -> tuple[Engine, tuple[Policy, ...]]:
     names = policies_for_players(policy_name, num_players)
-    engine = Engine(deal(random.Random(seed), num_players))
+    state = deal(random.Random(seed), num_players)
+    state.game_rules = game_rules
+    engine = Engine(state)
     policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
     return engine, policies
 
@@ -55,6 +65,7 @@ def create_board_game(
     seat_suspects: Sequence[int] | None = None,
     weapon_rooms: Sequence[int] | None = None,
     board_rules: BoardRules = DEFAULT_BOARD_RULES,
+    game_rules: GameRules = DEFAULT_GAME_RULES,
 ) -> tuple[Engine, tuple[Policy, ...]]:
     """Create an opt-in board game with dice independent of the card deal and bots."""
     names = policies_for_players(policy_name, num_players)
@@ -62,6 +73,7 @@ def create_board_game(
         random.Random(seed), num_players, layout=layout,
         seat_suspects=seat_suspects, weapon_rooms=weapon_rooms, board_rules=board_rules,
     )
+    state.game_rules = game_rules
     engine = Engine(state, dice_rng=random.Random(f"{seed}:movement"))
     policies = tuple(make_policy(name, random.Random(f"{seed}:{i}")) for i, name in enumerate(names))
     return engine, policies
@@ -86,6 +98,7 @@ class GameSession:
         if max_steps < 0:
             raise ValueError("max_steps must be non-negative")
         self._engine = engine
+        self._initial_state = deepcopy(engine.state)
         self._policies = tuple(policies)
         self._human_player = human_player
         self._debug = debug
@@ -93,8 +106,20 @@ class GameSession:
         self._steps = 0
 
     @property
+    def initial_state(self) -> GameState:
+        return deepcopy(self._initial_state)
+
+    @property
+    def history(self) -> tuple[ActionRecord, ...]:
+        return self._engine.history
+
+    @property
     def board_rules(self) -> BoardRules:
         return self._engine.state.board_rules
+
+    @property
+    def game_rules(self) -> GameRules:
+        return self._engine.state.game_rules
 
     def snapshot(self) -> SessionSnapshot:
         engine = self._engine

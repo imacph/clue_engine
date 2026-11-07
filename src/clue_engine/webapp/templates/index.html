@@ -47,6 +47,10 @@
         </div>
       </div>
       <form id="setup-form" novalidate>
+        <div class="form-actions">
+          <button id="replay-import-button" class="button button-quiet" type="button">Import private replay</button>
+          <input id="replay-import" type="file" accept=".json,application/json" hidden>
+        </div>
         <nav class="wizard-progress" aria-label="New game steps">
           <button type="button" data-setup-step="0">1. Game</button>
           <button type="button" data-setup-step="1">2. Seats</button>
@@ -183,7 +187,11 @@
         </section>
         <section class="setup-step" data-step="3" aria-labelledby="setup-rules-title" hidden>
           <h3 id="setup-rules-title" tabindex="-1">Rules</h3>
-          <p id="card-rules-note" class="hint">These house rules apply to board games only.</p>
+          <fieldset>
+            <legend>Refutation</legend>
+            <label class="check-row"><input type="checkbox" id="rule-reverse-refutation"><span><strong>Reverse response order</strong><small>Responses proceed in reverse seat order; the first player able to refute must still show one card.</small></span></label>
+          </fieldset>
+          <p id="card-rules-note" class="hint">The remaining house rules apply to board games only.</p>
           <fieldset id="board-rules-fields">
             <legend>Board rules</legend>
             <div class="setup-rules-toolbar">
@@ -196,11 +204,22 @@
               </label>
               <button type="button" class="button button-quiet" id="reset-rules">Reset to standard</button>
             </div>
+            <h4>Movement</h4>
             <div class="setup-rules-grid">
+              <label class="check-row"><input type="checkbox" id="rule-early-end"><span><strong>Stop movement early</strong><small>End a turn before using all movement steps.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-revisit"><span><strong>Revisit hallway squares</strong><small>Allow revisiting a hallway square on the same turn.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-passages" checked><span><strong>Allow secret passages</strong><small>Disabling passages may leave players blocked and reach the action limit.</small></span></label>
+            </div>
+            <h4>Suggestions and relocation</h4>
+            <div class="setup-rules-grid">
+              <label class="check-row"><input type="checkbox" id="rule-optional-suggestion"><span><strong>Optional room suggestions</strong><small>End the turn without suggesting after entering a room.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-move-suspect" checked><span><strong>Move named suspect</strong><small>Move the named token to the suggestion room, including unassigned and eliminated characters.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-move-weapon" checked><span><strong>Move named weapon</strong><small>Move the named weapon to the suggestion room.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-summoned" checked><span><strong>Summoned players may suggest</strong><small>A player moved by a suggestion can suggest there on their next turn. Requires suspect movement.</small></span></label>
-              <label class="check-row"><input type="checkbox" id="rule-passages" checked><span><strong>Allow secret passages</strong><small>Disabling passages may leave players blocked and reach the action limit.</small></span></label>
+            </div>
+            <h4>Accusations</h4>
+            <div class="setup-rules-grid">
+              <label class="check-row"><input type="checkbox" id="rule-accuse-room"><span><strong>Accuse from a room only</strong><small>Accusations may name any room, but must be made while in a room.</small></span></label>
             </div>
           </fieldset>
         </section>
@@ -222,8 +241,23 @@
           <button id="pause-button" class="button button-secondary" type="button">Pause</button>
           <button id="next-turn-button" class="button button-primary" type="button" hidden>Next turn</button>
           <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
+          <button id="replay-open" class="button button-secondary" type="button" hidden>Replay</button>
+          <button id="replay-end" class="button button-quiet" type="button">End and reveal</button>
           <button id="new-game-button" class="button button-quiet" type="button">New game</button>
         </div>
+      </div>
+      <div id="replay-controls" class="replay-controls" hidden>
+          <strong>Replay</strong>
+          <button id="replay-previous-turn" type="button">Previous turn</button>
+          <button id="replay-previous" type="button">Previous</button>
+          <input id="replay-position" type="range" min="0" value="0" aria-label="Replay position">
+          <button id="replay-next" type="button">Next</button>
+          <button id="replay-next-turn" type="button">Next turn</button>
+          <label>Player <select id="replay-player"></select></label>
+          <label><input id="replay-manual" type="checkbox"> Original notes</label>
+          <label><input id="replay-omniscient" type="checkbox"> Reveal all</label>
+          <button id="replay-export" type="button">Save private replay</button>
+          <button id="replay-close" type="button">Close replay</button>
       </div>
       <div id="debug-panel" class="debug-panel" hidden></div>
 

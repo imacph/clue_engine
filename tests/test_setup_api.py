@@ -42,7 +42,10 @@ def test_structured_board_setup_and_validation():
     assert response.status_code == 201
     state = response.get_json()
     assert state["board"]["turn_player"] == 1
-    assert state["board_rules"] == config["board_rules"]
+    assert state["board_rules"] == {
+        **config["board_rules"], "early_end": False, "revisit_hallways": False,
+        "optional_suggestion": False, "accuse_in_room": False,
+    }
     assert state["board"]["suspects"][2]["seat"] == 0
 
     invalid = dict(config, seat_suspects=[1, 2, 3])

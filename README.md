@@ -319,9 +319,10 @@ the selected player's view. Actor and type filters affect the clause list only,
 not the linked cells; player-authored accusation notes have no actor.
 
 Manual marks and clauses belong to the current game and survive updates and page reloads
-while its local server session remains active. They are not saved as a game
-file: starting a new game, restarting the server, or allowing the session to
-expire discards them. Existing setup profiles without a notebook setting load
+while its local server session remains active. Starting a new game, restarting
+the server, or allowing the session to expire discards the live session. After
+the game ends, save a private replay to preserve its recorded notes. Existing
+setup profiles without a notebook setting load
 with the manual player default. For compatibility, HTTP callers that omit
 `notebook_mode` from `POST /api/game` retain the automatic notebook; send
 `"manual"` explicitly to opt in. In manual mode, `PUT /api/notebook` accepts
@@ -337,8 +338,10 @@ protection as notebook mark edits. State responses include unfiltered
 `notebook_clauses` with their original cards, active links, and status; the
 existing textual `clauses` field remains available.
 
-The wizard offers per-bot presets and custom strategy controls, plus standard
-rules and optional board house rules. The strategy toolkit score describes the
+The wizard offers per-bot presets and custom strategy controls, plus categorized
+optional rules. Reverse refutation order applies to both game types; other new
+movement, suggestion, and accusation options apply only to board games. The
+strategy toolkit score describes the
 enabled techniques; it is not a predicted win rate. See the
 [board rules contract](docs/board-rules.md) for rule defaults and effects.
 
@@ -374,6 +377,25 @@ geometry is original rather than a reproduction of the printed C00045 board.
 Spectator mode exposes each player's private hand and notebook. Omniscient debug
 mode reveals all hands, the solution, and private events. Do not use either
 mode if you need to preserve hidden information.
+
+### Private game replay
+
+When a game finishes, select **Replay** to step through actions and recorded
+notebook edits, or jump between turns. Select a player to see their hand and
+automatic deductions based only on what that player had observed at that point.
+For a human manual notebook, **Original notes** shows the marks and clauses
+actually recorded, including intermediate edits. **Reveal all** additionally
+shows the solution, all hands, and private events. Replay is read-only.
+
+To reveal an unfinished or action-limited game, choose **End and reveal** and
+confirm. This permanently ends that game; an action limit alone does not unlock
+its secrets. **Save private replay** downloads a JSON file, and **Import private
+replay** on the setup screen opens a saved record. Replay files contain every
+hand and the solution even if **Reveal all** was not selected: do not share
+them with anyone who should not see the answers. Files are not encrypted.
+Import also accepts existing private version-1 and version-2 board records, but
+they have no historical manual notes. Notes are captured only in newly played
+games. A saved replay cannot be used to resume play.
 
 The Player 0 turn counter starts at zero and increases when Player 0 completes
 their own turn, including by making an accusation. Refuting another player's

@@ -10,7 +10,7 @@ from .board import BoardLayout, CharacterStart, Door, Room, Square
 from .board_state import BoardState, RoomPosition, SuspectToken, WeaponToken
 from .board_turn import BoardPhase, BoardTurn, Move, Roll, UsePassage
 from .engine import ActionRecord, DiceRandom, Engine, replay_board
-from .game_settings import BoardRules
+from .game_settings import BoardRules, GameRules
 from .models import Accuse, Action, Combination, EndTurn, Pass, Reveal, Suggest
 from .observations import Event, EventKind
 from .state import GameState
@@ -41,8 +41,16 @@ def write_board_record(
             "action": {"kind": type(action).__name__, "data": asdict(action)},
             "events": [asdict(event) for event in record.events],
         })
+    initial = asdict(initial_state)
+    board_rules = initial["board_rules"]
+    new_rules = ("early_end", "revisit_hallways", "optional_suggestion", "accuse_in_room")
+    extended = any(board_rules[key] for key in new_rules) or initial_state.game_rules.reverse_refutation
+    if not extended:
+        for key in new_rules:
+            del board_rules[key]
+        del initial["game_rules"]
     payload = {
-        "version": 2, "private": True, "initial_state": asdict(initial_state), "history": records,
+        "version": 3 if extended else 2, "private": True, "initial_state": initial, "history": records,
     }
     with path.open("x", encoding="utf-8", newline="\n") as stream:
         json.dump(payload, stream, default=_json_value, separators=(",", ":"), ensure_ascii=True)
@@ -172,7 +180,8 @@ def _initial_state(value: object, version: int) -> GameState:
         player_hands=[frozenset(_int(card) for card in _array(hand)) for hand in _array(data["player_hands"])],
         current_player=_int(data["current_player"]),
         board=board_turn,
-        board_rules=BoardRules(**_object(data["board_rules"])) if version == 2 else BoardRules(),
+        board_rules=BoardRules(**_object(data["board_rules"])) if version >= 2 else BoardRules(),
+        game_rules=GameRules(**_object(data["game_rules"])) if version >= 3 else GameRules(),
     )
 
 
@@ -222,7 +231,7 @@ def read_board_record(path: Path, *, dice_rng: DiceRandom | None = None) -> Engi
         with path.open(encoding="utf-8") as stream:
             payload = _object(json.load(stream))
         version = payload["version"]
-        if type(version) is not int or version not in (1, 2) or payload["private"] is not True:
+        if type(version) is not int or version not in (1, 2, 3) or payload["private"] is not True:
             raise ValueError("unsupported board record")
         initial = _initial_state(payload["initial_state"], version)
         history = tuple(

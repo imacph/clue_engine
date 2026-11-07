@@ -79,6 +79,82 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     assert b"[hidden] { display: none !important; }" in stylesheet.data
 
 
+def test_private_replay_captures_perspectives_and_manual_history(client, monkeypatch):
+    def scripted(num_players, seed, policy_name):
+        return make_engine(), (
+            ScriptedPolicy(), ScriptedPolicy(Reveal(7)), ScriptedPolicy(), ScriptedPolicy(),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    assert post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step", "notebook_mode": "manual",
+    }).status_code == 201
+    assert client.get("/api/replay/export").status_code == 409
+    assert client.get("/api/replay/state").status_code == 400
+    assert post(client, token, "/api/replay/end", {}).status_code == 400
+    assert client.put("/api/notebook", json={"card_id": 7, "holder": 2, "mark": "+"},
+                      headers={"X-CSRF-Token": token}).status_code == 200
+    assert post(client, token, "/api/notebook/clauses", {
+        "kind": "refute", "holder": 1, "cards": [0, 7, 13], "resolved": False,
+    }).status_code == 200
+    assert post(client, token, "/api/action", {
+        "action": "suggest", "suspect_id": 0, "weapon_id": 7, "room_id": 13,
+    }).status_code == 200
+    assert post(client, token, "/api/advance", {"step": True}).status_code == 200
+    assert post(client, token, "/api/replay/end", {"confirmed": True}).status_code == 200
+    assert post(client, token, "/api/action", {"action": "end_turn"}).status_code == 409
+    assert post(client, token, "/api/advance", {"step": True}).status_code == 409
+
+    before = client.get("/api/replay/state?position=0&player=0&manual=1").get_json()
+    marked = client.get("/api/replay/state?position=1&player=0&manual=1").get_json()
+    noted = client.get("/api/replay/state?position=2&player=0&manual=1").get_json()
+    assert before["matrix"][7]["marks"][2] == "?"
+    assert marked["matrix"][7]["marks"][2] == "+"
+    assert len(noted["notebook_clauses"]) == 1
+    assert not any(noted["matrix"][7]["editable"])
+    player0 = client.get("/api/replay/state?position=4&player=0").get_json()
+    player2 = client.get("/api/replay/state?position=4&player=2").get_json()
+    assert player0["matrix"][7]["marks"][1] == "+"
+    assert player2["matrix"][7]["marks"][1] == "?"
+    assert all(event["kind"] != "show" for event in player2["events"])
+    assert client.get("/api/replay/state?position=4&player=2&omniscient=1").get_json()["debug_info"]
+
+    exported = client.get("/api/replay/export")
+    assert exported.headers["Content-Disposition"] == 'attachment; filename="clue-private-replay.json"'
+    assert exported.headers["Cache-Control"] == "no-store"
+    record = exported.get_json()
+    assert record["private"] is True
+    assert post(client, token, "/api/replay/import", record).status_code == 200
+    restored = client.get("/api/replay/state?position=2&player=0&manual=1").get_json()
+    assert restored["matrix"][7]["marks"][2] == "+"
+    assert len(restored["notebook_clauses"]) == 1
+    record["history"][0]["actor"] = 3
+    assert post(client, token, "/api/replay/import", record).status_code == 400
+
+
+def test_replay_unlocks_on_game_over_but_not_action_limit(client, monkeypatch):
+    def scripted(num_players, seed, policy_name):
+        return make_engine(), tuple(ScriptedPolicy() for _ in range(num_players))
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    assert post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step", "max_steps": 0,
+    }).status_code == 201
+    assert client.get("/api/replay/export").status_code == 409
+    assert post(client, token, "/api/game", {
+        "players": 4, "seat": 0, "progress": "step",
+    }).status_code == 201
+    assert post(client, token, "/api/action", {
+        "action": "accuse", "confirmed": True, "suspect_id": 0, "weapon_id": 6, "room_id": 12,
+    }).get_json()["is_over"]
+    assert client.get("/api/replay/export").status_code == 200
+    replay = client.get("/api/replay/state?position=1&player=1").get_json()
+    assert replay["winner"] == 0
+    assert replay["manual_available"] is False
+
+
 def test_optional_setup_controls_are_disclosed_on_demand(client):
     page = client.get("/").get_data(as_text=True)
     for summary in ("Advanced options", "Saved setup profiles"):

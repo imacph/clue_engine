@@ -1092,3 +1092,22 @@ body.game-active.board-game .action-history { border-top: 1px solid var(--line);
   #setup-screen .setup-navigation { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); }
   #setup-screen .setup-navigation .button { font-size: .78rem; min-width: 0; padding: 7px 5px; }
 }
+.replay-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+  padding: .4rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.replay-controls[hidden] { display: none; }
+.replay-controls input[type="range"] { flex: 1 1 8rem; min-width: 6rem; }
+body.game-active.replay-active #debug-panel { max-width: none; position: static; }
+@media (min-width: 901px) and (min-height: 621px) {
+  body.game-active.replay-active #game-screen { grid-template-rows: auto auto auto minmax(0, 1fr); }
+  body.game-active.replay-active .game-topbar { grid-row: 1; }
+  body.game-active.replay-active #replay-controls { grid-row: 2; }
+  body.game-active.replay-active #debug-panel { grid-row: 3; }
+  body.game-active.replay-active .game-dashboard { grid-row: 4; }
+}

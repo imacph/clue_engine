@@ -87,6 +87,7 @@ def run_desktop() -> None:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         raise RuntimeError("LOCALAPPDATA is not set; desktop preferences cannot be stored.")
+    webview.settings["ALLOW_DOWNLOADS"] = True
     preferences = DesktopPreferences(Path(local_app_data) / "ClueEngine")
     preferences.get_theme()
     server = make_server("127.0.0.1", 0, create_app(desktop_preferences=preferences), threaded=True)

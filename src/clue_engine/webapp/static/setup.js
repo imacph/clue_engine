@@ -34,6 +34,12 @@ window.setupWizard = (() => {
   const ruleIds = {
     move_suspect: "rule-move-suspect", move_weapon: "rule-move-weapon",
     summoned_suggestion: "rule-summoned", secret_passages: "rule-passages",
+    early_end: "rule-early-end", revisit_hallways: "rule-revisit",
+    optional_suggestion: "rule-optional-suggestion", accuse_in_room: "rule-accuse-room",
+  };
+  const standardRules = {
+    move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true,
+    early_end: false, revisit_hallways: false, optional_suggestion: false, accuse_in_room: false,
   };
   const storageKey = "clue-engine-setup-profiles";
   const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
@@ -274,7 +280,7 @@ window.setupWizard = (() => {
   }
 
   function setRules(value) {
-    for (const [key, id] of Object.entries(ruleIds)) $(id).checked = value[key];
+    for (const [key, id] of Object.entries(ruleIds)) $(id).checked = value[key] ?? standardRules[key];
     renderRules();
   }
 
@@ -283,8 +289,9 @@ window.setupWizard = (() => {
     $("card-rules-note").hidden = isBoard();
     $("rule-summoned").disabled = !isBoard() || !$("rule-move-suspect").checked;
     const value = rules();
-    $("rule-preset").value = Object.values(value).every(Boolean) ? "standard"
-      : !value.move_suspect && !value.move_weapon && !value.summoned_suggestion && value.secret_passages
+    const matches = (preset) => Object.keys(ruleIds).every((key) => value[key] === preset[key]);
+    $("rule-preset").value = matches(standardRules) ? "standard"
+      : matches({ ...standardRules, move_suspect: false, move_weapon: false, summoned_suggestion: false })
         ? "no-relocation" : "custom";
   }
 
@@ -300,6 +307,7 @@ window.setupWizard = (() => {
       players: count, seat: Number($("seat").value), seed: Number($("seed").value),
       bots: copy(bots.slice(0, count)), progress: $("progress").value,
       max_steps: Number($("max-steps").value), debug: $("debug").checked,
+      game_rules: { reverse_refutation: $("rule-reverse-refutation").checked },
     };
     if (isBoard()) {
       value.seat_suspects = characters.slice(0, count);
@@ -329,10 +337,12 @@ window.setupWizard = (() => {
       add(`Player ${i + 1}`, `${bot}${character}${data.seat_suspects && data.seat_suspects[i] === 0 ? " · starts" : ""}`);
     }
     if (data.board_rules) {
-      const changed = Object.entries(data.board_rules).filter(([, value]) => !value)
-        .map(([key]) => key.replaceAll("_", " "));
-      add("Rules", changed.length ? `House rules: disabled ${changed.join(", ")}` : "Standard");
+      const changed = Object.entries(data.board_rules)
+        .filter(([key, value]) => value !== standardRules[key])
+        .map(([key, value]) => `${key.replaceAll("_", " ")} ${value ? "on" : "off"}`);
+      add("Board rules", changed.length ? changed.join(", ") : "Standard");
     }
+    if (data.game_rules.reverse_refutation) add("Refutation", "Reverse response order");
     const progression = { auto: "Automatic", turn: "Turn-by-turn", step: "Step-by-step" };
     add("Progression", `${progression[data.progress]} · action limit ${data.max_steps}`);
     if (data.debug) add("Warning", "Omniscient debug reveals hidden information.");
@@ -367,6 +377,7 @@ window.setupWizard = (() => {
     $("debug").checked = data.debug;
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
     bots = copy(data.bots);
+    $("rule-reverse-refutation").checked = data.game_rules?.reverse_refutation === true;
     if (data.board_rules) setRules(data.board_rules);
     updateMode(false);
     updateGameType();
@@ -381,7 +392,7 @@ window.setupWizard = (() => {
   function validateProfile(data, withSeed = false) {
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid setup profile.");
     const allowed = ["mode", "game_type", "notebook_mode", "players", "seat", "bots", "seat_suspects",
-      "board_rules", "progress", "max_steps", "debug", ...(withSeed ? ["seed"] : [])];
+      "board_rules", "game_rules", "progress", "max_steps", "debug", ...(withSeed ? ["seed"] : [])];
     if (Object.keys(data).some((key) => !allowed.includes(key))
       || !["play", "spectate"].includes(data.mode)
       || !["board", "card_only"].includes(data.game_type)
@@ -408,7 +419,7 @@ window.setupWizard = (() => {
       if (!Array.isArray(data.seat_suspects) || data.seat_suspects.length !== data.players
         || new Set(data.seat_suspects).size !== data.players || !data.seat_suspects.includes(0)
         || data.seat_suspects.some((id) => !Number.isInteger(id) || id < 0 || id > 5)
-        || !data.board_rules || Object.keys(data.board_rules).length !== Object.keys(ruleIds).length
+        || !data.board_rules || !["move_suspect", "move_weapon", "summoned_suggestion", "secret_passages"].every((key) => Object.hasOwn(data.board_rules, key))
         || Object.keys(data.board_rules).some((key) => !Object.hasOwn(ruleIds, key) || typeof data.board_rules[key] !== "boolean")
         || (!data.board_rules.move_suspect && data.board_rules.summoned_suggestion)) {
         throw new Error("Invalid board settings in setup profile.");
@@ -416,6 +427,10 @@ window.setupWizard = (() => {
     } else if (data.seat_suspects !== undefined || data.board_rules !== undefined) {
       throw new Error("Card-only profiles cannot contain board settings.");
     }
+    if (data.game_rules !== undefined && (!data.game_rules || typeof data.game_rules !== "object"
+      || Array.isArray(data.game_rules) || Object.keys(data.game_rules).some(
+        (key) => key !== "reverse_refutation" || typeof data.game_rules[key] !== "boolean"
+      ))) throw new Error("Invalid game rules in setup profile.");
   }
 
   function renderProfiles() {
@@ -546,16 +561,15 @@ window.setupWizard = (() => {
     }
   });
   $("rule-preset").addEventListener("change", () => {
-    if ($("rule-preset").value === "standard") setRules({
-      move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true,
-    });
+    if ($("rule-preset").value === "standard") setRules(standardRules);
     if ($("rule-preset").value === "no-relocation") setRules({
-      move_suspect: false, move_weapon: false, summoned_suggestion: false, secret_passages: true,
+      ...standardRules, move_suspect: false, move_weapon: false, summoned_suggestion: false,
     });
   });
-  $("reset-rules").addEventListener("click", () => setRules({
-    move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true,
-  }));
+  $("reset-rules").addEventListener("click", () => {
+    $("rule-reverse-refutation").checked = false;
+    setRules(standardRules);
+  });
   for (const id of Object.values(ruleIds)) {
     $(id).addEventListener("change", () => {
       if (!$("rule-move-suspect").checked) $("rule-summoned").checked = false;

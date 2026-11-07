@@ -79,19 +79,26 @@ Any edition-specific display aliases must not change card IDs or old traces.
 
 The standard configuration implements BR-01–16. Board games can opt into
 independent settings for suspect relocation, weapon relocation, summoned-player
-suggestions, and secret passages. Disabling suspect relocation leaves all
+suggestions, secret passages, stopping movement early, revisiting hallway
+squares in one turn, optional room suggestions, and restricting accusations
+to players currently in a room. Room-only accusations may still name any
+room. Disabling suspect relocation leaves all
 suspect tokens in place, including unassigned and eliminated tokens, and also
 requires summoned-player suggestions to be disabled. Disabling weapon
 relocation leaves weapon tokens in place. Disabling summoned-player suggestions
 still moves suspects but requires the affected player to move normally on their
 next turn. Disabling passages removes passage actions and may leave a player
-blocked until the game's action limit. Card dealing, refutation, accusations,
-and private information are unchanged.
+blocked until the game's action limit. In either board or card-only games,
+reverse refutation order makes responders proceed in reverse seat order. The
+first player able to refute must still privately show one matching card;
+passing remains mandatory only when no card matches. Standard rules keep the
+original order. Card dealing and private information are unchanged.
 
 The browser and Windows wizard offer Standard and No relocation presets as well
 as custom settings. Rules are fixed when a game starts and are included in
-version-2 private board records. Version-1 records are replayed with standard
-rules.
+version-2 private board records. Extended variants are saved in version-3 board
+records. Version-1 records are replayed with standard rules; version-2 records
+use their original rules and standard defaults for the newer options.
 
 ## Implemented board engine
 

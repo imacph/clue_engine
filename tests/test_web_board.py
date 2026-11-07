@@ -173,3 +173,26 @@ def test_spectated_board_bots_complete_a_web_game(client):
     assert state["steps"] < 1500
     assert any(event["kind"] == "roll" for event in state["events"])
     assert all(event["kind"] != "show" for event in state["events"])
+def test_import_legacy_board_record_replays_board_state(client, tmp_path):
+    import json
+    import random
+    from copy import deepcopy
+
+    from clue_engine.board_record import write_board_record
+    from clue_engine.board_turn import Roll
+    from clue_engine.engine import Engine
+    from clue_engine.state import deal_board
+
+    initial = deal_board(random.Random(4), 3)
+    engine = Engine(deepcopy(initial), dice_rng=random.Random(1))
+    engine.step(Roll())
+    path = tmp_path / "board.json"
+    write_board_record(path, initial, engine.history)
+    record = json.loads(path.read_text())
+    csrf = token(client)
+    assert post(client, csrf, "/api/replay/import", record).status_code == 200
+    first = client.get("/api/replay/state?position=0&player=0").get_json()
+    second = client.get("/api/replay/state?position=1&player=0").get_json()
+    assert first["board"]["dice"] is None
+    assert second["board"]["dice"] == list(engine.history[0].events[0].dice)
+    assert second["manual_available"] is False

@@ -4,7 +4,7 @@ from dataclasses import fields
 
 from .board_setup import BoardSetup
 from .board_state import create_board
-from .game_settings import BoardRules, BotStrategy
+from .game_settings import BoardRules, BotStrategy, GameRules
 from .policies import POLICY_NAMES
 
 
@@ -15,8 +15,17 @@ def validate_setup_profile(value: object) -> None:
     board_fields = {"seat_suspects", "board_rules"}
     game_type = value.get("game_type")
     expected = required | board_fields if game_type == "board" else required
-    if set(value) not in (expected, expected | {"notebook_mode"}) or game_type not in {"board", "card_only"}:
+    if (
+        not expected <= set(value)
+        or set(value) - expected - {"notebook_mode", "game_rules"}
+        or game_type not in {"board", "card_only"}
+    ):
         raise ValueError("Invalid setup profile fields or game type.")
+    if "game_rules" in value:
+        rules = value["game_rules"]
+        if not isinstance(rules, dict) or set(rules) - {item.name for item in fields(GameRules)}:
+            raise ValueError("Invalid game rules in setup profile.")
+        GameRules(**rules)
     players = value["players"]
     seat = value["seat"]
     if type(players) is not int or players < 2:
@@ -46,6 +55,10 @@ def validate_setup_profile(value: object) -> None:
             raise ValueError("Profile character assignments must be an array.")
         create_board(BoardSetup(players), seat_suspects=suspects)
         rules = value["board_rules"]
-        if not isinstance(rules, dict) or set(rules) != {item.name for item in fields(BoardRules)}:
+        if (
+            not isinstance(rules, dict)
+            or not {"move_suspect", "move_weapon", "summoned_suggestion", "secret_passages"} <= set(rules)
+            or set(rules) - {item.name for item in fields(BoardRules)}
+        ):
             raise ValueError("Invalid board rules in setup profile.")
         BoardRules(**rules)

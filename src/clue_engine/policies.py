@@ -106,7 +106,7 @@ class RandomPolicy:
 
         blocked = board.occupied_hallways(
             excluding_suspect_id=board.seat_suspects[view.player]
-        ) | turn.visited
+        ) | (frozenset() if view.board_rules.revisit_hallways else turn.visited)
         distances: dict[Square, int] = {}
         queue: list[tuple[int, Square]] = []
         for door in board.layout.doors:
@@ -277,7 +277,8 @@ class StrategicPolicy(ProbingPolicy):
             unknown_marks = 0
             clause_targets = 0
             for offset in range(1, knowledge.num_players):
-                seat = (view.player + offset) % knowledge.num_players
+                direction = -1 if view.reverse_refutation else 1
+                seat = (view.player + direction * offset) % knowledge.num_players
                 marks = tuple(knowledge.mark_of(seat, card) for card in cards)
                 if Mark.HELD in marks:
                     break

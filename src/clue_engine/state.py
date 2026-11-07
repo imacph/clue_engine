@@ -7,7 +7,12 @@ from .board_setup import BoardSetup
 from .board_state import create_board
 from .board_turn import BoardTurn
 from .cards import CARDS, CARDS_BY_ID
-from .game_settings import DEFAULT_BOARD_RULES, BoardRules
+from .game_settings import (
+    DEFAULT_BOARD_RULES,
+    DEFAULT_GAME_RULES,
+    BoardRules,
+    GameRules,
+)
 from .models import CardType, Combination
 
 
@@ -18,6 +23,7 @@ class GameState:
     current_player: int
     board: BoardTurn | None = None
     board_rules: BoardRules = DEFAULT_BOARD_RULES
+    game_rules: GameRules = DEFAULT_GAME_RULES
 
 def deal(rng: random.Random, num_players: int) -> GameState:
     if num_players < 2:

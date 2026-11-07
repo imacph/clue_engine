@@ -5,7 +5,7 @@ import random
 import secrets
 import threading
 import time
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
@@ -18,8 +18,8 @@ from ..board_state import RoomPosition, create_board
 from ..board_turn import BoardTurn, Move, Roll, UsePassage
 from ..cards import CARDS, CARDS_BY_ID
 from ..desktop_preferences import DesktopPreferences
-from ..engine import IllegalActionError
-from ..game_settings import BoardRules, BotStrategy
+from ..engine import IllegalActionError, replay_history
+from ..game_settings import BoardRules, BotStrategy, GameRules
 from ..knowledge import Knowledge, Mark, knowledge_for
 from ..models import (
     Accuse,
@@ -33,7 +33,8 @@ from ..models import (
 from ..observations import EventKind, PlayerView, is_incorrect_accusation
 from ..policies import POLICY_NAMES, CustomPolicy, make_policy, policies_for_players
 from ..presentation import format_clauses, format_event
-from ..session import GameSession, create_board_game, create_game
+from ..replay import Replay, decode_replay, encode_replay
+from ..session import DebugInfo, GameSession, create_board_game, create_game
 
 _SESSION_TTL_SECONDS = 60 * 60
 _MAX_ACTIVE_SESSIONS = 64
@@ -53,6 +54,9 @@ class WebGame:
     notebook_clauses: dict[int, dict[str, Any]] = field(default_factory=dict)
     next_clause_id: int = 1
     notebook_revision: int = 0
+    notebook_history: list[dict[str, Any]] = field(default_factory=list)
+    abandoned: bool = False
+    imported_replay: Replay | None = None
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -313,9 +317,11 @@ def _board_payload(turn: BoardTurn, turn_player: int | None) -> dict[str, Any]:
     }
 
 
-def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
-    snapshot = game.game.snapshot()
-    selected_player = snapshot.human_player
+def _serialize_state(
+    game: WebGame, query: Any, *, replay_snapshot: Any = None, replay_player: int | None = None,
+) -> dict[str, Any]:
+    snapshot = replay_snapshot if replay_snapshot is not None else game.game.snapshot()
+    selected_player = replay_player if replay_snapshot is not None else snapshot.human_player
     if selected_player is None:
         requested_player = query.get("player")
         if requested_player is not None:
@@ -389,7 +395,7 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
     legal = snapshot.legal_actions
     can_act = (
         game.mode == "play" and snapshot.to_move == snapshot.human_player
-        and not game.waiting_for_turn
+        and not game.waiting_for_turn and not game.abandoned
     )
     reveals = [
         {"id": action.card_id, "name": next(
@@ -414,7 +420,9 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
             ],
         }
 
-    if snapshot.is_over:
+    if game.abandoned and replay_snapshot is None:
+        status = "Game ended and revealed."
+    elif snapshot.is_over:
         status = (
             "Game over: all players were eliminated."
             if snapshot.winner is None
@@ -434,6 +442,7 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         "game_type": "board" if board is not None else "card_only",
         "board": board,
         "board_rules": asdict(game.game.board_rules) if board is not None else None,
+        "game_rules": asdict(game.game.game_rules),
         "auto_progress": game.auto_progress,
         "paused": game.paused,
         "waiting_for_turn": game.waiting_for_turn,
@@ -441,7 +450,7 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         "human_player": snapshot.human_player,
         "selected_player": selected_player,
         "to_move": snapshot.to_move,
-        "is_over": snapshot.is_over,
+        "is_over": snapshot.is_over or game.abandoned,
         "winner": snapshot.winner,
         "steps": snapshot.steps,
         "player0_turns": snapshot.player0_turns,
@@ -482,13 +491,19 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        MAX_CONTENT_LENGTH=16 * 1024,
+        MAX_CONTENT_LENGTH=8 * 1024 * 1024,
     )
     games: dict[str, WebGame] = {}
     games_lock = threading.Lock()
 
     @app.before_request
     def protect_mutations():
+        if (
+            request.path != "/api/replay/import"
+            and request.content_length is not None
+            and request.content_length > 16 * 1024
+        ):
+            return jsonify(error="Request is too large."), 413
         if request.path.startswith("/api/") and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             expected = browser_session.get("csrf_token")
             supplied = request.headers.get("X-CSRF-Token", "")
@@ -626,6 +641,13 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             if type(debug) is not bool:
                 raise ValueError("Debug must be true or false.")
             board_options: dict[str, Any] = {}
+            raw_game_rules = body.get("game_rules", {})
+            if not isinstance(raw_game_rules, dict) or set(raw_game_rules) - {
+                item.name for item in fields(GameRules)
+            }:
+                raise ValueError("Invalid game rules.")
+            if "game_rules" in body:
+                board_options["game_rules"] = GameRules(**raw_game_rules)
             if "board_rules" in body:
                 if game_type != "board" or not isinstance(body["board_rules"], dict):
                     raise ValueError("Board rules require a board game and an object.")
@@ -700,6 +722,165 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             except ValueError as exc:
                 return jsonify(error=str(exc)), 400
 
+    def available_replay(game: WebGame) -> Replay:
+        if not game.abandoned and not game.game.snapshot().is_over:
+            raise ValueError("Replay is available only after the game ends.")
+        if game.imported_replay is not None:
+            return game.imported_replay
+        return Replay(
+            game.game.initial_state, game.game.history,
+            game.game.snapshot().human_player, game.notebook_mode, tuple(game.notebook_history),
+        )
+
+    @app.post("/api/replay/end")
+    def end_and_reveal():
+        game = _game_from_request(games, games_lock)
+        if game is None:
+            return jsonify(error="Start a game first."), 404
+        with game.lock:
+            try:
+                body = _json_body()
+            except TypeError as exc:
+                return jsonify(error=str(exc)), 400
+            if body.get("confirmed") is not True:
+                return jsonify(error="Confirm ending and revealing the game."), 400
+            if game.game.snapshot().is_over or game.abandoned:
+                return jsonify(error="This game has already ended."), 409
+            game.abandoned = True
+            game.paused = True
+            game.waiting_for_turn = False
+            return jsonify(_serialize_state(game, {}))
+
+    @app.get("/api/replay/export")
+    def export_replay():
+        game = _game_from_request(games, games_lock)
+        if game is None:
+            return jsonify(error="Start a game first."), 404
+        with game.lock:
+            try:
+                response = jsonify(encode_replay(available_replay(game)))
+                response.headers["Content-Disposition"] = 'attachment; filename="clue-private-replay.json"'
+                response.headers["Cache-Control"] = "no-store"
+                return response
+            except ValueError as exc:
+                return jsonify(error=str(exc)), 409
+
+    @app.post("/api/replay/import")
+    def import_replay():
+        try:
+            replay = decode_replay(_json_body())
+            for note in replay.notes:
+                if note["kind"] == "clause":
+                    ids = set()
+                    for clause in note["clauses"]:
+                        if not isinstance(clause, dict):
+                            raise TypeError("Invalid recorded clause.")
+                        if clause.get("status") not in ("resolved", "unresolved"):
+                            raise ValueError("Invalid recorded clause status.")
+                        clause_id = _integer(clause, "id")
+                        if clause_id < 1 or clause_id in ids:
+                            raise ValueError("Invalid recorded clause id.")
+                        ids.add(clause_id)
+                        normalized = _manual_clause({
+                            "kind": clause.get("kind"), "holder": clause.get("holder"),
+                            "cards": clause.get("cards"),
+                            "resolved": clause.get("status") == "resolved",
+                            "excluded_cards": clause.get("excluded_cards", []),
+                        }, len(replay.initial.player_hands))
+                        normalized["id"] = clause_id
+                        clause.clear()
+                        clause.update(normalized)
+            engine = replay_history(replay.initial, ())
+        except (TypeError, ValueError) as exc:
+            return jsonify(error=str(exc)), 400
+        policies = tuple(
+            make_policy("random", random.Random(seat)) for seat in range(engine.num_players)
+        )
+        session_game = GameSession(engine, policies, human_player=replay.human)
+        game = WebGame(
+            game=session_game, mode="spectate", auto_progress=False, paused=True,
+            confirm_turns=False, selected_player=0, abandoned=True, imported_replay=replay,
+        )
+        game_id = secrets.token_urlsafe(24)
+        with games_lock:
+            old_id = browser_session.get("game_id")
+            if isinstance(old_id, str):
+                games.pop(old_id, None)
+            if len(games) >= _MAX_ACTIVE_SESSIONS:
+                return jsonify(error="The local server has too many active games."), 503
+            games[game_id] = game
+        browser_session["game_id"] = game_id
+        return jsonify(positions=len(replay.history) + len(replay.notes) + 1)
+
+    @app.get("/api/replay/state")
+    def replay_state():
+        game = _game_from_request(games, games_lock)
+        if game is None:
+            return jsonify(error="Start or import a game first."), 404
+        with game.lock:
+            try:
+                replay = available_replay(game)
+                position = int(request.args.get("position", "0"))
+                player = int(request.args.get("player", "0"))
+                if not 0 <= player < len(replay.initial.player_hands):
+                    raise ValueError("Invalid player.")
+                timeline: list[tuple[int, int]] = [(0, 0)]
+                note_index = 0
+                turns = [0]
+                for step in range(len(replay.history) + 1):
+                    while note_index < len(replay.notes) and replay.notes[note_index]["step"] == step:
+                        note_index += 1
+                        timeline.append((step, note_index))
+                    if step < len(replay.history):
+                        timeline.append((step + 1, note_index))
+                        if any(e.kind is EventKind.END_TURN for e in replay.history[step].events):
+                            turns.append(len(timeline) - 1)
+                if not 0 <= position < len(timeline):
+                    raise ValueError("Invalid replay position.")
+                step, note_count = timeline[position]
+                engine = replay_history(replay.initial, replay.history[:step])
+                view = engine.view(player)
+                show_all = request.args.get("omniscient") == "1"
+                snapshot = replace(
+                    game.game.snapshot(), human_player=player, to_move=None, is_over=True,
+                    winner=engine.winner, steps=step, limit_reached=False, view=view,
+                    events=engine.log if show_all else view.events, legal_actions=(),
+                    debug_info=DebugInfo(engine.state.solution, tuple(engine.state.player_hands))
+                    if show_all else None,
+                    board=engine.state.board, turn_player=engine.state.current_player,
+                )
+                manual = (
+                    request.args.get("manual") == "1" and player == replay.human
+                    and replay.notebook_mode == "manual"
+                )
+                marks: dict[tuple[int, int], str] = {}
+                clauses: dict[int, dict[str, Any]] = {}
+                for note in replay.notes[:note_count]:
+                    if note["kind"] == "mark":
+                        marks[(note["holder"], note["card"])] = note["mark"]
+                    else:
+                        clauses = {clause["id"]: clause for clause in note["clauses"]}
+                temporary = replace(
+                    game, mode="replay", notebook_mode="manual" if manual else "automatic",
+                    notebook_marks=marks, notebook_clauses=clauses, waiting_for_turn=False,
+                )
+                result = _serialize_state(
+                    temporary, request.args, replay_snapshot=snapshot, replay_player=player,
+                )
+                result.update(
+                    mode="replay", paused=True, auto_progress=False, is_replay=True,
+                    position=position, positions=len(timeline), turns=turns,
+                    manual_available=player == replay.human and replay.notebook_mode == "manual",
+                    status=f"Replay: action {step} of {len(replay.history)}.",
+                    board_rules=asdict(engine.state.board_rules) if engine.state.board else None,
+                    game_rules=asdict(engine.state.game_rules),
+                )
+                for card in result["matrix"]:
+                    card["editable"] = [False] * len(card["editable"])
+                return jsonify(result)
+            except (TypeError, ValueError) as exc:
+                return jsonify(error=str(exc)), 400
+
     @app.put("/api/notebook")
     def update_notebook():
         game = _game_from_request(games, games_lock)
@@ -722,6 +903,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         with game.lock:
             if game.notebook_mode != "manual":
                 return jsonify(error="This notebook is automatic and cannot be edited."), 409
+            if game.abandoned:
+                return jsonify(error="This game has ended."), 409
             snapshot = game.game.snapshot()
             view = snapshot.view
             if view is None:
@@ -737,6 +920,10 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 else:
                     game.notebook_marks[key] = mark
                 game.notebook_revision += 1
+                game.notebook_history.append({
+                    "step": snapshot.steps, "kind": "mark", "holder": holder,
+                    "card": card_id, "mark": mark,
+                })
             return jsonify(_serialize_state(game, {}))
 
     @app.route("/api/notebook/clauses", methods=["POST"])
@@ -746,6 +933,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         if game is None:
             return jsonify(error="Start a game before editing its notebook."), 404
         with game.lock:
+            if game.abandoned:
+                return jsonify(error="This game has ended."), 409
             if game.notebook_mode != "manual" or game.game.snapshot().view is None:
                 return jsonify(error="This notebook is automatic and cannot be edited."), 409
             if clause_id is not None and clause_id not in game.notebook_clauses:
@@ -765,6 +954,11 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 if game.notebook_clauses.get(clause_id) != clause:
                     game.notebook_clauses[clause_id] = clause
                     game.notebook_revision += 1
+            if game.notebook_revision > len(game.notebook_history):
+                game.notebook_history.append({
+                    "step": game.game.snapshot().steps, "kind": "clause",
+                    "clauses": list(game.notebook_clauses.values()),
+                })
             return jsonify(_serialize_state(game, {}))
 
     @app.post("/api/action")
@@ -808,6 +1002,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             return jsonify(error=str(exc)), 400
 
         with game.lock:
+            if game.abandoned:
+                return jsonify(error="This game has ended."), 409
             if game.waiting_for_turn:
                 return jsonify(error="Select Next turn before taking an action."), 409
             try:
@@ -837,7 +1033,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         with game.lock:
             snapshot = game.game.snapshot()
             is_bot_turn = (
-                not snapshot.is_over
+                not game.abandoned and not snapshot.is_over
                 and not snapshot.limit_reached
                 and not game.waiting_for_turn
                 and snapshot.to_move != snapshot.human_player
@@ -874,6 +1070,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         if game is None:
             return jsonify(error="Start a game before continuing to the next turn."), 404
         with game.lock:
+            if game.abandoned:
+                return jsonify(error="This game has ended."), 409
             if not game.waiting_for_turn:
                 return jsonify(error="No turn is waiting for confirmation."), 409
             game.waiting_for_turn = False
@@ -892,7 +1090,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             return jsonify(error="Start a game before changing pause state."), 404
         with game.lock:
             snapshot = game.game.snapshot()
-            if snapshot.is_over or snapshot.limit_reached:
+            if game.abandoned or snapshot.is_over or snapshot.limit_reached:
                 return jsonify(error="This game can no longer be paused or resumed."), 409
             game.paused = not game.paused
             if not game.paused:

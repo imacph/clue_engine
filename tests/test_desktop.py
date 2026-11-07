@@ -154,13 +154,18 @@ def test_desktop_server_is_local_and_stops_after_window(tmp_path, monkeypatch, f
         if fail:
             raise RuntimeError("window failed")
 
-    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(create_window=create_window, start=start))
+    settings = {"ALLOW_DOWNLOADS": False}
+    monkeypatch.setitem(
+        sys.modules, "webview",
+        SimpleNamespace(create_window=create_window, start=start, settings=settings),
+    )
     if fail:
         with pytest.raises(RuntimeError, match="window failed"):
             desktop.run_desktop()
     else:
         desktop.run_desktop()
 
+    assert settings["ALLOW_DOWNLOADS"] is True
     port = int(result["url"].split(":")[-1].rstrip("/"))
     with socket.socket() as connection:
         connection.settimeout(1)

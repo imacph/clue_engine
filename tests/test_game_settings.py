@@ -10,10 +10,11 @@ from clue_engine.board_record import read_board_record, write_board_record
 from clue_engine.board_state import RoomPosition, SuspectToken
 from clue_engine.board_turn import Move, Roll, UsePassage
 from clue_engine.engine import Engine
-from clue_engine.game_settings import BoardRules
-from clue_engine.models import Combination, EndTurn, Suggest
+from clue_engine.game_settings import BoardRules, GameRules
+from clue_engine.models import Accuse, Combination, EndTurn, Suggest
 from clue_engine.observations import EventKind
-from clue_engine.state import deal_board
+from clue_engine.session import GameSession, create_board_game
+from clue_engine.state import deal, deal_board
 
 
 def positioned_game(rules):
@@ -112,3 +113,68 @@ def test_invalid_rules_are_rejected():
     with pytest.raises(TypeError):
         deal_board(rng, 3, board_rules=None)
     assert rng.getstate() == before
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_early_end_and_hallway_revisit(enabled):
+    engine = positioned_game(BoardRules(early_end=enabled, revisit_hallways=enabled))
+    engine.step(Roll())
+    assert (EndTurn() in engine.legal_actions()) is enabled
+    start = Square(3, 6)
+    move = next(
+        action for action in engine.legal_actions()
+        if isinstance(action, Move) and isinstance(action.destination, Square)
+    )
+    engine.step(move)
+    assert (Move(start) in engine.legal_actions()) is enabled
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_optional_suggestion_and_room_only_accusation(enabled):
+    engine = positioned_game(BoardRules(optional_suggestion=enabled, accuse_in_room=enabled))
+    assert any(isinstance(action, Accuse) for action in engine.legal_actions()) is not enabled
+    engine.step(Roll())
+    assert any(isinstance(action, Accuse) for action in engine.legal_actions()) is not enabled
+    engine.step(Move(RoomPosition(12)))
+    assert (EndTurn() in engine.legal_actions()) is enabled
+    assert any(isinstance(action, Accuse) for action in engine.legal_actions())
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_refutation_order_and_view(reverse):
+    state = deal(random.Random(4), 4)
+    state.game_rules = GameRules(reverse_refutation=reverse)
+    engine = Engine(state)
+    engine.step(Suggest(Combination(0, 6, 12)))
+    assert engine.to_move == (3 if reverse else 1)
+    assert engine.view(0).reverse_refutation is reverse
+
+
+def test_extended_rules_round_trip_in_version_three_board_record(tmp_path):
+    engine = positioned_game(BoardRules(early_end=True, optional_suggestion=True))
+    engine.state.game_rules = GameRules(reverse_refutation=True)
+    initial = deepcopy(engine.state)
+    engine.step(Roll())
+    engine.step(Move(RoomPosition(12)))
+    engine.step(Suggest(Combination(1, 8, 12)))
+    assert engine.to_move == 2
+    path = tmp_path / "extended.json"
+    write_board_record(path, initial, engine.history)
+    assert json.loads(path.read_text())["version"] == 3
+    replayed = read_board_record(path)
+    assert replayed.state == engine.state
+    assert replayed.to_move == engine.to_move
+
+
+def test_bots_can_play_with_all_new_rules():
+    engine, policies = create_board_game(
+        3, 42, "strategic",
+        board_rules=BoardRules(
+            early_end=True, revisit_hallways=True, optional_suggestion=True, accuse_in_room=True,
+        ),
+        game_rules=GameRules(reverse_refutation=True),
+    )
+    session = GameSession(engine, policies, max_steps=250)
+    while not session.snapshot().is_over and not session.snapshot().limit_reached:
+        session.advance_bot()
+    assert session.snapshot().steps > 0

@@ -202,6 +202,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
       mode: { value: "play" }, "notebook-mode": { value: "manual" },
       players: { value: "6" }, seat: { value: "0" }, seed: { value: "42" },
       progress: { value: "turn" }, "max-steps": { value: "10000" }, debug: { checked: false },
+      "rule-reverse-refutation": { checked: false },
     },
   });
   vm.runInContext(`

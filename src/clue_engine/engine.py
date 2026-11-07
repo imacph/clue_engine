@@ -7,7 +7,7 @@ from . import rules
 from .board import Square
 from .board_state import BoardState, RoomPosition, SuspectToken, WeaponToken
 from .board_turn import BoardPhase, BoardTurn, Move, Roll, UsePassage, suspect_location
-from .game_settings import BoardRules
+from .game_settings import BoardRules, GameRules
 from .models import Accuse, Action, Combination, EndTurn, Pass, Reveal, Suggest
 from .observations import (
     Event,
@@ -42,6 +42,8 @@ class Engine:
     def __init__(self, state: GameState, *, dice_rng: DiceRandom | None = None):
         if not isinstance(state.board_rules, BoardRules):
             raise TypeError("board_rules must be BoardRules")
+        if not isinstance(state.game_rules, GameRules):
+            raise TypeError("game_rules must be GameRules")
         if len(state.player_hands) < 2:
             raise ValueError("a game requires at least two players")
         if not 0 <= state.current_player < len(state.player_hands):
@@ -73,7 +75,7 @@ class Engine:
         """The player who must act next: a pending responder, else the turn owner."""
         if self.is_over:
             return None
-        response = pending(self.log, self.num_players)
+        response = pending(self.log, self.num_players, self.state.game_rules.reverse_refutation)
         return response.player if response is not None else self.state.current_player
 
     def legal_actions(self) -> tuple[Action, ...]:
@@ -85,7 +87,10 @@ class Engine:
     def view(self, player: int) -> PlayerView:
         if not 0 <= player < self.num_players:
             raise ValueError(f"invalid player: {player}")
-        return view_for(self.log, player, self.state.player_hands[player], self.state.board)
+        return view_for(
+            self.log, player, self.state.player_hands[player], self.state.board,
+            self.state.game_rules.reverse_refutation, self.state.board_rules,
+        )
 
     def step(self, action: Action) -> tuple[Event, ...]:
         """Apply an action for the player to move and return the events it produced."""
@@ -94,8 +99,7 @@ class Engine:
             raise IllegalActionError(f"{action} is not legal for player {player}")
         events = self._events_for(player, action)
         self.log += events
-        if self.state.board is not None:
-            self.history += (ActionRecord(player, action, events),)
+        self.history += (ActionRecord(player, action, events),)
         if any(event.kind is EventKind.END_TURN for event in events):
             self._advance_turn()
         return events
@@ -273,6 +277,14 @@ def replay_board(
     """Verify a full record; an optional dice RNG enables subsequent play."""
     if initial_state.board is None:
         raise ValueError("replay requires an initial board game")
+    return replay_history(initial_state, history, dice_rng=dice_rng)
+
+
+def replay_history(
+    initial_state: GameState, history: Sequence[ActionRecord], *,
+    dice_rng: DiceRandom | None = None,
+) -> Engine:
+    """Reconstruct and verify the recorded actions without running policies."""
     values: list[int] = []
     for record in history:
         rolls = tuple(event for event in record.events if event.kind is EventKind.ROLL)
