@@ -1,5 +1,47 @@
 # Changelog
 
+## Desktop 0.4.0 / App 0.5.0 / API 0.6.0 - 2026-11-07
+
+### Added
+
+- Add linked, numbered notebook clauses for refutations and incorrect
+  accusations. Players can create, edit, resolve, and filter manual clauses;
+  automatic notebooks update their links as deductions progress.
+- Add read-only private game replay with turn navigation, player perspectives,
+  original manual notes, and an optional omniscient view. Replays can be
+  exported and imported after a game ends. Replay files contain the solution
+  and every hand and must be kept private.
+- Add combinable house rules for face-up starting cards, public refutations,
+  responses from every other player, reverse response order, and suggesting
+  from a room without moving. Organize rule choices into categories in setup.
+- Add a fullscreen control to the Windows desktop app and activity highlighting
+  to the notebook for current players, suggested or accused cards, and
+  visible refutations.
+- Add public hand sizes and custom bot options for deal analysis and calculated
+  accusations. Risky accusations are disabled in named presets.
+
+### Changed
+
+- Strengthen deduction with hand sizes and overlapping clauses; strategic
+  bots can use bounded deal analysis and response modeling to inform
+  suggestions. Improve board routing, passage decisions, and card reveals.
+- Reorganize the board workspace, notebook, clauses, and help; compact the
+  setup wizard, keep its navigation controls in a consistent location, and
+  allow quick play without visiting every settings page.
+- Show both dice and their total separately from movement remaining. Highlight
+  a private refutation only for perspectives permitted to see it.
+- Include extended rules in version-3 private board records while retaining
+  support for older private board records. API state includes notebook clauses,
+  activity focus, and public hand sizes.
+
+### Fixed
+
+- Require manual clauses to contain exactly one suspect, one weapon, and one
+  room, while allowing players to manage their own deductions independently
+  from notebook cell marks.
+- Prevent notebook controls and the version bar from obscuring adjacent
+  content at constrained window sizes.
+
 ## Desktop 0.3.2 / App 0.4.1 / API 0.5.0 - 2026-11-06
 
 ### Added

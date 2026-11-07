@@ -11,8 +11,8 @@ or when every player has made an incorrect accusation.
 ## Versions
 
 <!-- component-versions:start -->
-The game API and Python distribution are **0.5.0**, the shared browser/desktop
-frontend is **0.4.1**, and the Windows desktop wrapper is **0.3.2**.
+The game API and Python distribution are **0.6.0**, the shared browser/desktop
+frontend is **0.5.0**, and the Windows desktop wrapper is **0.4.0**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
