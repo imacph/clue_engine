@@ -20,6 +20,8 @@ desktop-build = [
     "pyinstaller>=6.0,<7",
 ]
 dev = [
+    "build",
+    "hatchling",
     "pytest",
     "ruff",
 ]

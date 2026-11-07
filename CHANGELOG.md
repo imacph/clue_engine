@@ -1,5 +1,31 @@
 # Changelog
 
+## Desktop 0.4.0 / App 0.6.0 / API 0.6.0 - 2026-11-07
+
+### Added
+
+- Add a pull-request and branch-push quality gate for tests, lint, version
+  checks, and wheel verification across Linux and Windows.
+- Record optional source-revision provenance when capturing new card-only
+  baselines and warn when it is omitted.
+
+### Changed
+
+- Replace expanding notebook clause tags with compact indicators and
+  color-linked highlights, including for overlapping clauses.
+- Give cards-only games more notebook space and move omniscient details into
+  an expandable panel that does not cover game controls.
+- Clarify board and desktop documentation, historical baseline limitations,
+  and the privacy of generated traces. Remove an unused private trace from
+  the current tree; it remains in Git history.
+
+### Fixed
+
+- Report useful HTTP status information for failed non-JSON responses and
+  surface theme-storage failures without disabling the active theme.
+- Clear omniscient details and clause highlights when changing game or
+  perspective so stale information does not remain visible.
+
 ## Desktop 0.4.0 / App 0.5.0 / API 0.6.0 - 2026-11-07
 
 ### Added

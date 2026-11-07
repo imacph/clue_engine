@@ -1,0 +1,47 @@
+name: Project checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.13'
+          - os: windows-2022
+            python: '3.13'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install development dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Check Python dependencies
+        run: python -m pip check
+      - name: Run tests and report skips
+        run: python -m pytest -ra
+      - name: Run JavaScript tests explicitly
+        run: node --test tests/test_web_ui.cjs
+      - name: Check lint
+        run: python -m ruff check .
+      - name: Check component versions
+        run: python -m tools.versioning check
+      - name: Build wheel
+        run: python -m build --wheel --no-isolation --outdir audit-wheel
+      - name: Verify wheel
+        run: python -c "from pathlib import Path; from tools.release import verify_wheel; from tools.versioning import read_versions; verify_wheel(Path('audit-wheel'), read_versions())"

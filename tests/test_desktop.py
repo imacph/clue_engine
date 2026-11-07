@@ -15,7 +15,8 @@ def test_desktop_theme_persists_across_apps_and_requires_csrf(tmp_path):
     preferences = DesktopPreferences(tmp_path / "settings")
     client = create_app(desktop_preferences=preferences).test_client()
     page = client.get("/")
-    assert b"const savedTheme = null;" in page.data
+    assert b"let savedTheme = null;" in page.data
+    assert b'localStorage.getItem("clue-engine-theme")' not in page.data
     token = re.search(rb'name="csrf-token" content="([^"]+)"', page.data).group(1).decode()
 
     assert client.post("/api/desktop/theme", json={"theme": "dark"}).status_code == 403
@@ -25,7 +26,7 @@ def test_desktop_theme_persists_across_apps_and_requires_csrf(tmp_path):
     assert client.post("/api/desktop/theme", json={"theme": "dark"}, headers=headers).status_code == 200
 
     new_app = create_app(desktop_preferences=DesktopPreferences(tmp_path / "settings"))
-    assert b'const savedTheme = "dark";' in new_app.test_client().get("/").data
+    assert b'let savedTheme = "dark";' in new_app.test_client().get("/").data
     assert create_app().test_client().post("/api/desktop/theme").status_code == 403
 
 

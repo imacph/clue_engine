@@ -14,8 +14,8 @@ reproduced. Card-only mode keeps its current rules and remains the default.
   starting spaces, including unassigned tokens. Put the six weapon tokens in
   six different rooms. Assign each player a different suspect.
 - **BR-03 — Turn order:** Miss Scarlet starts and play proceeds in seat order.
-  Until a character-selection flow defines the otherwise unspecified case,
-  default assignments must include Miss Scarlet as an active player.
+  Character selection and default assignments require Miss Scarlet to be an
+  active player.
 - **BR-04 — Cards:** Randomly choose one suspect, weapon, and room for the
   solution; deal all remaining cards as evenly as possible. Players keep their
   hands private unless an information variant is enabled.
@@ -170,5 +170,5 @@ covered by tests.
 - [x] Replay board games with recorded rolls and positions; ensure public
   snapshots never expose private cards or future random outcomes.
 - [x] Verify all bot profiles through complete board games.
-- [x] Add and verify board play in the web interface without adding board-play
-  controls to console or desktop interfaces.
+- [x] Add and verify board play in the web interface and shared Windows desktop
+  interface; the console and legacy Tk interface remain card-only.

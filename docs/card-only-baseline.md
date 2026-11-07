@@ -62,16 +62,25 @@ The sample uses only 30 distinct four-player deals and does not establish
 statistical significance. The built-in `turns` distribution instead reports
 Player 0's completed turns and should not be read as winner turns.
 
-## Reproduce
+## Capture a current comparison
 
-Install the project, create an empty trace directory, and run:
+The original measurements used the engine at `fd6813a`. The capture tool was
+added later, so the exact historical capture procedure is not verified. Running
+the current tool uses the current implementation and does not necessarily
+reproduce the numbers above.
 
-```text
-python tools\capture_card_only_baseline.py --trace-dir <empty-directory> > baseline-summary.json
+To capture a new comparison, install the project, check that the source tree is
+clean, create an empty private trace directory, and run in PowerShell:
+
+```powershell
+python tools\capture_card_only_baseline.py --trace-dir <empty-directory> --source-revision (git rev-parse HEAD) > baseline-summary.json
 ```
 
 Defaults are the settings above. The tool writes 21 private JSONL traces to
-that directory and prints aggregate JSON to standard output. It refuses to
+that directory and prints aggregate JSON, including the caller-supplied source
+revision, to standard output. It warns if no source revision is provided.
+Record any uncommitted changes separately; the supplied revision alone does not
+prove the source tree was clean. The tool refuses to
 overwrite any existing trace, reports errors or timeouts with a nonzero exit
 status, and warns when the game count does not balance all seat rotations.
 Traces include solutions, hands, and private reveals; store them securely and

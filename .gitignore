@@ -7,3 +7,5 @@ dist/
 build/
 output/
 node_modules/
+*.jsonl
+!tests/fixtures/**/*.jsonl

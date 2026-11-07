@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--games", type=int, default=120, help="games per group (default: 120)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-steps", type=int, default=10_000)
+    parser.add_argument("--source-revision", help="source revision used for this capture")
     args = parser.parse_args()
     if not args.trace_dir.is_dir():
         parser.error("--trace-dir must be an existing directory")
@@ -26,6 +27,8 @@ def main() -> int:
         parser.error("--games must be at least 1")
     if args.max_steps < 0:
         parser.error("--max-steps must be non-negative")
+    if args.source_revision is not None and not args.source_revision.strip():
+        parser.error("--source-revision must not be empty")
 
     configurations = [
         (players, (profile,) * players, profile)
@@ -47,6 +50,8 @@ def main() -> int:
             file=sys.stderr,
         )
     print("WARNING: traces contain private hands, shown cards, and solutions.", file=sys.stderr)
+    if args.source_revision is None:
+        print("WARNING: source revision was not recorded.", file=sys.stderr)
 
     groups = []
     failed = False
@@ -78,6 +83,7 @@ def main() -> int:
     print(json.dumps({
         "python_version": platform.python_version(),
         "python_implementation": platform.python_implementation(),
+        "source_revision": args.source_revision,
         "games_per_group": args.games,
         "seed": args.seed,
         "max_steps": args.max_steps,

@@ -398,14 +398,16 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
 .notebook-table tr.notebook-card-focus > td.mark-held, .notebook-table td.notebook-turn.mark-held, .notebook-table td.notebook-actor.mark-held { color: var(--notebook-focus-held); }
 .notebook-table tr.notebook-card-focus > td.mark-not-held, .notebook-table td.notebook-turn.mark-not-held, .notebook-table td.notebook-actor.mark-not-held { color: var(--notebook-focus-negative); }
 .notebook-table tr.notebook-card-focus > td.mark-unknown, .notebook-table td.notebook-turn.mark-unknown, .notebook-table td.notebook-actor.mark-unknown { color: var(--notebook-focus-unknown); }
-.notebook-shown > .notebook-mark, .notebook-shown > span:not(.clause-references) { text-decoration: underline double var(--notebook-actor-accent); text-underline-offset: 2px; }
+.notebook-shown > .notebook-mark, .notebook-shown > span:not(.clause-highlight-band) { text-decoration: underline double var(--notebook-actor-accent); text-underline-offset: 2px; }
 .manual-notebook .category-table td:not(:first-child) { padding: 0 2px; }
+.notebook-table td:not(:first-child) { position: relative; }
 .notebook-mark { background: transparent; border: 0; border-radius: 4px; color: inherit; cursor: pointer; font: inherit; height: 22px; padding: 0; width: 100%; }
 .notebook-mark.notebook-fixed-mark { height: auto; }
 .notebook-mark:hover { background: var(--card-tint); }
-.clause-references { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
-.clause-reference { background: var(--table-head); border: 1px solid var(--table-border); border-radius: 3px; color: var(--blue-dark); cursor: pointer; font: 700 .65rem/1.2 "Segoe UI", Arial, sans-serif; max-width: 100%; overflow-wrap: anywhere; padding: 1px; }
-.clause-selected { outline: 2px solid var(--blue); outline-offset: -2px; }
+.clause-indicator { background: var(--blue); border: 1px solid var(--panel); border-radius: 50%; cursor: pointer; height: 11px; padding: 0; position: absolute; right: 1px; top: 1px; width: 11px; }
+.clause-indicator:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 2; }
+.clause-highlight-band { background: var(--clause-colors); bottom: 0; height: 3px; left: 0; pointer-events: none; position: absolute; right: 0; }
+.clause-item.clause-selected { box-shadow: inset 4px 0 var(--clause-color); padding-left: 8px; }
 .clause-draft-selected { background: var(--suspect-tint); box-shadow: inset 0 0 0 2px var(--blue); }
 .notebook-table tr > td.clause-draft-selected { background: var(--suspect-tint); }
 #notebook-heading-tools { align-items: center; display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; width: 100%; }
@@ -452,7 +454,9 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
   padding: 8px;
   white-space: normal;
 }
-.debug-panel { background: var(--debug-bg); border: 1px solid var(--debug-border); border-radius: 8px; color: var(--debug-ink); max-height: 58px; overflow: auto; padding: 6px 10px; white-space: pre-wrap; }
+.debug-panel { background: var(--debug-bg); border: 1px solid var(--debug-border); color: var(--debug-ink); max-height: min(30vh, 220px); overflow: auto; padding: 6px 10px; }
+.debug-panel summary { cursor: pointer; font-weight: 700; }
+#debug-content { font-size: .82rem; padding-top: 5px; white-space: pre-wrap; }
 .error-message { background: var(--danger-bg); border-left: 4px solid var(--red); color: var(--danger-ink); padding: 10px 14px; }
 footer {
   align-items: center;
@@ -490,7 +494,8 @@ body.game-active .game-topbar .toolbar > .button { font-size: .78rem; min-height
 body.game-active .footer-note { display: none; }
 body.game-active #game-screen { display: grid; gap: 8px; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
 body.game-active #error-message { bottom: 28px; left: 50%; max-width: min(680px, calc(100vw - 24px)); position: fixed; transform: translateX(-50%); z-index: 20; }
-body.game-active #debug-panel { max-width: min(430px, 42vw); position: fixed; right: 12px; top: 62px; z-index: 10; }
+body.game-active #debug-panel { max-width: none; position: static; }
+body.game-active.debug-active #game-screen { grid-template-rows: auto auto minmax(0, 1fr); }
 body.game-active .game-dashboard { display: grid; gap: 8px; grid-template-columns: minmax(0, 1.75fr) minmax(300px, .9fr); grid-template-rows: minmax(320px, .4fr) minmax(0, 1fr); min-height: 0; overflow: hidden; }
 body.game-active .hand-panel { grid-column: 1 / -1; grid-row: 1; }
 body.game-active .notebook-workspace { grid-column: 1; grid-row: 2; }
@@ -509,6 +514,22 @@ body.game-active .insights-column { grid-column: 2; grid-row: 2; }
   body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card .card-topline { display: none; }
   body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card .card-art { height: 26px; width: 26px; }
   body.game-active.manual-notebook-active:not(.board-game) .playing-card.mini-card .card-illustration { height: 22px; width: 22px; }
+}
+
+@media (min-width: 1101px) and (min-height: 621px) {
+  body.game-active:not(.board-game) .game-dashboard,
+  body.game-active.manual-notebook-active:not(.board-game) .game-dashboard {
+    grid-template-columns: minmax(380px, .95fr) minmax(0, 1.05fr);
+    grid-template-rows: minmax(210px, .8fr) minmax(0, 1fr);
+  }
+  body.game-active:not(.board-game) .hand-panel { grid-column: 2; grid-row: 1; }
+  body.game-active:not(.board-game) .notebook-workspace { grid-column: 1; grid-row: 1 / 3; }
+  body.game-active:not(.board-game) .insights-column { grid-column: 2; grid-row: 2; }
+  body.game-active:not(.board-game) .card-workspace,
+  body.game-active:not(.board-game) .card-interaction { min-height: 0; }
+  body.game-active:not(.board-game) .card-interaction { gap: 4px; overflow: auto; padding: 6px; }
+  body.game-active:not(.board-game) .selection-slot,
+  body.game-active:not(.board-game) .playing-card.mini-card { min-height: 50px; }
 }
 
 @media (max-width: 1020px) and (min-width: 901px) {
@@ -737,7 +758,7 @@ body.game-active.board-game .notebook-panel .eyebrow { display: none; }
 body.game-active.board-game .notebook-panel .panel-heading { margin-bottom: 4px; }
 body.game-active.board-game .notebook-panel h3 { font-size: .9rem; }
 body.game-active.board-game .notebook-heading-tools .button { font-size: .75rem; min-height: 30px; padding: 4px 8px; }
-body.game-active.board-game #viewer-field select { min-height: 30px; padding: 3px 6px; width: auto; }
+body.game-active #notebook-heading-tools #viewer-field select { min-height: 30px; padding: 3px 6px; width: auto; }
 .board-workspace-tabs { display: flex; flex-direction: column; gap: 4px; grid-area: tabs; min-width: 0; }
 .board-workspace-tab {
   background: transparent;

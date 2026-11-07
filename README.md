@@ -8,11 +8,14 @@ movement, rooms, passages, and movement-aware bots. Eliminated players still
 respond to suggestions in both modes. A game ends after a correct accusation
 or when every player has made an incorrect accusation.
 
+This is a personal project and is not intended for commercial redistribution.
+No license granting redistribution rights is provided.
+
 ## Versions
 
 <!-- component-versions:start -->
 The game API and Python distribution are **0.6.0**, the shared browser/desktop
-frontend is **0.5.0**, and the Windows desktop wrapper is **0.4.0**.
+frontend is **0.6.0**, and the Windows desktop wrapper is **0.4.0**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -307,11 +310,12 @@ the envelope. Selecting a different column moves the whole clause to that
 holder; selecting a different card of the same type replaces the previous card.
 Select **Confirm** to save, or **Cancel** to discard the draft. Cell
 marks do not change while entering a clause, and even fixed hand cells can be
-selected. A numbered reference appears in each linked cell; select it to inspect
-the clause in the right-side **Clauses** tab, or use **Highlight** in the list.
-Select the reference or **Clear highlight** again to remove the highlight.
-References are notebook
-clause numbers, not history event numbers. Multiple clauses can share a cell.
+selected. A small dot marks each cell linked to a clause without changing the
+row height. Select the dot to open the **Clauses** tab and highlight every clause
+linked to that cell. Different colors distinguish overlapping clauses, and
+matching colored bars appear on their linked cells and list entries. Use
+**Highlight** or **Clear highlight** in the list to control each clause.
+Clause numbers are notebook numbers, not history event numbers.
 You can edit clauses using the same notebook interaction, resolve, reopen, or
 delete them, and independently exclude
 or restore individual card links as you reason through them. Resolving and
@@ -321,7 +325,7 @@ may therefore disagree; they are not checked against the deal. Manual clauses
 are authored by you, not automatically generated from game events.
 
 Choose **Automatic** in setup to use the read-only deduction matrix and clauses
-instead. Linked references automatically narrow as cards are ruled out and
+instead. Linked indicators automatically narrow as cards are ruled out and
 disappear when a clause is satisfied; the original clause remains in the list.
 Refutation clauses and incorrect-accusation clauses express opposite conditions,
 as described in the list. Spectator games always use the automatic notebook for
@@ -387,9 +391,11 @@ suggestion. When summoned to a room, you can suggest there or move normally.
 Follow the card-area prompt to reveal a card or pass when responding. Board
 geometry is original rather than a reproduction of the printed C00045 board.
 
-Spectator mode exposes each player's private hand and notebook. Omniscient debug
-mode reveals all hands, the solution, and private events. Do not use either
-mode if you need to preserve hidden information.
+Spectator mode exposes each player's private hand and notebook; use **View as**
+to select the perspective. Omniscient debug mode reveals all hands, the
+solution, and private events. Its solution banner expands to show all hands
+without covering game controls. Do not use either mode if you need to preserve
+hidden information.
 
 ### Private game replay
 
@@ -579,3 +585,15 @@ python -m ruff check .
 
 Frontend JavaScript regression tests run with pytest when Node.js 18 or newer is
 available; if Node.js is not installed, they are skipped.
+Run `node --test tests\test_web_ui.cjs` directly to require those tests.
+The [CI workflow](.github/workflows/ci.yml) runs Python 3.11 and 3.13 on Linux
+and Python 3.13 on Windows with Node.js 22. Headless systems may skip tests
+requiring a Tk display; the skip report makes that visible. Other Python versions
+allowed by the package metadata are not individually certified by this matrix.
+The layout and WebView2 checks in the release process remain manual.
+
+Batch JSONL traces contain hands, solutions, and private reveals. Store them in
+the ignored `output` directory or another private location; Git ignores JSONL
+outputs by default. Deliberate test fixtures may be placed under
+`tests\fixtures`. Ignoring a file does not remove previously committed data
+from Git history.

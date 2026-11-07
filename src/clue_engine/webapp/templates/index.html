@@ -6,7 +6,14 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Clue Engine</title>
   <script>
-    const savedTheme = {% if desktop_mode %}{{ desktop_theme|tojson }}{% else %}localStorage.getItem("clue-engine-theme"){% endif %};
+    let savedTheme = {% if desktop_mode %}{{ desktop_theme|tojson }}{% else %}null{% endif %};
+    {% if not desktop_mode %}
+    try {
+      savedTheme = localStorage.getItem("clue-engine-theme");
+    } catch (error) {
+      window.clueThemeStorageError = String(error.message || error);
+    }
+    {% endif %}
     const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     document.documentElement.dataset.theme =
       savedTheme === "light" || savedTheme === "dark"
@@ -268,7 +275,10 @@
           <button id="replay-export" type="button">Save private replay</button>
           <button id="replay-close" type="button">Close replay</button>
       </div>
-      <div id="debug-panel" class="debug-panel" hidden></div>
+      <details id="debug-panel" class="debug-panel" hidden>
+        <summary id="debug-summary">Omniscient information</summary>
+        <div id="debug-content"></div>
+      </details>
 
       <div class="game-dashboard">
         <div id="board-workspace-tabs" class="board-workspace-tabs" role="tablist" aria-orientation="vertical"
@@ -326,7 +336,7 @@
             <button class="card-view-button" type="button" data-card-view="room" aria-pressed="false">Rooms</button>
             <button class="card-view-button" type="button" data-card-view="all" aria-pressed="false">All cards</button>
             <label id="viewer-field" class="compact-label" hidden>
-              Notebook for
+              View as
               <select id="viewer-select"></select>
             </label>
           </div>
@@ -417,7 +427,7 @@
             <p>Columns show what each player may hold; E is the envelope. A plus means held, a minus means not held, and a question mark means unknown.</p>
             <p>In a manual notebook, activate a cell to cycle its mark. Your own hand facts are fixed. Use arrow keys to move between cells.</p>
             <p>To add a clause, select Clause above the notebook, then choose one suspect, weapon, and room in a player column. Choose the envelope column for an incorrect accusation. Select Confirm to save or Cancel to discard.</p>
-            <p>Numbered cell references link to the Clauses tab. Select a reference or Highlight to highlight its links; select it again to clear the highlight. Manual clauses can also be edited, resolved, reopened, deleted, or have individual links excluded or restored.</p>
+            <p>A dot in a cell means it belongs to a clause. Select it to open the Clauses tab and highlight all linked clauses. Different colors distinguish overlapping clauses; use Clear highlight in the list to remove each highlight. Manual clauses can also be edited, resolved, reopened, deleted, or have individual links excluded or restored.</p>
             <p>Automatic notebooks update deductions and links for you. Manual notes are independent of marks and do not affect bots.</p>
             <p>The number beside each player in the notebook is their public hand size.</p>
             <p>Blue marks the turn owner's column and gold marks the player acting now. Private responses are highlighted only for their participants. Highlighted rows are cards in the current suggestion or accusation; an underlined mark identifies a card visibly shown. These highlights clear or change as play advances.</p>

@@ -16,11 +16,12 @@ def run_tool(directory, *args):
 
 
 def test_baseline_tool_records_all_profiles_and_player_counts(tmp_path):
-    result = run_tool(tmp_path, "--games", "1")
+    result = run_tool(tmp_path, "--games", "1", "--source-revision", "example-revision")
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     assert data["games_per_group"] == 1
     assert data["seed"] == 42
+    assert data["source_revision"] == "example-revision"
     assert len(data["groups"]) == 21
     assert {(group["players"], group["profile"]) for group in data["groups"]} == {
         *((players, profile) for players in range(2, 7)
@@ -29,6 +30,13 @@ def test_baseline_tool_records_all_profiles_and_player_counts(tmp_path):
     }
     assert all(group["summary"]["started_games"] == 1 for group in data["groups"])
     assert len(list(tmp_path.glob("card-only-*.jsonl"))) == 21
+
+
+def test_baseline_tool_warns_when_source_revision_is_not_provided(tmp_path):
+    result = run_tool(tmp_path, "--games", "1", "--max-steps", "0")
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["source_revision"] is None
+    assert "source revision" in result.stderr
 
 
 def test_baseline_tool_checks_for_existing_traces_before_running(tmp_path):

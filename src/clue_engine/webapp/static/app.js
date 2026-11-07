@@ -32,7 +32,9 @@ let lastActivityKey = null;
 let lastRenderedState = null;
 let lastNotebookFingerprint = null;
 let lastClauseFingerprint = null;
-let selectedClause = null;
+let lastDebugFingerprint = null;
+let lastNotebookPerspective = null;
+let selectedClauses = [];
 let clauseDraft = null;
 let notebookGeneration = 0;
 let notebookQueue = Promise.resolve();
@@ -70,13 +72,21 @@ async function requestJson(path, { method = "GET", body } = {}) {
   }
   if (body !== undefined) options.body = JSON.stringify(body);
   const response = await fetch(path, options);
-  const data = await response.json();
   if (!response.ok) {
-    const error = new Error(data.error || `Request failed (${response.status}).`);
+    let message = `Request failed (HTTP ${response.status}).`;
+    if ((response.headers.get("content-type") || "").includes("json")) {
+      try {
+        const data = await response.json();
+        if (typeof data?.error === "string" && data.error) message = data.error;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+      }
+    }
+    const error = new Error(message);
     error.status = response.status;
     throw error;
   }
-  return data;
+  return response.json();
 }
 
 async function startGame(event) {
@@ -91,7 +101,7 @@ async function startGame(event) {
   lastRenderedState = null;
   lastNotebookFingerprint = null;
   lastClauseFingerprint = null;
-  selectedClause = null;
+  selectedClauses = [];
   clauseDraft = null;
   lastBoardState = null;
   lastSuggestionRoom = null;
@@ -224,6 +234,7 @@ function renderState(state) {
   const fingerprint = JSON.stringify(state);
   if (fingerprint === lastRenderedState) return;
   lastRenderedState = fingerprint;
+  updateClausePerspective(state);
   const fixedRoom = state.board && state.legal.suggest ? state.legal.suggest_room : null;
   const hasReveal = state.legal.reveals.length > 0;
   const hasBoardResponse = state.board && (hasReveal || state.legal.pass);
@@ -987,7 +998,7 @@ function renderNotebook(state) {
   updateClauseEntryControls(state);
   const fingerprint = JSON.stringify([
     state.notebook_mode, state.num_players, state.hand_sizes, state.matrix, state.notebook_clauses,
-    state.notebook_focus, selectedClause, clauseDraft,
+    state.notebook_focus, selectedClauses, clauseDraft,
   ]);
   if (fingerprint === lastNotebookFingerprint) return;
   lastNotebookFingerprint = fingerprint;
@@ -1081,7 +1092,14 @@ function renderNotebook(state) {
           + cardContext + (shown ? "; visibly shown" : "");
         const links = (state.notebook_clauses || []).filter((clause) =>
           clause.holder === holder && clause.active_cards.includes(card.id));
-        if (links.some((clause) => clause.id === selectedClause)) cell.classList.add("clause-selected");
+        const highlighted = links.filter((clause) => selectedClauses.includes(clause.id));
+        if (highlighted.length) {
+          const band = document.createElement("span");
+          band.className = "clause-highlight-band";
+          band.setAttribute("aria-hidden", "true");
+          band.style.setProperty("--clause-colors", clauseGradient(highlighted.map((clause) => clause.id)));
+          cell.append(band);
+        }
         const draftSelected = clauseDraft?.holder === holder && clauseDraft.cards[type] === card.id;
         if (draftSelected) cell.classList.add("clause-draft-selected");
         const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
@@ -1105,19 +1123,17 @@ function renderNotebook(state) {
           value.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}${cellContext}`);
           cell.append(value);
         }
-        if (links.length) {
-          const references = document.createElement("span");
-          references.className = "clause-references";
-          for (const clause of links) {
-            const reference = document.createElement("button");
-            reference.type = "button";
-            reference.className = "clause-reference";
-            reference.dataset.clauseId = String(clause.id);
-            reference.textContent = `#${clause.id}`;
-            reference.setAttribute("aria-label", `View clause ${clause.id} for ${card.name}, ${owner}`);
-            references.append(reference);
-          }
-          cell.append(references);
+        if (links.length && !clauseDraft) {
+          const indicator = document.createElement("button");
+          indicator.type = "button";
+          indicator.className = "clause-indicator";
+          indicator.dataset.clauseCard = String(card.id);
+          indicator.dataset.clauseHolder = String(holder);
+          const ids = links.map((clause) => clause.id).join(", ");
+          const description = `View ${links.length === 1 ? "clause" : "clauses"} ${ids} for ${card.name}, ${owner}`;
+          indicator.setAttribute("aria-label", description);
+          indicator.title = description;
+          cell.append(indicator);
         }
         row.append(cell);
       }
@@ -1253,15 +1269,44 @@ function openClauses() {
   else switchInsightsTab("clauses");
 }
 
+function updateClausePerspective(state) {
+  const perspective = `${state.is_replay ? "replay" : "live"}:${state.selected_player}:${state.notebook_mode}`;
+  if (lastNotebookPerspective !== null && perspective !== lastNotebookPerspective) selectedClauses = [];
+  lastNotebookPerspective = perspective;
+  const active = new Set((state.notebook_clauses || [])
+    .filter((clause) => clause.active_cards.length).map((clause) => clause.id));
+  selectedClauses = selectedClauses.filter((id) => active.has(id));
+}
+
+function clauseColor(id) {
+  const index = selectedClauses.indexOf(id);
+  return `hsl(${Math.round(index * 360 / selectedClauses.length)} 75% 45%)`;
+}
+
+function clauseGradient(ids) {
+  const colors = ids.map(clauseColor);
+  return `linear-gradient(to right, ${colors.flatMap((color, index) => [
+    `${color} ${index * 100 / colors.length}%`, `${color} ${(index + 1) * 100 / colors.length}%`,
+  ]).join(", ")})`;
+}
+
+function selectCellClauses(cardId, holder) {
+  selectedClauses = currentState.notebook_clauses
+    .filter((clause) => clause.holder === holder && clause.active_cards.includes(cardId))
+    .map((clause) => clause.id).sort((a, b) => a - b);
+}
+
 function toggleClauseHighlight(id) {
-  selectedClause = selectedClause === id ? null : id;
+  selectedClauses = selectedClauses.includes(id)
+    ? selectedClauses.filter((selected) => selected !== id)
+    : [...selectedClauses, id].sort((a, b) => a - b);
 }
 
 function renderClauses(state) {
   const clauses = state.notebook_clauses || [];
   const actor = $("clause-actor").value || "all";
   const kind = $("clause-kind").value || "all";
-  const fingerprint = JSON.stringify([clauses, actor, kind, selectedClause, state.notebook_mode]);
+  const fingerprint = JSON.stringify([clauses, actor, kind, selectedClauses, state.notebook_mode]);
   if (fingerprint === lastClauseFingerprint) return;
   lastClauseFingerprint = fingerprint;
   const list = $("clauses");
@@ -1280,7 +1325,11 @@ function renderClauses(state) {
     const item = document.createElement("article");
     item.className = "clause-item";
     item.tabIndex = -1;
-    if (clause.id === selectedClause) item.classList.add("clause-selected");
+    const highlighted = selectedClauses.includes(clause.id);
+    if (highlighted) {
+      item.classList.add("clause-selected");
+      item.style.setProperty("--clause-color", clauseColor(clause.id));
+    }
     item.dataset.clauseItem = String(clause.id);
     const heading = document.createElement("strong");
     const subject = clause.kind === "refute"
@@ -1300,7 +1349,7 @@ function renderClauses(state) {
     const actions = document.createElement("div");
     actions.className = "clause-actions";
     for (const [action, label] of [
-      ["highlight", clause.id === selectedClause ? "Clear highlight" : "Highlight"],
+      ["highlight", highlighted ? "Clear highlight" : "Highlight"],
       ...(state.notebook_mode === "manual" && !state.is_replay ? [
         ["edit", "Edit"], ["resolve", clause.status === "resolved" ? "Reopen" : "Resolve"],
         ["delete", "Delete"],
@@ -1313,8 +1362,8 @@ function renderClauses(state) {
       button.dataset.clauseId = String(clause.id);
       button.textContent = label;
       if (action === "highlight") {
-        button.disabled = !clause.active_cards.length && clause.id !== selectedClause;
-        button.setAttribute("aria-pressed", String(clause.id === selectedClause));
+        button.disabled = !clause.active_cards.length && !highlighted;
+        button.setAttribute("aria-pressed", String(highlighted));
       }
       button.setAttribute("aria-label", `${label} clause ${clause.id}`);
       actions.append(button);
@@ -1434,14 +1483,25 @@ function appendCardReferences(container, text) {
 function renderDebug(debugInfo) {
   const panel = $("debug-panel");
   panel.hidden = !debugInfo;
-  panel.replaceChildren();
-  if (!debugInfo) return;
+  document.body.classList.toggle("debug-active", Boolean(debugInfo));
+  const fingerprint = JSON.stringify(debugInfo);
+  if (fingerprint === lastDebugFingerprint) return;
+  lastDebugFingerprint = fingerprint;
+  if (!debugInfo) {
+    panel.open = false;
+    setText("debug-summary", "Omniscient information");
+    $("debug-content").replaceChildren();
+    return;
+  }
   const solution = debugInfo.solution.map(cardName).join(", ");
-  const lines = [`WARNING: omniscient information is visible.`, `Solution: ${solution}`];
+  setText("debug-summary", `Omniscient · Solution: ${solution} · Hands`);
+  const lines = ["Private hands and events are visible."];
   debugInfo.hands.forEach((hand, seat) => {
     lines.push(`Player ${seat + 1} hand: ${hand.map(cardName).join(", ") || "(empty)"}`);
   });
-  appendCardReferences(panel, lines.join("\n"));
+  const content = $("debug-content");
+  content.replaceChildren();
+  appendCardReferences(content, lines.join("\n"));
 }
 
 function cardName(id) {
@@ -1549,6 +1609,7 @@ async function nextTurn() {
 
 function newGame() {
   replayMode = false;
+  renderDebug(null);
   $("replay-controls").hidden = true;
   document.body.classList.remove("replay-active");
   requestVersion++;
@@ -1563,7 +1624,7 @@ function newGame() {
   lastRenderedState = null;
   lastNotebookFingerprint = null;
   lastClauseFingerprint = null;
-  selectedClause = null;
+  selectedClauses = [];
   clauseDraft = null;
   lastBoardState = null;
   lastBoardLayout = null;
@@ -1606,7 +1667,7 @@ async function loadReplay() {
 async function openReplay() {
   if (!currentState?.is_over) return;
   clauseDraft = null;
-  selectedClause = null;
+  selectedClauses = [];
   replayMode = true;
   document.body.classList.add("replay-active");
   $("replay-controls").hidden = false;
@@ -1674,7 +1735,7 @@ function configureBoardWorkspace(isBoard) {
   $("board-workspace-tabs").hidden = !isBoard;
   $("insights-tabs").hidden = isBoard;
   $("action-history").hidden = !isBoard;
-  moveViewerField(isBoard ? "notebook-heading-tools" : "card-view-tabs");
+  moveViewerField("notebook-heading-tools");
   const clauses = $("clauses-panel");
   if (isBoard) {
     for (const name of ["cards", "locations"]) {
@@ -1781,7 +1842,11 @@ function setTheme(theme, persist = false) {
         }))
         .catch((error) => showError(error.message));
     } else {
-      localStorage.setItem("clue-engine-theme", isDark ? "dark" : "light");
+      try {
+        localStorage.setItem("clue-engine-theme", isDark ? "dark" : "light");
+      } catch (error) {
+        showError(`Could not save theme: ${error.message}`);
+      }
     }
   }
 }
@@ -1819,6 +1884,9 @@ async function toggleDesktopFullscreen() {
 }
 
 setTheme(document.documentElement.dataset.theme);
+if (window.clueThemeStorageError) {
+  showError(`Could not load saved theme: ${window.clueThemeStorageError}`);
+}
 window.addEventListener("pywebviewready", initializeFullscreen);
 if (window.clueOptions.desktop && window.pywebview?.api) initializeFullscreen();
 $("fullscreen-toggle").addEventListener("click", toggleDesktopFullscreen);
@@ -1840,21 +1908,15 @@ $("theme-toggle").addEventListener("click", () => {
   setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
 });
 $("notebook").addEventListener("click", (event) => {
-  const reference = event.target.closest("[data-clause-id]");
-  if (reference) {
-    const id = Number(reference.dataset.clauseId);
-    toggleClauseHighlight(id);
-    if (selectedClause === null) {
-      renderNotebook(currentState);
-      renderClauses(currentState);
-      return;
-    }
+  const indicator = event.target.closest("[data-clause-card]");
+  if (indicator && currentState) {
+    selectCellClauses(Number(indicator.dataset.clauseCard), Number(indicator.dataset.clauseHolder));
     $("clause-actor").value = "all";
     $("clause-kind").value = "all";
     lastRenderedState = null;
     renderState(currentState);
     openClauses();
-    const item = $("clauses").querySelector(`[data-clause-item="${selectedClause}"]`);
+    const item = $("clauses").querySelector(`[data-clause-item="${selectedClauses[0]}"]`);
     item?.scrollIntoView({ block: "nearest" });
     item?.focus({ preventScroll: true });
     return;
@@ -1882,9 +1944,6 @@ $("clauses").addEventListener("click", (event) => {
     toggleClauseHighlight(clause.id);
     lastRenderedState = null;
     renderState(currentState);
-    if (selectedClause !== null) {
-      $("notebook").querySelector(`[data-clause-id="${clause.id}"]`)?.focus({ preventScroll: true });
-    }
   } else if (action === "edit") {
     startClauseEntry(clause);
   } else if (action === "resolve") {
@@ -1902,7 +1961,7 @@ $("clauses").addEventListener("click", (event) => {
       return;
     }
     saveClause("DELETE", clause.id, undefined, () => {
-      if (selectedClause === clause.id) selectedClause = null;
+      selectedClauses = selectedClauses.filter((id) => id !== clause.id);
       renderNotebook(currentState);
       renderClauses(currentState);
     });
