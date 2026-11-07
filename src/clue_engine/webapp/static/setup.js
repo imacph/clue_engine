@@ -8,6 +8,8 @@ window.setupWizard = (() => {
     repeat_reveals: "Repeat cards already shown to the same player",
     candidate_rooms: "Favor possible solution rooms (board only)",
     prefer_suggest: "Favor suggesting when possible (cards only)",
+    deal_analysis: "Analyze possible deals for deeper deductions",
+    risk_accusation: "Allow calculated accusations (may eliminate the bot)",
   };
   const presets = {
     random: {},
@@ -17,19 +19,20 @@ window.setupWizard = (() => {
       candidate_rooms: true, prefer_suggest: true,
     },
     strategic: {
-      candidate_suggestions: true, probe_suggestions: true, rank_suggestions: true,
+      candidate_suggestions: true, rank_suggestions: true,
       repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
+      deal_analysis: true,
     },
   };
   const presetDescriptions = {
     random: "Random decisions; shared deduction and movement.",
     deductive: "Favors possible solution cards and useful rooms.",
     probing: "Adds controlled probes and repeats previously shown cards.",
-    strategic: "Ranks suggestions using responders, knowledge, and unresolved clauses.",
+    strategic: "Ranks suggestions and analyzes possible deals when practical; never guesses.",
   };
   const weights = {
     candidate_suggestions: 20, probe_suggestions: 15, rank_suggestions: 15,
-    repeat_reveals: 15, candidate_rooms: 15, prefer_suggest: 10,
+    repeat_reveals: 15, candidate_rooms: 15, prefer_suggest: 10, deal_analysis: 15,
   };
   const ruleIds = {
     move_suspect: "rule-move-suspect", move_weapon: "rule-move-weapon",

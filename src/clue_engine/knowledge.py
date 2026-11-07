@@ -30,6 +30,7 @@ class Knowledge:
     marks: list[list[Mark]]
     clauses: list[Clause]
     wrong_accusations: list[frozenset[int]] = field(default_factory=list)
+    hand_sizes: tuple[int, ...] | None = None
 
     @property
     def envelope(self) -> int:
@@ -40,10 +41,18 @@ class Knowledge:
 
 
 def knowledge_for(view: PlayerView, num_players: int) -> Knowledge:
+    if view.hand_sizes is not None and (
+        len(view.hand_sizes) != num_players
+        or any(type(size) is not int or size < 0 for size in view.hand_sizes)
+        or view.hand_sizes[view.player] != len(view.own_hand)
+        or sum(view.hand_sizes) != len(CARDS_BY_ID) - len(CARDS)
+    ):
+        raise ValueError("invalid public hand sizes")
     knowledge = Knowledge(
         num_players=num_players,
         marks=[[Mark.UNKNOWN] * len(CARDS_BY_ID) for _ in range(num_players + 1)],
         clauses=[],
+        hand_sizes=view.hand_sizes,
     )
     for card_id in CARDS_BY_ID:
         mark = Mark.HELD if card_id in view.own_hand else Mark.NOT_HELD
@@ -129,10 +138,28 @@ def _propagate(knowledge: Knowledge) -> None:
             changed |= _settle_card(knowledge, card_id)
         for cards in CARDS.values():
             changed |= _settle_envelope_category(knowledge, [card.id for card in cards])
+        if knowledge.hand_sizes is not None:
+            for holder, size in enumerate(knowledge.hand_sizes):
+                changed |= _settle_hand_size(knowledge, holder, size)
         for clause in knowledge.clauses:
             changed |= _settle_clause(knowledge, clause)
         for cards in knowledge.wrong_accusations:
             changed |= _settle_wrong_accusation(knowledge, cards)
+
+
+def _settle_hand_size(knowledge: Knowledge, holder: int, size: int) -> bool:
+    row = knowledge.marks[holder]
+    held = sum(mark is Mark.HELD for mark in row)
+    unknown = [card for card, mark in enumerate(row) if mark is Mark.UNKNOWN]
+    if held > size or held + len(unknown) < size:
+        raise InconsistentKnowledgeError(f"holder {holder} cannot have {size} cards")
+    if held != size and held + len(unknown) != size:
+        return False
+    mark = Mark.NOT_HELD if held == size else Mark.HELD
+    changed = False
+    for card in unknown:
+        changed |= _set(knowledge, holder, card, mark)
+    return changed
 
 
 def _settle_card(knowledge: Knowledge, card_id: int) -> bool:

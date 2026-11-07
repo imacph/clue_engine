@@ -105,6 +105,7 @@ class Engine:
             self.log, player, self.state.player_hands[player], self.state.board,
             self.state.game_rules.reverse_refutation, self.state.board_rules,
             self.state.game_rules.all_refute,
+            tuple(len(hand) for hand in self.state.player_hands),
         )
 
     def step(self, action: Action) -> tuple[Event, ...]:

@@ -982,9 +982,12 @@ function cardIllustration(cardId) {
 
 function renderNotebook(state) {
   const notebook = $("notebook");
+  const focus = state.notebook_focus || { cards: [] };
+  const focusCards = new Set(focus.cards);
   updateClauseEntryControls(state);
   const fingerprint = JSON.stringify([
-    state.notebook_mode, state.num_players, state.matrix, state.notebook_clauses, selectedClause, clauseDraft,
+    state.notebook_mode, state.num_players, state.hand_sizes, state.matrix, state.notebook_clauses,
+    state.notebook_focus, selectedClause, clauseDraft,
   ]);
   if (fingerprint === lastNotebookFingerprint) return;
   lastNotebookFingerprint = fingerprint;
@@ -1004,7 +1007,20 @@ function renderNotebook(state) {
   for (let seat = 0; seat < state.num_players; seat++) {
     const th = document.createElement("th");
     th.scope = "col";
-    th.textContent = `P${seat + 1}`;
+    th.dataset.notebookSeat = String(seat);
+    th.textContent = `P${seat + 1} (${state.hand_sizes[seat]})`;
+    const roles = [];
+    if (seat === focus.turn) {
+      th.classList.add("notebook-turn");
+      roles.push("turn owner");
+    }
+    if (seat === focus.actor) {
+      th.classList.add("notebook-actor");
+      roles.push("acting now");
+    }
+    th.title = `Player ${seat + 1}: ${state.hand_sizes[seat]} cards`
+      + (roles.length ? `; ${roles.join(", ")}` : "");
+    th.setAttribute("aria-label", th.title);
     heading.append(th);
   }
   const envelope = document.createElement("th");
@@ -1029,8 +1045,14 @@ function renderNotebook(state) {
     body.append(category);
     for (const card of state.matrix.filter((item) => item.type === type)) {
       const row = document.createElement("tr");
+      row.dataset.cardId = String(card.id);
+      const cardInFocus = focusCards.has(card.id);
+      if (cardInFocus) row.classList.add("notebook-card-focus");
       const name = document.createElement("td");
       name.className = "card-name";
+      const cardContext = cardInFocus
+        ? `; ${focus.kind === "accuse" ? "current accusation" : "current suggestion"}` : "";
+      name.setAttribute("aria-label", `${card.name}${cardContext}`);
       const label = document.createElement("span");
       label.className = "matrix-card-label";
       const icon = document.createElement("span");
@@ -1044,6 +1066,19 @@ function renderNotebook(state) {
       for (const [holder, mark] of card.marks.entries()) {
         const cell = document.createElement("td");
         cell.className = mark === "+" ? "mark-held" : mark === "-" ? "mark-not-held" : "mark-unknown";
+        const roles = [];
+        if (holder === focus.turn) {
+          cell.classList.add("notebook-turn");
+          roles.push("turn owner");
+        }
+        if (holder === focus.actor) {
+          cell.classList.add("notebook-actor");
+          roles.push("acting now");
+        }
+        const shown = focus.shown?.holder === holder && focus.shown?.card === card.id;
+        if (shown) cell.classList.add("notebook-shown");
+        const cellContext = (roles.length ? `; ${roles.join(", ")}` : "")
+          + cardContext + (shown ? "; visibly shown" : "");
         const links = (state.notebook_clauses || []).filter((clause) =>
           clause.holder === holder && clause.active_cards.includes(card.id));
         if (links.some((clause) => clause.id === selectedClause)) cell.classList.add("clause-selected");
@@ -1059,15 +1094,15 @@ function renderNotebook(state) {
           button.dataset.notebookHolder = String(holder);
           const action = clauseDraft ? `${draftSelected ? "Selected" : "Not selected"} for clause. Activate to select.`
             : "Activate to change.";
-          button.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}. ${action}`);
+          button.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}${cellContext}. ${action}`);
           if (clauseDraft) button.setAttribute("aria-pressed", String(draftSelected));
-          button.title = `${card.name}, ${owner}: ${meaning}. ${action}`;
+          button.title = `${card.name}, ${owner}: ${meaning}${cellContext}. ${action}`;
           button.textContent = mark;
           cell.append(button);
         } else {
           const value = document.createElement("span");
           value.textContent = mark;
-          value.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}`);
+          value.setAttribute("aria-label", `${card.name}, ${owner}: ${meaning}${cellContext}`);
           cell.append(value);
         }
         if (links.length) {

@@ -3,6 +3,7 @@ import random
 import pytest
 
 from clue_engine.actions import ACCUSES, ENDTURNS, SUGGESTIONS
+from clue_engine.deal_analysis import solution_deal_counts
 from clue_engine.engine import Engine
 from clue_engine.knowledge import Mark, knowledge_for, known_solution
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
@@ -110,12 +111,11 @@ def test_deductive_policy_respects_restricted_suggestion_actions():
     assert policy.choose(unsolved_view(), NUM_PLAYERS, legal) in legal
 
 
-@pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
-def test_policy_isolates_unknown_card_with_own_controls(policy_cls):
+def test_probing_policy_isolates_unknown_card_with_own_controls():
     view = PlayerView(player=0, own_hand=frozenset({1, 7, 13}), events=())
     probe = Suggest(Combination(0, 7, 13))
     legal = (probe, Suggest(Combination(0, 6, 12)), EndTurn())
-    assert policy_cls(random.Random(0)).choose(view, NUM_PLAYERS, legal) == probe
+    assert ProbingPolicy(random.Random(0)).choose(view, NUM_PLAYERS, legal) == probe
 
 
 @pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
@@ -137,12 +137,18 @@ def test_controlled_probe_learns_envelope_or_holder(policy_cls, target, holder):
     assert knowledge.mark_of(knowledge.envelope if holder is None else holder, target) is Mark.HELD
 
 
-@pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
-def test_known_envelope_card_is_a_valid_probe_control(policy_cls):
+def test_known_envelope_card_is_a_valid_probe_control():
     view = PlayerView(player=0, own_hand=frozenset({7, 8, 9, 10, 11, 13}), events=())
     probe = Suggest(Combination(0, 6, 13))
     legal = (probe, Suggest(Combination(0, 6, 12)))
-    assert policy_cls(random.Random(0)).choose(view, NUM_PLAYERS, legal) == probe
+    assert ProbingPolicy(random.Random(0)).choose(view, NUM_PLAYERS, legal) == probe
+
+
+def test_strategic_prefers_solution_candidates_to_forced_probes():
+    view = PlayerView(player=0, own_hand=frozenset({1, 7, 13}), events=())
+    candidate = Suggest(Combination(0, 6, 12))
+    probe = Suggest(Combination(0, 7, 13))
+    assert StrategicPolicy(random.Random(0)).choose(view, NUM_PLAYERS, (probe, candidate)) == candidate
 
 
 @pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
@@ -161,6 +167,17 @@ def test_advanced_policy_repeats_a_card_shown_to_same_recipient(policy_cls):
         1, view.own_hand, (*events[:-1], Event(EventKind.SUGGEST, 2, combo=Combination(0, 7, 13)))
     )
     assert policy_cls(random.Random(0)).choose(different_recipient, NUM_PLAYERS, legal) == Reveal(13)
+
+
+@pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
+@pytest.mark.parametrize("kind", [EventKind.EXPOSE, EventKind.SHOW])
+def test_advanced_policy_prefers_an_already_public_card(policy_cls, kind):
+    events = (
+        Event(kind, 1, card_id=7, private_to=3 if kind is EventKind.SHOW else None, public=True),
+        Event(EventKind.SUGGEST, 2, combo=Combination(0, 7, 13)),
+    )
+    view = PlayerView(1, frozenset({7, 13}), events)
+    assert policy_cls(random.Random(0)).choose(view, NUM_PLAYERS, (Reveal(7), Reveal(13))) == Reveal(7)
 
 
 @pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
@@ -252,9 +269,15 @@ def test_every_accusation_was_implied_by_the_accusers_knowledge_at_the_time(poli
     for index in accusation_indexes(engine):
         accusation = engine.log[index]
         view = view_for(
-            engine.log[:index], accusation.actor, engine.state.player_hands[accusation.actor]
+            engine.log[:index], accusation.actor, engine.state.player_hands[accusation.actor],
+            hand_sizes=tuple(map(len, engine.state.player_hands)),
         )
-        assert known_solution(knowledge_for(view, NUM_PLAYERS)) == accusation.combo
+        knowledge = knowledge_for(view, NUM_PLAYERS)
+        if known_solution(knowledge) is None:
+            assert policy_cls is StrategicPolicy
+            assert set(solution_deal_counts(knowledge)) == {accusation.combo}
+        else:
+            assert known_solution(knowledge) == accusation.combo
 
 
 @pytest.mark.parametrize("policy_cls", POLICIES)
@@ -270,8 +293,16 @@ def test_advanced_policies_finish_with_different_player_counts(policy_cls, playe
     play(engine, bots, max_steps=1_000)
     assert engine.winner is not None
     accusation = engine.log[-1]
-    winner_view = view_for(engine.log[:-1], accusation.actor, engine.state.player_hands[accusation.actor])
-    assert known_solution(knowledge_for(winner_view, players)) == accusation.combo
+    winner_view = view_for(
+        engine.log[:-1], accusation.actor, engine.state.player_hands[accusation.actor],
+        hand_sizes=tuple(map(len, engine.state.player_hands)),
+    )
+    knowledge = knowledge_for(winner_view, players)
+    if known_solution(knowledge) is None:
+        assert policy_cls is StrategicPolicy
+        assert set(solution_deal_counts(knowledge)) == {accusation.combo}
+    else:
+        assert known_solution(knowledge) == accusation.combo
 
 
 def test_deductive_play_needs_fewer_suggestions_than_random_play():

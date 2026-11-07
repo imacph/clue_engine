@@ -11,6 +11,8 @@ from clue_engine.presentation import (
     format_event,
     format_hand,
     format_knowledge,
+    notebook_activity,
+    notebook_actor,
     public_events,
 )
 from clue_engine.state import GameState
@@ -30,10 +32,47 @@ def test_public_events_exclude_private_show():
     assert "showed Dagger" in format_event(engine.view(0).events[-1])
 
 
+def test_notebook_activity_tracks_turn_and_visible_reveals():
+    engine = Engine(GameState(
+        Combination(0, 6, 12),
+        [frozenset({1}), frozenset({7}), frozenset({13})],
+        0,
+    ))
+    assert notebook_activity(engine.view(0).events) == (None, None)
+    engine.step(Suggest(Combination(0, 7, 13)))
+    engine.step(Reveal(7))
+    focus, shown = notebook_activity(engine.view(0).events)
+    assert focus.combo == Combination(0, 7, 13)
+    assert shown.card_id == 7 and shown.actor == 1
+    assert notebook_activity(engine.view(2).events) == (focus, None)
+    engine.step(EndTurn())
+    assert notebook_activity(engine.view(0).events) == (None, None)
+    engine.step(Accuse(Combination(1, 6, 12)))
+    focus, shown = notebook_activity(engine.view(0).events)
+    assert focus.kind is EventKind.ACCUSE and shown is None
+    assert focus.combo == Combination(1, 6, 12)
+    engine.step(Suggest(Combination(2, 8, 14)))
+    assert notebook_activity(engine.view(0).events)[0].combo == Combination(2, 8, 14)
+
+
+@pytest.mark.parametrize(
+    ("viewer", "public", "omniscient", "expected"),
+    [(0, False, False, 1), (1, False, False, 1), (2, False, False, None),
+     (2, True, False, 1), (2, False, True, 1)],
+)
+def test_notebook_actor_respects_response_visibility(viewer, public, omniscient, expected):
+    assert notebook_actor(
+        0, 1, viewer, public_refutations=public, omniscient=omniscient,
+    ) == expected
+    assert notebook_actor(
+        0, 0, viewer, public_refutations=public, omniscient=omniscient,
+    ) == 0
+
+
 def test_hand_and_knowledge_formatting():
     engine = Engine(GameState(
         Combination(0, 6, 12),
-        [frozenset({1}), frozenset({7})],
+        [frozenset({1}), frozenset(set(range(21)) - {0, 1, 6, 12})],
         0,
     ))
     view = engine.view(0)
@@ -65,7 +104,7 @@ def test_knowledge_displays_unresolved_and_resolved_refutation_clauses():
 def test_knowledge_displays_wrong_accusation_clause():
     engine = Engine(GameState(
         Combination(0, 6, 12),
-        [frozenset({1}), frozenset({7}), frozenset({13})],
+        [frozenset({1}), frozenset({7}), frozenset(set(range(21)) - {0, 1, 6, 7, 12})],
         0,
     ))
     engine.step(Accuse(Combination(1, 6, 12)))

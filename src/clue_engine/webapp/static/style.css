@@ -43,6 +43,13 @@
   --table-head-ink: #445460;
   --mark-negative: #69747d;
   --mark-unknown: #9a6b16;
+  --notebook-row-focus: #fff3d4;
+  --notebook-turn-tint: #75b7d04a;
+  --notebook-actor-tint: #e8ab3f59;
+  --notebook-actor-accent: #a66a08;
+  --notebook-focus-held: #285643;
+  --notebook-focus-negative: #46545c;
+  --notebook-focus-unknown: #704704;
   --clauses-bg: #f7f8f6;
   --clauses-ink: #354351;
   --debug-bg: #fff0ed;
@@ -107,6 +114,13 @@
   --table-head-ink: #cad6dd;
   --mark-negative: #aab6bd;
   --mark-unknown: #efc367;
+  --notebook-row-focus: #42371f;
+  --notebook-turn-tint: #56a8cb40;
+  --notebook-actor-tint: #dba74352;
+  --notebook-actor-accent: #efc367;
+  --notebook-focus-held: #baf2d8;
+  --notebook-focus-negative: #dce7ed;
+  --notebook-focus-unknown: #ffe6a5;
   --clauses-bg: #15212b;
   --clauses-ink: #d1dbe2;
   --debug-bg: #442526;
@@ -375,6 +389,16 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
 .category-table td.mark-held { color: var(--green); }
 .category-table td.mark-not-held { color: var(--mark-negative); }
 .category-table td.mark-unknown { color: var(--mark-unknown); }
+.notebook-table tr.notebook-card-focus > td { background-color: var(--notebook-row-focus); }
+.notebook-table .notebook-turn { background-image: linear-gradient(var(--notebook-turn-tint), var(--notebook-turn-tint)); }
+.notebook-table .notebook-actor { background-image: linear-gradient(var(--notebook-actor-tint), var(--notebook-actor-tint)); }
+.notebook-table .notebook-turn.notebook-actor { background-image: linear-gradient(var(--notebook-turn-tint), var(--notebook-actor-tint)); }
+.notebook-table th.notebook-turn { box-shadow: inset 0 3px var(--blue); }
+.notebook-table th.notebook-actor { border-bottom: 3px solid var(--notebook-actor-accent); }
+.notebook-table tr.notebook-card-focus > td.mark-held, .notebook-table td.notebook-turn.mark-held, .notebook-table td.notebook-actor.mark-held { color: var(--notebook-focus-held); }
+.notebook-table tr.notebook-card-focus > td.mark-not-held, .notebook-table td.notebook-turn.mark-not-held, .notebook-table td.notebook-actor.mark-not-held { color: var(--notebook-focus-negative); }
+.notebook-table tr.notebook-card-focus > td.mark-unknown, .notebook-table td.notebook-turn.mark-unknown, .notebook-table td.notebook-actor.mark-unknown { color: var(--notebook-focus-unknown); }
+.notebook-shown > .notebook-mark, .notebook-shown > span:not(.clause-references) { text-decoration: underline double var(--notebook-actor-accent); text-underline-offset: 2px; }
 .manual-notebook .category-table td:not(:first-child) { padding: 0 2px; }
 .notebook-mark { background: transparent; border: 0; border-radius: 4px; color: inherit; cursor: pointer; font: inherit; height: 22px; padding: 0; width: 100%; }
 .notebook-mark.notebook-fixed-mark { height: auto; }
@@ -383,6 +407,7 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
 .clause-reference { background: var(--table-head); border: 1px solid var(--table-border); border-radius: 3px; color: var(--blue-dark); cursor: pointer; font: 700 .65rem/1.2 "Segoe UI", Arial, sans-serif; max-width: 100%; overflow-wrap: anywhere; padding: 1px; }
 .clause-selected { outline: 2px solid var(--blue); outline-offset: -2px; }
 .clause-draft-selected { background: var(--suspect-tint); box-shadow: inset 0 0 0 2px var(--blue); }
+.notebook-table tr > td.clause-draft-selected { background: var(--suspect-tint); }
 #notebook-heading-tools { align-items: center; display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; width: 100%; }
 #notebook-heading-tools .legend, #clause-entry-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #clause-entry-hint { font-size: .73rem; margin: 0; }

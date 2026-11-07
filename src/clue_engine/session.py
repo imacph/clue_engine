@@ -52,6 +52,7 @@ class SessionSnapshot:
     events: tuple[Event, ...]
     legal_actions: tuple[Action, ...]
     debug_info: DebugInfo | None
+    hand_sizes: tuple[int, ...]
     board: BoardTurn | None = None
     turn_player: int | None = None
 
@@ -168,6 +169,7 @@ class GameSession:
             events=events,
             legal_actions=legal,
             debug_info=debug_info,
+            hand_sizes=tuple(len(hand) for hand in engine.state.player_hands),
             board=engine.state.board,
             turn_player=engine.state.current_player,
         )

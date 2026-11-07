@@ -23,6 +23,8 @@ from ..presentation import (
     format_debug_information,
     format_event,
     format_hand,
+    notebook_activity,
+    notebook_actor,
 )
 from ..session import GameSession, SessionSnapshot
 
@@ -153,6 +155,7 @@ class GameFrame(ttk.Frame):
         self.knowledge_player_choice.current(0)
         self.knowledge_player_choice.pack(side="left", padx=5)
         self.knowledge_player_choice.bind("<<ComboboxSelected>>", self._knowledge_selected)
+        ttk.Label(selector, text="Highlighted rows: current cards; T: turn, A: acting").pack(side="left")
 
         notebook_panels = ttk.Panedwindow(notebook_frame, orient="horizontal")
         notebook_panels.grid(row=1, column=0, columnspan=2, sticky="nsew")
@@ -172,10 +175,11 @@ class GameFrame(ttk.Frame):
         )
         columns = ("card", *(f"p{i}" for i in range(num_players)), "envelope")
         self.notebook = ttk.Treeview(matrix_frame, columns=columns, show="headings", height=8)
+        self.notebook.tag_configure("activity", background="#e6f2f6", foreground="#173847")
         self.notebook.heading("card", text="Card")
         self.notebook.column("card", width=150, anchor="w")
         for i in range(num_players):
-            self.notebook.heading(f"p{i}", text=f"Player {i}")
+            self.notebook.heading(f"p{i}", text=f"Player {i} ({snapshot.hand_sizes[i]})")
             self.notebook.column(f"p{i}", width=75, anchor="center")
         self.notebook.heading("envelope", text="Envelope")
         self.notebook.column("envelope", width=85, anchor="center")
@@ -286,6 +290,26 @@ class GameFrame(ttk.Frame):
 
     def _refresh_notebook(self, snapshot: SessionSnapshot, view: PlayerView) -> None:
         knowledge = knowledge_for(view, snapshot.num_players)
+        focus, _ = notebook_activity(view.events)
+        cards_in_focus = (
+            {focus.combo.suspect_id, focus.combo.weapon_id, focus.combo.room_id}
+            if focus is not None and focus.combo is not None else set()
+        )
+        actor = notebook_actor(
+            snapshot.turn_player, snapshot.to_move, view.player,
+            public_refutations=self.session.game_rules.public_refutations,
+            omniscient=snapshot.debug_info is not None,
+        )
+        for seat in range(snapshot.num_players):
+            labels = []
+            if not snapshot.is_over and not snapshot.limit_reached and seat == snapshot.turn_player:
+                labels.append("T")
+            if not snapshot.is_over and not snapshot.limit_reached and seat == actor:
+                labels.append("A")
+            suffix = f" [{'/'.join(labels)}]" if labels else ""
+            self.notebook.heading(
+                f"p{seat}", text=f"P{seat} ({snapshot.hand_sizes[seat]}){suffix}",
+            )
         symbols = {Mark.UNKNOWN: "?", Mark.HELD: "+", Mark.NOT_HELD: "-"}
         for cards in CARDS.values():
             for card in cards:
@@ -294,10 +318,11 @@ class GameFrame(ttk.Frame):
                     for holder in range(snapshot.num_players + 1)
                 ))
                 item_id = str(card.id)
+                tags = ("activity",) if card.id in cards_in_focus else ()
                 if self.notebook.exists(item_id):
-                    self.notebook.item(item_id, values=values)
+                    self.notebook.item(item_id, values=values, tags=tags)
                 else:
-                    self.notebook.insert("", "end", iid=item_id, values=values)
+                    self.notebook.insert("", "end", iid=item_id, values=values, tags=tags)
         self.clauses.configure(state="normal")
         self.clauses.delete("1.0", "end")
         actor_index = self.clause_actor_choice.current() - 1

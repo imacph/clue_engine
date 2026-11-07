@@ -36,11 +36,16 @@ def test_structured_board_setup_and_validation():
             "move_suspect": False, "move_weapon": False,
             "summoned_suggestion": False, "secret_passages": False,
         },
-        "bots": [None, "deductive", {"repeat_reveals": True}],
+        "bots": [None, "deductive", {
+            "repeat_reveals": True, "deal_analysis": True, "risk_accusation": True,
+        }],
     }
     response = client.post("/api/game", json=config, headers=headers)
     assert response.status_code == 201
     state = response.get_json()
+    assert state["hand_sizes"] == [6, 6, 6]
+    assert len(state["hand"]) == state["hand_sizes"][0]
+    assert state["debug_info"] is None
     assert state["board"]["turn_player"] == 1
     assert state["board_rules"] == {
         **config["board_rules"], "early_end": True, "revisit_hallways": False,

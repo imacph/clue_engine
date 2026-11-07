@@ -288,7 +288,7 @@ test("clause entry selects notebook cells, validates, saves and preserves exclus
   const ui = frontend({ notebook: true });
   const result = await ui.evaluate(`(async () => {
     currentState = {
-      notebook_mode: "manual", num_players: 2, notebook_revision: 0,
+      notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9], notebook_revision: 0,
       matrix: [
         { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["+", "?", "?"], editable: [false, true, true] },
         { id: 7, name: "Dagger", type: "weapon", marks: ["?", "?", "?"], editable: [true, true, true] },
@@ -372,7 +372,7 @@ test("clause highlighting can be cleared or switched", () => {
 test("a failed clause save leaves the draft available for retry or cancellation", async () => {
   const ui = frontend({ notebook: true });
   const result = await ui.evaluate(`(async () => {
-    currentState = { notebook_mode: "manual", num_players: 2, matrix: [], notebook_revision: 0, notebook_clauses: [] };
+    currentState = { notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9], matrix: [], notebook_revision: 0, notebook_clauses: [] };
     globalThis.fetch = async () => { throw new Error("offline"); };
     startClauseEntry();
     selectClauseCell(0, 1); selectClauseCell(7, 1); selectClauseCell(12, 1);
@@ -402,7 +402,7 @@ test("action history remains unfiltered and shows only the latest eight events",
 test("notebook renders overlapping clause references without replacing marks", () => {
   const ui = frontend({ notebook: true });
   const notebookState = {
-    notebook_mode: "manual", num_players: 2,
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9],
     matrix: [
       { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "+", "?"], editable: [true, true, true] },
       { id: 7, name: "Dagger", type: "weapon", marks: ["?", "-", "?"], editable: [true, true, true] },
@@ -418,6 +418,9 @@ test("notebook renders overlapping clause references without replacing marks", (
     return [node, ...node.children.flatMap(descendants)];
   }
   const all = descendants(ui.element("notebook"));
+  const headers = all.filter((node) => node.tagName === "TH" && node.scope === "col");
+  assert.ok(headers.some((node) => node.textContent === "P1 (9)"));
+  assert.ok(headers.some((node) => node.textContent === "P2 (9)"));
   assert.equal(all.filter((node) => node.tagName === "TABLE").length, 1);
   assert.equal(all.filter((node) => node.tagName === "THEAD").length, 1);
   assert.equal(all.filter((node) => node.tagName === "TBODY").length, 3);
@@ -435,6 +438,59 @@ test("notebook renders overlapping clause references without replacing marks", (
   ui.renderNotebook(notebookState);
   const remaining = descendants(ui.element("notebook")).filter((node) => node.dataset.clauseId);
   assert.deepEqual(remaining.map((node) => node.textContent), ["#2"]);
+});
+
+test("notebook highlights turn, actor, cards and visible reveal without disturbing clauses", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 2, hand_sizes: [9, 9],
+    matrix: [
+      { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "+", "?"], editable: [true, true, true] },
+      { id: 7, name: "Dagger", type: "weapon", marks: ["?", "-", "?"], editable: [true, true, true] },
+      { id: 13, name: "Ballroom", type: "room", marks: ["?", "?", "?"], editable: [true, true, true] },
+    ],
+    notebook_clauses: [{ id: 1, holder: 1, active_cards: [0, 7] }],
+    notebook_focus: {
+      turn: 0, actor: 1, kind: "suggest", cards: [0, 7], shown: { card: 7, holder: 1 },
+    },
+  };
+  function descendants(node) {
+    return [node, ...node.children.flatMap(descendants)];
+  }
+  ui.renderNotebook(state);
+  let all = descendants(ui.element("notebook"));
+  const header0 = all.find((node) => node.dataset.notebookSeat === "0");
+  const header1 = all.find((node) => node.dataset.notebookSeat === "1");
+  assert.ok(header0.classList.contains("notebook-turn"));
+  assert.ok(!header0.classList.contains("notebook-actor"));
+  assert.ok(header1.classList.contains("notebook-actor"));
+  assert.match(header1["aria-label"], /acting now/);
+  let row = all.find((node) => node.dataset.cardId === "7");
+  assert.ok(row.classList.contains("notebook-card-focus"));
+  assert.ok(row.children[1].classList.contains("notebook-turn"));
+  assert.ok(row.children[2].classList.contains("notebook-actor"));
+  assert.ok(row.children[2].classList.contains("notebook-shown"));
+  assert.match(row.children[2].children[0]["aria-label"], /current suggestion; visibly shown/);
+  assert.equal(all.filter((node) => node.dataset.clauseId).length, 2);
+
+  state.notebook_focus = { turn: 0, actor: null, kind: "suggest", cards: [0, 7], shown: null };
+  ui.renderNotebook(state);
+  all = descendants(ui.element("notebook"));
+  row = all.find((node) => node.dataset.cardId === "7");
+  assert.ok(row.classList.contains("notebook-card-focus"));
+  assert.ok(row.children[1].classList.contains("notebook-turn"));
+  assert.ok(!row.children[2].classList.contains("notebook-actor"));
+  assert.ok(!row.children[2].classList.contains("notebook-shown"));
+
+  state.notebook_focus = { turn: 1, actor: 1, kind: null, cards: [], shown: null };
+  ui.renderNotebook(state);
+  all = descendants(ui.element("notebook"));
+  row = all.find((node) => node.dataset.cardId === "7");
+  assert.ok(!row.classList.contains("notebook-card-focus"));
+  assert.ok(!row.children[2].classList.contains("notebook-shown"));
+  assert.ok(row.children[2].classList.contains("notebook-turn"));
+  assert.ok(row.children[2].classList.contains("notebook-actor"));
+  assert.equal(all.filter((node) => node.dataset.clauseId).length, 2);
 });
 
 test("stale refresh preserves the entire manual notebook snapshot", () => {

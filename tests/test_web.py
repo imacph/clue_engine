@@ -79,6 +79,39 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     assert b"[hidden] { display: none !important; }" in stylesheet.data
 
 
+def test_notebook_focus_tracks_accusations_and_game_completion(client, monkeypatch):
+    def scripted(num_players, seed, policy_name):
+        return make_engine(), (
+            ScriptedPolicy(), ScriptedPolicy(Suggest(Combination(0, 7, 13))),
+            ScriptedPolicy(), ScriptedPolicy(),
+        )
+
+    monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
+    token = csrf_token(client)
+    initial = post(client, token, "/api/game", {"players": 4, "seat": 0, "progress": "step"})
+    assert initial.get_json()["notebook_focus"] == {
+        "turn": 0, "actor": 0, "kind": None, "cards": [], "shown": None,
+    }
+    wrong = post(client, token, "/api/action", {
+        "action": "accuse", "suspect_id": 1, "weapon_id": 6, "room_id": 12, "confirmed": True,
+    }).get_json()
+    assert wrong["notebook_focus"] == {
+        "turn": 1, "actor": 1, "kind": "accuse", "cards": [1, 6, 12], "shown": None,
+    }
+    next_action = post(client, token, "/api/advance", {"step": True}).get_json()
+    assert next_action["notebook_focus"] == {
+        "turn": 1, "actor": None, "kind": "suggest", "cards": [0, 7, 13], "shown": None,
+    }
+    post(client, token, "/api/game", {"players": 4, "seat": 0, "progress": "step"})
+    finished = post(client, token, "/api/action", {
+        "action": "accuse", "suspect_id": 0, "weapon_id": 6, "room_id": 12, "confirmed": True,
+    }).get_json()
+    assert finished["is_over"]
+    assert finished["notebook_focus"] == {
+        "turn": None, "actor": None, "kind": "accuse", "cards": [0, 6, 12], "shown": None,
+    }
+
+
 def test_private_replay_captures_perspectives_and_manual_history(client, monkeypatch):
     def scripted(num_players, seed, policy_name):
         return make_engine(), (
@@ -115,10 +148,28 @@ def test_private_replay_captures_perspectives_and_manual_history(client, monkeyp
     assert not any(noted["matrix"][7]["editable"])
     player0 = client.get("/api/replay/state?position=4&player=0").get_json()
     player2 = client.get("/api/replay/state?position=4&player=2").get_json()
+    assert player0["hand_sizes"] == player2["hand_sizes"] == [5, 5, 4, 4]
     assert player0["matrix"][7]["marks"][1] == "+"
     assert player2["matrix"][7]["marks"][1] == "?"
     assert all(event["kind"] != "show" for event in player2["events"])
-    assert client.get("/api/replay/state?position=4&player=2&omniscient=1").get_json()["debug_info"]
+    assert player0["notebook_focus"] == {
+        "turn": 0, "actor": 0, "kind": "suggest", "cards": [0, 7, 13],
+        "shown": {"card": 7, "holder": 1},
+    }
+    assert player2["notebook_focus"]["shown"] is None
+    omniscient = client.get("/api/replay/state?position=4&player=2&omniscient=1").get_json()
+    assert omniscient["debug_info"]
+    assert omniscient["notebook_focus"]["shown"] == {"card": 7, "holder": 1}
+    pending = client.get("/api/replay/state?position=3&player=2").get_json()
+    assert pending["notebook_focus"]["turn"] == 0
+    assert pending["notebook_focus"]["actor"] is None
+    for player in (0, 1):
+        participant = client.get(f"/api/replay/state?position=3&player={player}").get_json()
+        assert participant["notebook_focus"]["actor"] == 1
+    omniscient_pending = client.get(
+        "/api/replay/state?position=3&player=2&omniscient=1"
+    ).get_json()
+    assert omniscient_pending["notebook_focus"]["actor"] == 1
 
     exported = client.get("/api/replay/export")
     assert exported.headers["Content-Disposition"] == 'attachment; filename="clue-private-replay.json"'
@@ -127,6 +178,7 @@ def test_private_replay_captures_perspectives_and_manual_history(client, monkeyp
     assert record["private"] is True
     assert post(client, token, "/api/replay/import", record).status_code == 200
     restored = client.get("/api/replay/state?position=2&player=0&manual=1").get_json()
+    assert restored["hand_sizes"] == [5, 5, 4, 4]
     assert restored["matrix"][7]["marks"][2] == "+"
     assert len(restored["notebook_clauses"]) == 1
     record["history"][0]["actor"] = 3
@@ -158,21 +210,34 @@ def test_multi_response_activity_and_replay_with_face_up_cards(client, monkeypat
         "all_refute": True, "face_up_card": True,
     }
     assert len([event for event in response.get_json()["events"] if event["kind"] == "expose"]) == 4
-    assert post(client, token, "/api/advance", {"step": True}).status_code == 200
+    pending = post(client, token, "/api/advance", {"step": True})
+    assert pending.status_code == 200
+    assert pending.get_json()["notebook_focus"]["actor"] == (1 if public else None)
     state = post(client, token, "/api/advance", {"step": True}).get_json()
     assert state["to_move"] == 2
     assert state["activity"]["cards"] == [0, 7, 13]
     assert [card["id"] for card in state["legal"]["reveals"]] == [13]
     assert state["activity"]["kind"] == ("reveal" if public else "refute")
+    assert state["notebook_focus"] == {
+        "turn": 0, "actor": 2, "kind": "suggest", "cards": [0, 7, 13],
+        "shown": {"card": 7, "holder": 1} if public else None,
+    }
     assert post(client, token, "/api/action", {"action": "reveal", "card_id": 13}).status_code == 200
     assert post(client, token, "/api/replay/end", {"confirmed": True}).status_code == 200
     record = client.get("/api/replay/export").get_json()
     assert post(client, token, "/api/replay/import", record).status_code == 200
     initial = client.get("/api/replay/state?position=0&player=3").get_json()
     assert len([event for event in initial["events"] if event["kind"] == "expose"]) == 4
+    pending = client.get("/api/replay/state?position=1&player=3").get_json()
+    assert pending["notebook_focus"]["actor"] == (1 if public else None)
     replay = client.get("/api/replay/state?position=3&player=3").get_json()
     assert len([event for event in replay["events"] if event["kind"] == "show"]) == (
         2 if public else 0
+    )
+    assert replay["notebook_focus"]["turn"] == 0
+    assert replay["notebook_focus"]["actor"] == 3
+    assert replay["notebook_focus"]["shown"] == (
+        {"card": 13, "holder": 2} if public else None
     )
 
 
@@ -525,7 +590,7 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
 ):
     def create_scripted_game(num_players, seed, policy_name):
         return make_engine(), (
-            ScriptedPolicy(Suggest(Combination(0, 7, 13))),
+            ScriptedPolicy(Suggest(Combination(0, 7, 13)), EndTurn()),
             ScriptedPolicy(Reveal(7)),
             ScriptedPolicy(EndTurn()),
             ScriptedPolicy(EndTurn()),
@@ -542,9 +607,17 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
         "max_steps": 20,
     })
     assert response.status_code == 201
-    for _ in range(2):
-        response = post(client, token, "/api/advance", {"step": True})
-        assert response.status_code == 200
+    response = post(client, token, "/api/advance", {"step": True})
+    assert response.status_code == 200
+    unrelated = client.get("/api/state?player=2").get_json()
+    assert unrelated["to_move"] == 1
+    assert unrelated["notebook_focus"]["turn"] == 0
+    assert unrelated["notebook_focus"]["actor"] is None
+    for player in (0, 1):
+        participant = client.get(f"/api/state?player={player}").get_json()
+        assert participant["notebook_focus"]["actor"] == 1
+    response = post(client, token, "/api/advance", {"step": True})
+    assert response.status_code == 200
     public_state = client.get("/api/state").get_json()
     assert all(event["kind"] != "show" for event in public_state["events"])
     assert [event["kind"] for event in public_state["events"]] == ["refute", "suggest"]
@@ -565,6 +638,8 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
     dagger = next(row for row in private_view["matrix"] if row["id"] == 7)
     assert dagger["marks"][1] == "+"
     assert private_view["activity"]["card_id"] == 7
+    assert private_view["notebook_focus"]["shown"] == {"card": 7, "holder": 1}
+    assert private_view["notebook_focus"]["turn"] == private_view["notebook_focus"]["actor"] == 0
     assert all(event["kind"] != "show" for event in private_view["events"])
     assert private_view["notebook_clauses"][0]["status"] == "satisfied"
     assert private_view["notebook_clauses"][0]["active_cards"] == []
@@ -572,10 +647,15 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
     unrelated_view = client.get("/api/state?player=2").get_json()
     assert unrelated_view["activity"]["kind"] == "refute"
     assert "card_id" not in unrelated_view["activity"]
+    assert unrelated_view["notebook_focus"]["shown"] is None
     clause = unrelated_view["notebook_clauses"][0]
     assert clause["id"] == private_view["notebook_clauses"][0]["id"]
     assert clause["status"] == "unresolved"
     assert clause["active_cards"] == [0, 7]
+    finished_turn = post(client, token, "/api/advance", {"step": True}).get_json()
+    assert finished_turn["notebook_focus"] == {
+        "turn": 1, "actor": 1, "kind": None, "cards": [], "shown": None,
+    }
 
 
 def test_mutations_require_csrf_and_invalid_setup_is_reported(client):

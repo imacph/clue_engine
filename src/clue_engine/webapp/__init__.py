@@ -32,7 +32,12 @@ from ..models import (
 )
 from ..observations import EventKind, PlayerView, is_incorrect_accusation
 from ..policies import POLICY_NAMES, CustomPolicy, make_policy, policies_for_players
-from ..presentation import format_clauses, format_event
+from ..presentation import (
+    format_clauses,
+    format_event,
+    notebook_activity,
+    notebook_actor,
+)
 from ..replay import Replay, decode_replay, encode_replay
 from ..session import DebugInfo, GameSession, create_board_game, create_game
 
@@ -419,6 +424,32 @@ def _serialize_state(
                 sorted(hand) for hand in snapshot.debug_info.hands
             ],
         }
+    activity_events = snapshot.events if snapshot.debug_info is not None else view.events
+    focus_event, focus_show = notebook_activity(activity_events)
+    focus_combo = focus_event.combo if focus_event is not None else None
+    notebook_focus = {
+        "turn": (
+            snapshot.turn_player
+            if not snapshot.is_over and not snapshot.limit_reached and not game.abandoned else None
+        ),
+        "actor": notebook_actor(
+            snapshot.turn_player,
+            snapshot.to_move
+            if not snapshot.is_over and not snapshot.limit_reached and not game.abandoned else None,
+            view.player,
+            public_refutations=game.game.game_rules.public_refutations,
+            omniscient=snapshot.debug_info is not None,
+        ),
+        "kind": focus_event.kind.name.lower() if focus_event is not None else None,
+        "cards": (
+            [focus_combo.suspect_id, focus_combo.weapon_id, focus_combo.room_id]
+            if focus_combo is not None else []
+        ),
+        "shown": (
+            {"card": focus_show.card_id, "holder": focus_show.actor}
+            if focus_show is not None else None
+        ),
+    }
 
     if game.abandoned and replay_snapshot is None:
         status = "Game ended and revealed."
@@ -447,6 +478,7 @@ def _serialize_state(
         "paused": game.paused,
         "waiting_for_turn": game.waiting_for_turn,
         "num_players": snapshot.num_players,
+        "hand_sizes": view.hand_sizes,
         "human_player": snapshot.human_player,
         "selected_player": selected_player,
         "to_move": snapshot.to_move,
@@ -457,9 +489,8 @@ def _serialize_state(
         "limit_reached": snapshot.limit_reached,
         "status": status,
         "hand": sorted(view.own_hand),
-        "activity": _activity_payload(
-            snapshot.events if snapshot.debug_info is not None else view.events
-        ),
+        "activity": _activity_payload(activity_events),
+        "notebook_focus": notebook_focus,
         "events": _event_payload(snapshot.events),
         "matrix": matrix,
         "clauses": clauses,
@@ -866,6 +897,14 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 )
                 result = _serialize_state(
                     temporary, request.args, replay_snapshot=snapshot, replay_player=player,
+                )
+                result["notebook_focus"]["turn"] = (
+                    engine.state.current_player if not engine.is_over else None
+                )
+                result["notebook_focus"]["actor"] = notebook_actor(
+                    engine.state.current_player, engine.to_move, player,
+                    public_refutations=engine.state.game_rules.public_refutations,
+                    omniscient=show_all,
                 )
                 result.update(
                     mode="replay", paused=True, auto_progress=False, is_replay=True,

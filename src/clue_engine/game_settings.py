@@ -50,6 +50,8 @@ class BotStrategy:
     repeat_reveals: bool = False
     candidate_rooms: bool = False
     prefer_suggest: bool = False
+    deal_analysis: bool = False
+    risk_accusation: bool = False
 
     def __post_init__(self) -> None:
         for item in fields(self):

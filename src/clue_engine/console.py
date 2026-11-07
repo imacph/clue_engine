@@ -212,6 +212,9 @@ class ConsoleGame:
                 self._write(f"Your hand: {format_hand(snapshot.view.own_hand)}")
             else:
                 self._write("Spectator mode. Player knowledge includes private hands and shown cards.")
+            self._write("Public hand sizes: " + ", ".join(
+                f"Player {seat}: {size}" for seat, size in enumerate(snapshot.hand_sizes)
+            ))
 
             while True:
                 self._show_new_events()

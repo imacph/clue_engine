@@ -26,13 +26,13 @@ def test_default_game_remains_card_only_outside_board_player_limits(num_players)
 @pytest.mark.parametrize(
     "num_players,policy,winner,event_count,digest",
     [
-        (2, "strategic", 1, 45, "394909bdd3dce46aca68fbd49662370a1e4a3d26a3d2918f3cac10bd4bb14dfe"),
+        (2, "strategic", 0, 67, "82df85706238a0d2fcb4bc1cce934b1cc5cb780ca12b6d19fab39cb7f8349a55"),
         (
             4,
             "random,deductive,probing,strategic",
-            1,
-            88,
-            "1781a12c362c4bcb7367ba3ee7e4d8904012ad71f7528f60e4393a11e1b1960b",
+            3,
+            95,
+            "1f30b85d41882bde704f6d3a64472684703c61108e5d9d6a3f08ee70ea7d0752",
         ),
     ],
 )

@@ -77,15 +77,21 @@ def test_human_suggestion_and_private_reveal_in_real_widgets(root):
     root.update()
     assert "Colonel Mustard" in frame.hand_text.get()
     assert len(frame.notebook.get_children()) == 21
+    assert "[T/A]" in frame.notebook.heading("p0")["text"]
     frame.weapon_choice.current(1)
     frame.room_choice.current(1)
     frame.suggest_button.invoke()
     assert session.snapshot().to_move == 1
+    assert "[T]" in frame.notebook.heading("p0")["text"]
+    assert "[A]" in frame.notebook.heading("p1")["text"]
+    assert "activity" in frame.notebook.item("7")["tags"]
+    assert not frame.notebook.item("8")["tags"]
     frame.next_button.invoke()
     root.update()
     assert session.snapshot().to_move == 0
     assert "Player 1 showed Dagger to Player 0" in frame.history.get("1.0", "end")
     assert str(frame.suggest_button["state"]) == "disabled"
+    assert "[T/A]" in frame.notebook.heading("p0")["text"]
 
 
 def test_spectator_step_filters_private_information_and_reports_winner(root):
@@ -131,6 +137,23 @@ def test_spectator_selects_each_players_knowledge_and_sees_clauses(root):
     root.update()
     assert "satisfied" in frame.clauses.get("1.0", "end")
     assert frame.notebook.item("1")["values"][1] == "+"
+
+
+def test_spectator_notebook_hides_private_response_actor(root):
+    policies = [ScriptedPolicy(Suggest(SUGGESTION)), ScriptedPolicy(Reveal(7)),
+                ScriptedPolicy(), ScriptedPolicy()]
+    frame = GameFrame(root, GameSession(make_engine(), policies), paused=True)
+    frame.pack()
+    frame.next_button.invoke()
+    frame.knowledge_player_choice.current(2)
+    frame.knowledge_player_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    assert "[T]" in frame.notebook.heading("p0")["text"]
+    assert "[A]" not in frame.notebook.heading("p1")["text"]
+    frame.knowledge_player_choice.current(1)
+    frame.knowledge_player_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    assert "[A]" in frame.notebook.heading("p1")["text"]
 
 
 def test_player_cannot_switch_to_another_players_knowledge(root):

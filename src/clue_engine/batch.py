@@ -329,7 +329,7 @@ def format_summary(summary: BatchSummary) -> str:
         f"Mean completed turns by seat: {summary['mean_turns_by_seat']}",
         (f"Mean suggestions={summary['mean_suggestions']}, passes={summary['mean_passes']}, "
          f"refutations={summary['mean_refutations']}"),
-        "Policies (win rate per completed seat; deduction over all started seats):",
+        "Policies (win rate per completed seat; automatic-notebook deduction over all started seats):",
     ]
     for name, stats in summary["policy_stats"].items():
         lines.append(

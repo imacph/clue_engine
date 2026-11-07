@@ -1,3 +1,4 @@
+import random
 from copy import deepcopy
 from dataclasses import replace
 
@@ -10,6 +11,7 @@ from clue_engine.game_settings import BoardRules, GameRules
 from clue_engine.knowledge import Mark, knowledge_for
 from clue_engine.models import Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.observations import EventKind, public_events
+from clue_engine.policies import ProbingPolicy, StrategicPolicy
 from clue_engine.replay import Replay, decode_replay, encode_replay
 from clue_engine.session import GameSession, create_board_game, create_game
 from clue_engine.state import GameState
@@ -91,6 +93,43 @@ def test_face_up_cards_are_public_reproducible_and_in_initial_replay(board):
     record = Replay(deepcopy(engine.state), (), None, "automatic", ())
     restored = decode_replay(encode_replay(record))
     assert replay_history(restored.initial, restored.history).log == engine.log
+
+
+@pytest.mark.parametrize("policy", [ProbingPolicy, StrategicPolicy])
+@pytest.mark.parametrize("source", ["face_up", "public_show", "private_show"])
+def test_bot_reveal_preference_uses_actual_event_visibility(policy, source):
+    state = GameState(
+        Combination(0, 6, 12),
+        [
+            frozenset({1, 2, 3, 4, 5}),
+            frozenset({7, 8, 9, 10, 13}),
+            frozenset({11, 14, 15, 16}),
+            frozenset({17, 18, 19, 20}),
+        ],
+        0,
+        game_rules=GameRules(
+            face_up_card=source == "face_up",
+            public_refutations=source == "public_show",
+        ),
+        public_cards=(1, 7, 11, 17) if source == "face_up" else (),
+    )
+    engine = Engine(state)
+    engine.step(Suggest(Combination(0, 7, 13)))
+    if source != "face_up":
+        engine.step(Reveal(7))
+        engine.step(EndTurn())
+        engine.step(Suggest(Combination(0, 6, 12)))
+        for _ in range(3):
+            engine.step(Pass())
+        engine.step(EndTurn())
+        engine.step(Suggest(Combination(0, 7, 13)))
+        engine.step(Pass())
+        engine.step(Pass())
+    assert engine.to_move == 1
+    legal = engine.legal_actions()
+    assert Reveal(7) in legal and Reveal(13) in legal
+    result = policy(random.Random(0)).choose(engine.view(1), 4, legal)
+    assert result == Reveal(13 if source == "private_show" else 7)
 
 
 def test_stay_to_suggest_is_available_without_summoning():

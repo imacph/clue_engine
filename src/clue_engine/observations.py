@@ -44,6 +44,7 @@ class PlayerView:
     reverse_refutation: bool = False
     board_rules: BoardRules = DEFAULT_BOARD_RULES
     all_refute: bool = False
+    hand_sizes: tuple[int, ...] | None = None
 
 def refutation_events(
     refuter: int, refutation_card_id: int, suggest: Event, *, public: bool = False,
@@ -60,6 +61,7 @@ def view_for(
     reverse_refutation: bool = False,
     board_rules: BoardRules = DEFAULT_BOARD_RULES,
     all_refute: bool = False,
+    hand_sizes: tuple[int, ...] | None = None,
 ) -> PlayerView:
     return PlayerView(
         player=player,
@@ -69,6 +71,7 @@ def view_for(
         reverse_refutation=reverse_refutation,
         board_rules=board_rules,
         all_refute=all_refute,
+        hand_sizes=hand_sizes,
     )
 
 def visible_to(event: Event, player: int) -> bool:

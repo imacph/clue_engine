@@ -8,10 +8,12 @@ from clue_engine.board import Square
 from clue_engine.board_record import read_board_record, write_board_record
 from clue_engine.board_state import RoomPosition, SuspectToken
 from clue_engine.board_turn import BoardPhase, Move, Roll, UsePassage
+from clue_engine.game_settings import BotStrategy
 from clue_engine.knowledge import Mark, knowledge_for
 from clue_engine.models import Accuse, Combination, EndTurn, Reveal, Suggest
 from clue_engine.observations import Event, EventKind
 from clue_engine.policies import (
+    CustomPolicy,
     DeductivePolicy,
     ProbingPolicy,
     RandomPolicy,
@@ -56,7 +58,7 @@ def test_deductive_fixed_room_still_prefers_possible_suspects_and_weapons():
     place(engine, {0: Square(3, 6)})
     engine.step(Roll())
     engine.step(Move(RoomPosition(12)))
-    view = replace(engine.view(0), own_hand=frozenset({1, 7, 12}))
+    view = replace(engine.view(0), own_hand=frozenset({1, 7, 12}), hand_sizes=None)
     knowledge = knowledge_for(view, 3)
     policy = DeductivePolicy(random.Random(1))
     for _ in range(20):
@@ -65,6 +67,39 @@ def test_deductive_fixed_room_still_prefers_possible_suspects_and_weapons():
         assert action.combination.room_id == 12
         assert knowledge.mark_of(knowledge.envelope, action.combination.suspect_id) is not Mark.NOT_HELD
         assert knowledge.mark_of(knowledge.envelope, action.combination.weapon_id) is not Mark.NOT_HELD
+
+
+def test_strategic_routing_reaches_a_useful_room_within_the_same_roll():
+    engine, _ = create_board_game(3, 10, "random")
+    place(engine, {0: Square(6, 3)})
+    engine.state.board = replace(
+        engine.state.board, phase=BoardPhase.MOVE, remaining=6, dice=(3, 3),
+        visited=frozenset({Square(6, 3)}), starting_room=None,
+    )
+    view = replace(engine.view(0), own_hand=frozenset({1, 7, 12}), hand_sizes=None)
+    assert Move(RoomPosition(12)) in engine.legal_actions()
+    assert StrategicPolicy(random.Random(0)).choose(view, 3, engine.legal_actions()) == Move(Square(7, 3))
+    custom = CustomPolicy(random.Random(0), BotStrategy(candidate_rooms=False))
+    assert custom.choose(view, 3, engine.legal_actions()) == Move(RoomPosition(12))
+
+
+def test_strategic_routing_can_decline_a_less_useful_passage():
+    engine, _ = create_board_game(3, 10, "random")
+    place(engine, {0: RoomPosition(12)})
+    view = replace(engine.view(0), own_hand=frozenset({1, 7, 20}), hand_sizes=None)
+    assert UsePassage() in engine.legal_actions()
+    assert StrategicPolicy(random.Random(0)).choose(view, 3, engine.legal_actions()) == Roll()
+
+
+def test_strategic_suggestion_avoids_helping_an_opponent_on_a_tie():
+    engine, _ = create_board_game(3, 10, "random")
+    place(engine, {0: RoomPosition(12), 1: RoomPosition(20)})
+    engine.state.board = replace(engine.state.board, phase=BoardPhase.SUGGEST)
+    view = replace(engine.view(0), own_hand=frozenset({4, 7, 13}), hand_sizes=None)
+    own = Suggest(Combination(0, 6, 12))
+    rival = Suggest(Combination(1, 6, 12))
+    assert own in engine.legal_actions() and rival in engine.legal_actions()
+    assert StrategicPolicy(random.Random(0)).choose(view, 3, (own, rival)) == own
 
 
 @pytest.mark.parametrize("policy_cls", POLICIES)

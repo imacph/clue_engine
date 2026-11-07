@@ -41,6 +41,8 @@ def card_engine(players=4):
         frozenset({13, 14, 15, 16}),
         frozenset({17, 18, 19, 20}),
     ]
+    if players == 2:
+        hands = [hands[0], frozenset().union(*hands[1:])]
     return Engine(GameState(Combination(0, 6, 12), hands[:players], 0))
 
 

@@ -291,6 +291,15 @@ Space to cycle through unknown (`?`), held (`+`), and not held (`-`). Record
 shown cards and other deductions yourself; arrow keys move between editable
 cells. Your notes do not affect the bots.
 The right-side **Help** tab summarizes notebook and clause controls.
+In the browser and Windows app, the notebook highlights the turn owner's column
+in blue, the acting player's column in gold, and the cards in the current
+suggestion or accusation.
+An underlined cell marks a card visibly shown to the selected perspective.
+Highlights follow the current turn and replay position without revealing
+another player's private cards. During private responses, the acting column is
+highlighted only for the suggester or responder; public and omniscient views
+can highlight it for everyone. The legacy Tk notebook highlights the card rows
+and labels the turn and acting columns with `T` and `A` in their headers.
 To add a clause, select **Clause** above the notebook, then select one suspect,
 one weapon, and one room in the appropriate player's column. Select the envelope
 column instead for an incorrect accusation, where at least one card is not in
@@ -408,35 +417,56 @@ remains unchanged even if they continue to refute.
 
 ## Bot profiles
 
-All profiles use only their own player view, and accuse only when the existing
-knowledge engine has deduced the complete solution and an accusation is legal.
-They use seeded randomness for choices and ties.
+Every player's hand size is public and appears beside their notebook column.
+All profiles use only their own player view, including public hand sizes.
+By default, bots accuse only when the solution is established and an
+accusation is legal. They use seeded randomness for choices and ties.
 
 - `random`: chooses among legal card-only non-accusation actions at random.
 - `deductive`: randomly suggests cards still possible in the envelope.
 - `probing`: when possible, tests one unknown solution candidate alongside two
   controls known to be in its own hand or the envelope. It otherwise falls
-  back to `deductive` suggestions. When revealing, it prefers a card previously
-  shown to that same opponent; otherwise it chooses randomly.
-- `strategic`: uses the same probes and repeat-reveal behavior, and ranks
-  suggestions using potentially reachable responders, known blockers, unresolved
-  clauses, and remaining envelope candidates.
+  back to `deductive` suggestions. When revealing, it prefers an already public
+  matching card, then one previously shown to that same opponent; otherwise it
+  chooses randomly.
+- `strategic`: favors possible solution cards, ranks suggestions using reachable
+  responders and unresolved clauses, repeats reveals, and analyzes consistent
+  deals when the remaining solution candidates and search budget permit. When
+  at most 128 consistent deals can be completely enumerated, it also compares
+  the expected information in possible suggestion responses, assuming each
+  matching reveal is equally likely. This is a strategy model, not a guarantee
+  of how opponents will respond.
 
-The newer profiles use heuristics to select actions; they share the existing
-deduction engine rather than an exhaustive possible-deal solver. They are not
-guaranteed to win more often in every matchup. Use batch comparisons to measure
-their behavior with different opponents, seeds, and seat positions.
+The shared deduction engine uses hand sizes as well as observed cards and
+clauses. Strategic deal analysis can combine overlapping clauses with hand
+sizes and eliminate solutions proved impossible by a bounded deal search. It
+also counts consistent deals exactly when a separate bounded search completes;
+it never treats an incomplete search as proof. These additional deductions are
+used by the bot, not added to the automatic notebook.
+Suggestion selection remains heuristic and profiles are not guaranteed to win
+more often in every matchup. Use batch comparisons to measure their behavior
+with different opponents, seeds, and seat positions.
 In board mode, all profiles navigate toward reachable rooms while avoiding
-recently suggested rooms when practical. They use passages and summoned-room
-suggestions, and continue to apply their existing card and reveal heuristics.
+recently suggested rooms when practical. Strategic bots consider room usefulness
+and movement remaining, compare passages with possible dice rolls, and avoid
+summoning an opponent as a tie-breaker. They use summoned-room suggestions and
+continue to apply their card and reveal heuristics.
 The deductive profile evaluates suspect and weapon candidates even when the
 fixed room is known not to be in the solution.
 
 The browser and Windows wizard also provide custom per-bot choices for
 candidate suggestions, probes, suggestion ranking, repeat reveals, room
-preferences, and card-only suggestion priority. The toolkit score is a weighted
-summary of applicable enabled choices, not a measured difficulty or win
-probability. Named presets retain their existing policy implementations.
+preferences, card-only suggestion priority, and deal analysis. Custom bots can
+optionally make a calculated accusation when a completed analysis gives one
+solution at least 75% of consistent deals. This assumes consistent deals are
+equally likely and does not model how opponents choose actions; it is not a
+guaranteed probability and a wrong accusation eliminates the bot. Custom bots
+use response analysis when suggestion ranking is enabled together with deal
+analysis or calculated accusations, and enhanced routing when candidate-room
+preference is enabled. Guessing is off in every named preset. The toolkit score is
+a weighted summary of applicable
+enabled choices, not a measured difficulty or win probability; it excludes
+the risky-accusation setting.
 
 ## Batch statistics and private traces
 
@@ -489,6 +519,11 @@ learned, including partial games. If a policy occupies multiple seats, each
 seat is a separate exposure. A partial trace is flagged when a started game
 lacks a result or the batch result is missing; malformed traces are reported
 instead of silently skipped.
+
+Batch deduction metrics use the shared automatic-notebook deductions. They do
+not include additional deductions or guesses made by a bot's bounded deal
+analysis, so a strategic winner need not appear as having learned the solution
+in those metrics.
 
 **Traces contain all private information**, including every hand, the solution,
 and private shown cards. Keep them in a secure location and do not share them

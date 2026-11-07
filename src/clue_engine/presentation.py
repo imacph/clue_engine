@@ -15,6 +15,43 @@ def public_events(log: tuple[Event, ...]) -> tuple[Event, ...]:
     return _public_events(log)
 
 
+def notebook_activity(events: tuple[Event, ...]) -> tuple[Event | None, Event | None]:
+    """Return the current turn's combination and its latest visible reveal."""
+    shown = None
+    for index in range(len(events) - 1, -1, -1):
+        event = events[index]
+        if event.kind is EventKind.END_TURN:
+            if index == len(events) - 1 and index > 0:
+                previous = events[index - 1]
+                if previous.kind is EventKind.ACCUSE and previous.actor == event.actor:
+                    if previous.combo is None:
+                        raise ValueError("ACCUSE event without a combination")
+                    return previous, None
+            break
+        if event.kind is EventKind.SHOW and shown is None:
+            if event.card_id is None:
+                raise ValueError("SHOW event without a card")
+            shown = event
+        if event.kind in (EventKind.SUGGEST, EventKind.ACCUSE):
+            if event.combo is None:
+                raise ValueError(f"{event.kind.name} event without a combination")
+            return event, shown if event.kind is EventKind.SUGGEST else None
+    return None, None
+
+
+def notebook_actor(
+    turn: int | None, actor: int | None, viewer: int, *,
+    public_refutations: bool, omniscient: bool,
+) -> int | None:
+    """Hide private response activity from uninvolved notebook perspectives."""
+    if (
+        actor is not None and turn is not None and actor != turn
+        and viewer not in (turn, actor) and not public_refutations and not omniscient
+    ):
+        return None
+    return actor
+
+
 def format_combination(combo: Combination) -> str:
     return ", ".join(
         CARDS_BY_ID[card_id].name
@@ -88,6 +125,9 @@ def format_knowledge(view: PlayerView, num_players: int) -> str:
     labels = [f"P{i}" for i in range(num_players)] + ["Envelope"]
     symbols = {Mark.UNKNOWN: "?", Mark.HELD: "+", Mark.NOT_HELD: "-"}
     lines = [
+        "Public hand sizes: " + ", ".join(
+            f"P{seat}: {size}" for seat, size in enumerate(view.hand_sizes)
+        ) if view.hand_sizes is not None else "Public hand sizes: unavailable",
         "Knowledge (+ held, - not held, ? unknown):",
         f"{'Card':<20} " + " ".join(f"{label:>8}" for label in labels),
     ]

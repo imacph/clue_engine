@@ -60,7 +60,9 @@ def test_desktop_profiles_persist_validate_and_require_csrf(tmp_path):
     headers = {"X-CSRF-Token": token}
     profile = {
         "mode": "play", "game_type": "board", "players": 3, "seat": 0,
-        "bots": ["random", "deductive", {"repeat_reveals": True}],
+        "bots": ["random", "deductive", {
+            "repeat_reveals": True, "deal_analysis": True, "risk_accusation": True,
+        }],
         "seat_suspects": [2, 0, 1],
         "board_rules": {
             "move_suspect": False, "move_weapon": False,
