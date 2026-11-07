@@ -13,7 +13,7 @@ const source = fs.readFileSync(
 const startup = source.indexOf("\nsetTheme(document.documentElement.dataset.theme);");
 assert.notEqual(startup, -1, "Could not find frontend initialization");
 
-function frontend() {
+function frontend({ notebook = false } = {}) {
   const elements = new Map();
   function element() {
     const classes = new Set();
@@ -22,18 +22,23 @@ function frontend() {
       textContent: "",
       hidden: false,
       disabled: false,
+      dataset: {},
+      style: {},
       classList: {
         add: (value) => classes.add(value),
         remove: (value) => classes.delete(value),
         contains: (value) => classes.has(value),
+        toggle(value, enabled) { if (enabled) classes.add(value); else classes.delete(value); },
       },
       append(...children) { this.children.push(...children); },
       replaceChildren(...children) { this.children = children; },
       contains() { return false; },
+      setAttribute(name, value) { this[name] = value; },
+      querySelector() { return null; },
     };
   }
   const document = {
-    activeElement: null,
+    activeElement: { closest() { return null; } },
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, element());
       return elements.get(id);
@@ -56,19 +61,30 @@ function frontend() {
   });
   vm.runInContext(source.slice(0, startup), context);
   vm.runInContext(`
-    renderBoard = renderHand = renderNotebook = renderHistory = renderDebug =
+    renderBoard = renderHand = renderHistory = renderDebug =
       renderActions = switchBoardTab = appendCardReferences = () => {};
+    cardIllustration = () => document.createElement("svg");
     createCardFace = (card) => {
       const face = document.createElement("article");
       face.textContent = card.name;
       return face;
     };
   `, context);
+  if (!notebook) vm.runInContext("renderNotebook = () => {}", context);
   return {
     element: (id) => document.getElementById(id),
     render(state) {
       context.state = state;
       vm.runInContext("renderState(state)", context);
+    },
+    renderNotebook(state) {
+      context.state = state;
+      vm.runInContext("renderNotebook(state)", context);
+    },
+    accept(current, incoming) {
+      context.current = current;
+      context.incoming = incoming;
+      return vm.runInContext("currentState = current; acceptState(incoming); currentState", context);
     },
     select(suspect, weapon, room) {
       context.selection = { suspect, weapon, room };
@@ -79,6 +95,51 @@ function frontend() {
     },
   };
 }
+
+test("notebook renders overlapping clause references without replacing marks", () => {
+  const ui = frontend({ notebook: true });
+  const notebookState = {
+    notebook_mode: "manual", num_players: 2,
+    matrix: [
+      { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "+"], editable: [true, true] },
+      { id: 7, name: "Dagger", type: "weapon", marks: ["?", "-"], editable: [true, true] },
+    ],
+    notebook_clauses: [
+      { id: 1, holder: 1, active_cards: [0, 7] },
+      { id: 2, holder: 1, active_cards: [0] },
+      { id: 3, holder: 1, active_cards: [] },
+    ],
+  };
+  ui.renderNotebook(notebookState);
+  function descendants(node) {
+    return [node, ...node.children.flatMap(descendants)];
+  }
+  const all = descendants(ui.element("notebook"));
+  const links = all.filter((node) => node.dataset.clauseId);
+  assert.deepEqual(links.map((node) => node.textContent), ["#1", "#2", "#1"]);
+  const mark = all.find((node) => node.dataset.notebookCard === "0" && node.dataset.notebookHolder === "1");
+  assert.equal(mark.textContent, "+");
+  notebookState.notebook_clauses[0].active_cards = [];
+  ui.renderNotebook(notebookState);
+  const remaining = descendants(ui.element("notebook")).filter((node) => node.dataset.clauseId);
+  assert.deepEqual(remaining.map((node) => node.textContent), ["#2"]);
+});
+
+test("stale refresh preserves the entire manual notebook snapshot", () => {
+  const ui = frontend();
+  const current = {
+    notebook_mode: "manual", notebook_revision: 3, matrix: ["new"],
+    notebook_clauses: [{ id: 2 }],
+  };
+  const incoming = {
+    notebook_mode: "manual", notebook_revision: 2, matrix: ["old"],
+    notebook_clauses: [{ id: 1 }],
+  };
+  const accepted = ui.accept(current, incoming);
+  assert.deepEqual(accepted.matrix, ["new"]);
+  assert.deepEqual(accepted.notebook_clauses, [{ id: 2 }]);
+  assert.equal(accepted.notebook_revision, 3);
+});
 
 function state(overrides = {}) {
   return {

@@ -377,6 +377,9 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
 .manual-notebook .category-table td:not(:first-child) { padding: 0 2px; }
 .notebook-mark { background: transparent; border: 0; border-radius: 4px; color: inherit; cursor: pointer; font: inherit; height: 22px; padding: 0; width: 100%; }
 .notebook-mark:hover { background: var(--card-tint); }
+.clause-references { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+.clause-reference { background: var(--table-head); border: 1px solid var(--table-border); border-radius: 3px; color: var(--blue-dark); cursor: pointer; font: 700 .65rem/1.2 "Segoe UI", Arial, sans-serif; padding: 1px 2px; }
+.clause-selected { outline: 2px solid var(--blue); outline-offset: -2px; }
 #notebook-instructions { font-size: .73rem; line-height: 1.25; margin: 3px 0 0; }
 .matrix-card-label { align-items: center; display: flex; gap: 4px; min-width: 0; }
 .matrix-card-label > span:last-child { min-width: 0; overflow-wrap: anywhere; }
@@ -398,6 +401,17 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
 .event-text { min-width: 0; }
 .history-list .empty-history { color: var(--muted); display: block; padding: 12px 3px; }
 .clauses-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.clauses-content { min-height: 0; overflow: auto; }
+.clause-form { border: 1px solid var(--table-border); border-radius: 7px; display: grid; gap: 6px; margin-top: 6px; padding: 8px; }
+.clause-form h4, .clause-form p { margin: 0; }
+.clause-form fieldset { border: 1px solid var(--table-border); margin: 0; min-width: 0; }
+.clause-card-options { display: grid; gap: 3px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); max-height: 180px; overflow: auto; }
+.clause-card-options label { align-items: center; display: flex; font-size: .75rem; gap: 4px; }
+.clause-card-options input { min-height: 0; width: auto; }
+.clause-item { border-bottom: 1px solid var(--table-border); padding: 6px 2px; }
+.clause-item p { margin: 3px 0; }
+.clause-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.clause-actions .button { font-size: .7rem; min-height: 0; padding: 3px 6px; }
 .clauses {
   background: var(--clauses-bg);
   border: 1px solid var(--table-border);
@@ -408,7 +422,7 @@ button.playing-card[aria-pressed="true"] { outline: 2px solid var(--focus); outl
   min-height: 0;
   overflow: auto;
   padding: 8px;
-  white-space: pre-wrap;
+  white-space: normal;
 }
 .debug-panel { background: var(--debug-bg); border: 1px solid var(--debug-border); border-radius: 8px; color: var(--debug-ink); max-height: 58px; overflow: auto; padding: 6px 10px; white-space: pre-wrap; }
 .error-message { background: var(--danger-bg); border-left: 4px solid var(--red); color: var(--danger-ink); padding: 10px 14px; }
@@ -447,7 +461,7 @@ body.game-active .hand-panel { grid-column: 1 / -1; grid-row: 1; }
 body.game-active .notebook-panel { grid-column: 1; grid-row: 2; }
 body.game-active .insights-column { grid-column: 2; grid-row: 2; }
 body.game-active .notebook-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-body.game-active .category-table { overflow: hidden; }
+body.game-active .category-table { overflow: auto; }
 body.game-active .category-table table { min-width: 0; }
 
 @media (min-width: 901px) and (min-height: 621px) {

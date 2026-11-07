@@ -282,12 +282,25 @@ other cell begins unknown. Activate a cell with the mouse, touch, Enter, or
 Space to cycle through unknown (`?`), held (`+`), and not held (`-`). Record
 shown cards and other deductions yourself; arrow keys move between editable
 cells. Your notes do not affect the bots.
-Automatic deduction clauses are disabled in manual mode, while the history and
-cards shown to you remain available. Choose **Automatic** in setup to use the
-read-only deduction matrix and clauses instead. Spectator games always use the
-automatic notebook for the selected player's view.
+Use **Add clause** to link one or more cards for a player who holds at least
+one, or for an incorrect accusation where at least one card is not in the
+envelope. A numbered reference appears in each linked cell; select it to inspect
+the clause, or use **Highlight** in the Clauses tab. References are notebook
+clause numbers, not history event numbers. Multiple clauses can share a cell.
+You can edit, resolve, reopen, or delete your clauses. Changing a mark does not
+change your clauses, and resolving a clause does not change marks. Your notes
+may therefore disagree; they are not checked against the deal. Manual clauses
+are authored by you, not automatically generated from game events.
 
-Manual notes belong to the current game and survive updates and page reloads
+Choose **Automatic** in setup to use the read-only deduction matrix and clauses
+instead. Linked references automatically narrow as cards are ruled out and
+disappear when a clause is satisfied; the original clause remains in the list.
+Refutation clauses and incorrect-accusation clauses express opposite conditions,
+as described in the list. Spectator games always use the automatic notebook for
+the selected player's view. Actor and type filters affect the clause list only,
+not the linked cells; player-authored accusation notes have no actor.
+
+Manual marks and clauses belong to the current game and survive updates and page reloads
 while its local server session remains active. They are not saved as a game
 file: starting a new game, restarting the server, or allowing the session to
 expire discards them. Existing setup profiles without a notebook setting load
@@ -296,6 +309,14 @@ with the manual player default. For compatibility, HTTP callers that omit
 `"manual"` explicitly to opt in. In manual mode, `PUT /api/notebook` accepts
 `card_id`, a zero-based `holder` (the number of players denotes the envelope),
 and a `mark` of `?`, `+`, or `-`.
+Manual clause notes are created with `POST /api/notebook/clauses` and edited or
+deleted at `/api/notebook/clauses/<id>` using `PUT` or `DELETE`. Create and edit
+requests contain `kind` (`refute` or `accuse`), a zero-based `holder` (the
+envelope is the number of players), a nonempty `cards` array of distinct card
+IDs, and a boolean `resolved`. These operations use the same session and CSRF
+protection as notebook mark edits. State responses include unfiltered
+`notebook_clauses` with their original cards, active links, and status; the
+existing textual `clauses` field remains available.
 
 The wizard offers per-bot presets and custom strategy controls, plus standard
 rules and optional board house rules. The strategy toolkit score describes the

@@ -20,7 +20,7 @@ from ..cards import CARDS, CARDS_BY_ID
 from ..desktop_preferences import DesktopPreferences
 from ..engine import IllegalActionError
 from ..game_settings import BoardRules, BotStrategy
-from ..knowledge import Mark, knowledge_for
+from ..knowledge import Knowledge, Mark, knowledge_for
 from ..models import (
     Accuse,
     Action,
@@ -30,7 +30,7 @@ from ..models import (
     Reveal,
     Suggest,
 )
-from ..observations import EventKind
+from ..observations import EventKind, PlayerView, is_incorrect_accusation
 from ..policies import POLICY_NAMES, CustomPolicy, make_policy, policies_for_players
 from ..presentation import format_clauses, format_event
 from ..session import GameSession, create_board_game, create_game
@@ -50,9 +50,75 @@ class WebGame:
     waiting_for_turn: bool = False
     notebook_mode: str = "automatic"
     notebook_marks: dict[tuple[int, int], str] = field(default_factory=dict)
+    notebook_clauses: dict[int, dict[str, Any]] = field(default_factory=dict)
+    next_clause_id: int = 1
     notebook_revision: int = 0
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+def _automatic_clauses(view: PlayerView, knowledge: Knowledge) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    suggested: list[int] | None = None
+    for index, event in enumerate(view.events):
+        if event.kind is EventKind.SUGGEST:
+            if event.combo is None:
+                raise ValueError("SUGGEST event without a combination")
+            suggested = sorted((event.combo.suspect_id, event.combo.weapon_id, event.combo.room_id))
+        elif event.kind is EventKind.REFUTE:
+            if suggested is None:
+                raise ValueError("REFUTE before any SUGGEST")
+            result.append({
+                "id": len(result) + 1, "kind": "refute", "holder": event.actor,
+                "actor": event.actor, "cards": suggested,
+            })
+        elif is_incorrect_accusation(view.events, index):
+            if event.combo is None:
+                raise ValueError("ACCUSE event without a combination")
+            result.append({
+                "id": len(result) + 1, "kind": "accuse", "holder": knowledge.envelope,
+                "actor": event.actor,
+                "cards": sorted((event.combo.suspect_id, event.combo.weapon_id, event.combo.room_id)),
+            })
+    for clause in result:
+        target = Mark.HELD if clause["kind"] == "refute" else Mark.NOT_HELD
+        satisfied = any(
+            knowledge.mark_of(clause["holder"], card) is target for card in clause["cards"]
+        )
+        clause["status"] = "satisfied" if satisfied else "unresolved"
+        clause["active_cards"] = [] if satisfied else [
+            card for card in clause["cards"]
+            if knowledge.mark_of(clause["holder"], card) is Mark.UNKNOWN
+        ]
+    return result
+
+
+def _manual_clause(body: dict[str, Any], num_players: int) -> dict[str, Any]:
+    if set(body) != {"kind", "holder", "cards", "resolved"}:
+        raise ValueError("Supply kind, holder, cards, and resolved.")
+    kind = body["kind"]
+    holder = _integer(body, "holder")
+    cards = body["cards"]
+    resolved = body["resolved"]
+    if kind not in ("refute", "accuse"):
+        raise ValueError("Clause type must be refute or accuse.")
+    if (kind == "refute" and not 0 <= holder < num_players) or (
+        kind == "accuse" and holder != num_players
+    ):
+        raise ValueError("Clause holder must identify a player, or the envelope for an accusation.")
+    if (
+        not isinstance(cards, list) or not cards
+        or any(type(card) is not int or card not in CARDS_BY_ID for card in cards)
+        or len(set(cards)) != len(cards)
+    ):
+        raise ValueError("Choose one or more distinct cards.")
+    if type(resolved) is not bool:
+        raise ValueError("resolved must be a boolean.")
+    return {
+        "kind": kind, "holder": holder, "actor": holder if kind == "refute" else None,
+        "cards": sorted(cards), "status": "resolved" if resolved else "unresolved",
+        "active_cards": [] if resolved else sorted(cards),
+    }
 
 
 def _card_options() -> dict[str, list[dict[str, Any]]]:
@@ -378,6 +444,10 @@ def _serialize_state(game: WebGame, query: Any) -> dict[str, Any]:
         "events": _event_payload(snapshot.events),
         "matrix": matrix,
         "clauses": clauses,
+        "notebook_clauses": (
+            _automatic_clauses(view, knowledge) if knowledge is not None
+            else list(game.notebook_clauses.values())
+        ),
         "debug_info": debug_info,
         "legal": {
             "suggest": bool(suggestions),
@@ -657,6 +727,34 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 else:
                     game.notebook_marks[key] = mark
                 game.notebook_revision += 1
+            return jsonify(_serialize_state(game, {}))
+
+    @app.route("/api/notebook/clauses", methods=["POST"])
+    @app.route("/api/notebook/clauses/<int:clause_id>", methods=["PUT", "DELETE"])
+    def update_notebook_clause(clause_id: int | None = None):
+        game = _game_from_request(games, games_lock)
+        if game is None:
+            return jsonify(error="Start a game before editing its notebook."), 404
+        with game.lock:
+            if game.notebook_mode != "manual" or game.game.snapshot().view is None:
+                return jsonify(error="This notebook is automatic and cannot be edited."), 409
+            if clause_id is not None and clause_id not in game.notebook_clauses:
+                return jsonify(error="Clause not found."), 404
+            if request.method == "DELETE":
+                del game.notebook_clauses[clause_id]
+                game.notebook_revision += 1
+            else:
+                try:
+                    clause = _manual_clause(_json_body(), game.game.snapshot().num_players)
+                except (TypeError, ValueError) as exc:
+                    return jsonify(error=str(exc)), 400
+                if clause_id is None:
+                    clause_id = game.next_clause_id
+                    game.next_clause_id += 1
+                clause["id"] = clause_id
+                if game.notebook_clauses.get(clause_id) != clause:
+                    game.notebook_clauses[clause_id] = clause
+                    game.notebook_revision += 1
             return jsonify(_serialize_state(game, {}))
 
     @app.post("/api/action")

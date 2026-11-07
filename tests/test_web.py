@@ -3,9 +3,10 @@ import re
 import pytest
 
 from clue_engine.engine import Engine
-from clue_engine.models import Combination, EndTurn, Reveal, Suggest
+from clue_engine.knowledge import Mark, knowledge_for
+from clue_engine.models import Accuse, Combination, EndTurn, Reveal, Suggest
 from clue_engine.state import GameState
-from clue_engine.webapp import create_app
+from clue_engine.webapp import _automatic_clauses, create_app
 
 
 class ScriptedPolicy:
@@ -254,6 +255,110 @@ def test_manual_notebooks_are_isolated_between_sessions():
     assert next(row for row in other["matrix"] if row["id"] == card_id)["marks"][1] == "?"
 
 
+@pytest.mark.parametrize("game_type,players", [("card_only", 4), ("board", 3)])
+def test_manual_clause_lifecycle_is_independent_of_marks(client, game_type, players):
+    token = csrf_token(client)
+    headers = {"X-CSRF-Token": token}
+    config = {
+        "game_type": game_type, "players": players, "seat": 0,
+        "seed": 42, "progress": "step", "notebook_mode": "manual",
+    }
+    initial = post(client, token, "/api/game", config).get_json()
+    free = [row["id"] for row in initial["matrix"] if row["id"] not in initial["hand"]]
+    refute = {"kind": "refute", "holder": 1, "cards": free[:3], "resolved": False}
+    accusation = {"kind": "accuse", "holder": players, "cards": free[:3], "resolved": False}
+    state = post(client, token, "/api/notebook/clauses", refute).get_json()
+    assert state["notebook_revision"] == 1
+    assert state["notebook_clauses"] == [{
+        "id": 1, "kind": "refute", "holder": 1, "actor": 1,
+        "cards": sorted(free[:3]), "active_cards": sorted(free[:3]), "status": "unresolved",
+    }]
+    state = post(client, token, "/api/notebook/clauses", accusation).get_json()
+    assert [clause["id"] for clause in state["notebook_clauses"]] == [1, 2]
+    assert state["notebook_clauses"][1]["holder"] == players
+    state = client.put(
+        "/api/notebook", json={"card_id": free[0], "holder": 1, "mark": "+"}, headers=headers,
+    ).get_json()
+    assert state["notebook_clauses"][0]["active_cards"] == sorted(free[:3])
+    refute["cards"] = free[1:3]
+    refute["resolved"] = True
+    state = client.put("/api/notebook/clauses/1", json=refute, headers=headers).get_json()
+    assert state["notebook_clauses"][0]["status"] == "resolved"
+    assert state["notebook_clauses"][0]["active_cards"] == []
+    assert state["notebook_clauses"][0]["cards"] == sorted(free[1:3])
+    revision = state["notebook_revision"]
+    assert client.put(
+        "/api/notebook/clauses/1", json=refute, headers=headers,
+    ).get_json()["notebook_revision"] == revision
+    assert client.get("/api/state?clause_kind=accuse").get_json()["notebook_clauses"] == (
+        state["notebook_clauses"]
+    )
+    assert client.delete("/api/notebook/clauses/1", headers=headers).status_code == 200
+    state = post(client, token, "/api/notebook/clauses", refute).get_json()
+    assert [clause["id"] for clause in state["notebook_clauses"]] == [2, 3]
+    assert client.get("/api/state").get_json()["notebook_clauses"] == state["notebook_clauses"]
+    assert post(client, token, "/api/game", config).get_json()["notebook_clauses"] == []
+
+
+def test_manual_clause_validation_and_session_isolation():
+    app = create_app()
+    first, second = app.test_client(), app.test_client()
+    first_token, second_token = csrf_token(first), csrf_token(second)
+    config = {"notebook_mode": "manual", "seed": 12, "progress": "step"}
+    post(first, first_token, "/api/game", config)
+    post(second, second_token, "/api/game", config)
+    clause = {"kind": "refute", "holder": 1, "cards": [0, 7, 13], "resolved": False}
+    for bad in (
+        {**clause, "kind": "other"}, {**clause, "holder": 4},
+        {**clause, "kind": "accuse"}, {**clause, "cards": []},
+        {**clause, "cards": [0, 0]}, {**clause, "cards": [True]},
+        {**clause, "cards": [999]}, {**clause, "resolved": 1},
+        {**clause, "extra": 1},
+    ):
+        assert post(first, first_token, "/api/notebook/clauses", bad).status_code == 400
+    assert first.post("/api/notebook/clauses", json=clause).status_code == 403
+    assert post(first, first_token, "/api/notebook/clauses", clause).status_code == 200
+    assert second.get("/api/state").get_json()["notebook_clauses"] == []
+    assert second.delete(
+        "/api/notebook/clauses/1", headers={"X-CSRF-Token": second_token},
+    ).status_code == 404
+    post(first, first_token, "/api/game", {"progress": "step"})
+    assert post(first, first_token, "/api/notebook/clauses", clause).status_code == 409
+
+
+def test_automatic_clause_identity_and_types_follow_public_events():
+    engine = make_engine()
+    engine.step(Suggest(Combination(0, 7, 13)))
+    engine.step(Reveal(7))
+    view = engine.view(0)
+    before = _automatic_clauses(view, knowledge_for(view, engine.num_players))
+    assert before[0]["status"] == "satisfied"
+    engine.step(EndTurn())
+    engine.step(Accuse(Combination(2, 8, 14)))
+    engine.step(Accuse(Combination(2, 8, 14)))
+    view = engine.view(0)
+    after = _automatic_clauses(view, knowledge_for(view, engine.num_players))
+    assert after[0] == before[0]
+    assert [clause["id"] for clause in after] == [1, 2, 3]
+    assert [clause["actor"] for clause in after] == [1, 1, 2]
+    assert all(clause["kind"] == "accuse" and clause["holder"] == 4 for clause in after[1:])
+    assert all(clause["status"] == "satisfied" for clause in after[1:])
+    other = engine.view(3)
+    other_clauses = _automatic_clauses(other, knowledge_for(other, engine.num_players))
+    assert [clause["id"] for clause in other_clauses] == [1, 2, 3]
+    assert other_clauses[1]["status"] == "unresolved"
+    assert other_clauses[1]["active_cards"] == [2, 8, 14]
+    other_knowledge = knowledge_for(other, engine.num_players)
+    other_knowledge.marks[other_knowledge.envelope][2] = Mark.HELD
+    narrowed = _automatic_clauses(other, other_knowledge)[1]
+    assert narrowed["status"] == "unresolved"
+    assert narrowed["active_cards"] == [8, 14]
+    other_knowledge.marks[other_knowledge.envelope][8] = Mark.NOT_HELD
+    satisfied = _automatic_clauses(other, other_knowledge)[1]
+    assert satisfied["status"] == "satisfied"
+    assert satisfied["active_cards"] == []
+
+
 @pytest.mark.parametrize("players", [2, 7])
 def test_default_card_only_web_game_supports_counts_outside_board_range(client, players):
     token = csrf_token(client)
@@ -315,10 +420,16 @@ def test_spectator_history_hides_private_show_and_notebook_uses_selected_view(
     assert dagger["marks"][1] == "+"
     assert private_view["activity"]["card_id"] == 7
     assert all(event["kind"] != "show" for event in private_view["events"])
+    assert private_view["notebook_clauses"][0]["status"] == "satisfied"
+    assert private_view["notebook_clauses"][0]["active_cards"] == []
 
     unrelated_view = client.get("/api/state?player=2").get_json()
     assert unrelated_view["activity"]["kind"] == "refute"
     assert "card_id" not in unrelated_view["activity"]
+    clause = unrelated_view["notebook_clauses"][0]
+    assert clause["id"] == private_view["notebook_clauses"][0]["id"]
+    assert clause["status"] == "unresolved"
+    assert clause["active_cards"] == [0, 7]
 
 
 def test_mutations_require_csrf_and_invalid_setup_is_reported(client):

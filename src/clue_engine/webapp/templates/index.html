@@ -322,6 +322,7 @@
             </div>
             <div id="notebook-heading-tools" class="notebook-heading-tools">
               <span class="legend"><b>+</b> held <b>−</b> not held <b>?</b> unknown<span class="board-envelope-legend"> <b>E</b> envelope</span></span>
+              <button id="add-clause" class="button button-quiet" type="button" hidden>Add clause</button>
             </div>
           </div>
           <div id="notebook" class="notebook-grid" aria-label="Knowledge matrix"></div>
@@ -358,7 +359,27 @@
                 </label>
               </div>
             </div>
-            <pre id="clauses" class="clauses"></pre>
+            <div class="clauses-content">
+              <form id="clause-form" class="clause-form" hidden>
+                <h4 id="clause-form-title">Add a clause</h4>
+                <p class="hint">These are your notes. Changing marks will not change a clause.</p>
+                <label>Type
+                  <select id="clause-form-kind">
+                    <option value="refute">Player holds at least one</option>
+                    <option value="accuse">At least one is not in the envelope</option>
+                  </select>
+                </label>
+                <label id="clause-form-holder-field">Player
+                  <select id="clause-form-holder"></select>
+                </label>
+                <fieldset><legend>Linked cards</legend><div id="clause-form-cards" class="clause-card-options"></div></fieldset>
+                <div class="clause-actions">
+                  <button class="button button-secondary" type="submit">Save clause</button>
+                  <button id="cancel-clause" class="button button-quiet" type="button">Cancel</button>
+                </div>
+              </form>
+              <div id="clauses" class="clauses" aria-label="Notebook clauses" tabindex="-1"></div>
+            </div>
           </section>
         </div>
 
