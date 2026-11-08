@@ -1459,6 +1459,116 @@ test("replay replaces the card browser without adding a workspace tab", () => {
   assert.equal(ui.element("hand-cards").hidden, false);
 });
 
+test("replay speed selector exposes faster modes without changing the default", () => {
+  const selector = template.match(/<select id="replay-speed"[^>]*>([\s\S]*?)<\/select>/);
+  assert.ok(selector);
+  assert.deepEqual(
+    [...selector[1].matchAll(/<option value="([^"]+)"( selected)?>([^<]+)<\/option>/g)]
+      .map(([, value, selected, label]) => [value, Boolean(selected), label]),
+    [["2000", false, "0.5×"], ["1000", true, "1×"], ["500", false, "2×"],
+      ["250", false, "4×"], ["125", false, "8×"], ["62.5", false, "16×"]],
+  );
+});
+
+for (const [speed, scale] of [[250, 0.5], [125, 0.25], [62.5, 0.125]]) {
+  test(`replay at ${1000 / speed}x scales activity pauses and animations`, async () => {
+    const ui = frontend();
+    ui.element("replay-speed").value = String(speed);
+    const result = ui.evaluate(`(() => {
+      replayPlaying = true;
+      currentState = { is_replay: true, selected_player: 0, steps: 1,
+        activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+        events: [{ kind: "suggest", number: 1 }] };
+      cardAnimationKind(currentState);
+      const suggestion = cardActivityReadUntil - performance.now();
+      currentState.steps++;
+      currentState.events.unshift({ kind: "pass", actor: 1, number: 2 });
+      cardAnimationKind(currentState);
+      const pass = cardActivityReadUntil - performance.now();
+      currentState.steps++;
+      currentState.activity = { kind: "reveal", actor: 1, card_id: 7 };
+      currentState.events.unshift({ kind: "show", number: 3 });
+      cardAnimationKind(currentState);
+      const reveal = cardActivityReadUntil - performance.now();
+      const container = document.createElement("div");
+      renderMiniCards(container, [7], {}, 7, true);
+      const revealAnimation = container.children[0].style.animationDuration;
+      const records = [];
+      $("board-dynamic").querySelector = () => ({
+        getClientRects: () => [1],
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }),
+      });
+      const card = { getClientRects: () => [1],
+        getBoundingClientRect: () => ({ left: 20, top: 20, width: 10, height: 10 }),
+        animate: (_, options) => records.push(options),
+        cloneNode: () => ({ style: {}, classList: { add() {} }, setAttribute() {}, remove() {},
+          animate(_, options) {
+            records.push(options);
+            return { finished: new Promise((resolve) => { globalThis.finishFlights.push(resolve); }), cancel() {} };
+          } }),
+      };
+      globalThis.finishFlights = [];
+      currentState.board = { suspects: [{ id: 2, seat: 1 }] };
+      currentState.activity = { actor: 1 };
+      animateSuggestionFromBoard(currentState, { children: [card, card] });
+      return { suggestion, pass, reveal, revealAnimation, duration: records[0].duration,
+        secondDelay: records[2].delay };
+    })()`);
+    assert.equal(result.suggestion, 800 * scale);
+    assert.equal(result.pass, 1200 * scale);
+    assert.equal(result.reveal, 800 * scale);
+    assert.equal(result.revealAnimation, `${650 * scale}ms`);
+    assert.equal(result.duration, 850 * scale);
+    assert.equal(result.secondDelay, 100 * scale);
+    ui.evaluate("finishFlights[0]()");
+    await Promise.resolve();
+    assert.equal(ui.evaluate("suggestionFlights.length"), 1);
+    ui.evaluate("cardActivityReadUntil = 0; finishFlights[1]()");
+    await Promise.resolve();
+    assert.equal(ui.evaluate("cardActivityReadUntil - performance.now()"), 800 * scale);
+    ui.evaluate("clearSuggestionFlights(); replayPlaying = false");
+    assert.equal(ui.evaluate("replayActivityScale(currentState)"), 1);
+    ui.evaluate("replayPlaying = true; currentState.is_replay = false");
+    assert.equal(ui.evaluate("replayActivityScale(currentState)"), 1);
+  });
+}
+
+test("faster replay schedules steps serially and waits for scaled reading time", async () => {
+  const ui = frontend();
+  ui.element("replay-speed").value = "125";
+  ui.evaluate(`let now = 10000; performance.now = () => now;
+    replayMode = true; currentState = { is_replay: true, position: 0, positions: 4, steps: 1,
+      selected_player: 0, activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", number: 1 }, { kind: "pass", actor: 1, number: 2 }] };
+    loadReplay = async () => { currentState.position = Number($("replay-position").value); return true; };
+    toggleReplayPlayback();
+    currentState.events.reverse(); cardAnimationKind(currentState)`);
+  let [id, timer] = [...ui.timers.entries()][0];
+  assert.equal(timer.delay, 125);
+  ui.timers.delete(id);
+  ui.evaluate("now += 125");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 0);
+  [id, timer] = [...ui.timers.entries()][0];
+  assert.equal(timer.delay, 175);
+  ui.timers.delete(id);
+  ui.evaluate("now += 175");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 1);
+  assert.equal(ui.timers.size, 1);
+  ui.element("replay-speed").value = "62.5";
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 2);
+  [id, timer] = [...ui.timers.entries()][0];
+  assert.equal(timer.delay, 62.5);
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 3);
+  assert.equal(ui.timers.size, 0);
+});
+
 test("replay playback runs serially, respects speed, pauses, and stops at the end", async () => {
   const ui = frontend();
   ui.element("replay-speed").value = "500";

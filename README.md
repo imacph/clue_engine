@@ -452,6 +452,8 @@ notebook edits, jump between turns, or play continuously at a chosen speed.
 Playback stops at the end; manual navigation or changing the replay perspective
 pauses it. Select a player to see their notebook and automatic deductions
 based only on what that player had observed at that point.
+Playback speeds range from 0.5× to 16×. At 4× and above, suggestion animations
+and reading pauses also shorten; a changed speed takes effect on the next step.
 For a human manual notebook, **Original notes** shows the marks and clauses
 actually recorded, including intermediate edits. **Reveal all** additionally
 shows the solution, all hands, and private events. Replay is read-only.

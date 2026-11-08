@@ -23,6 +23,8 @@
 - Restyle batch results as a compact, tabbed game workspace and replace the
   scrolling bin list with a fixed-height distribution graph and accessible
   exact-bin data.
+- Add 4×, 8×, and 16× replay speeds, shortening replay animation and reading
+  pauses at those speeds.
 
 ## Desktop 0.4.1 / App 0.6.1 / API 0.6.2 - 2026-11-07
 

@@ -1625,6 +1625,12 @@ function renderActivityPasses(state) {
   $("activity-passes").title = summary;
 }
 
+function replayActivityScale(state) {
+  return state?.is_replay && replayPlaying
+    ? Math.min(1, Number($("replay-speed").value) / 500)
+    : 1;
+}
+
 function cardAnimationKind(state) {
   const activity = cardActivity(state);
   const eventKind = activity?.kind === "reveal" ? "show" : activity?.kind;
@@ -1641,7 +1647,7 @@ function cardAnimationKind(state) {
   if (previous && (previous.key === key || previous.perspective !== perspective
     || state.steps <= previous.step)) return null;
   cardActivityReadUntil = performance.now()
-    + (activity.kind === "pass" ? cardPassReadTime : cardActivityReadTime);
+    + (activity.kind === "pass" ? cardPassReadTime : cardActivityReadTime) * replayActivityScale(state);
   if (activity.kind === "pass" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
   return activity.kind;
 }
@@ -1652,6 +1658,7 @@ function animateSuggestionFromBoard(state, container) {
   const pawn = $("board-dynamic").querySelector(`[data-pawn-id="${actor.id}"]`);
   if (!pawn || !pawn.getClientRects().length) return;
   const origin = pawn.getBoundingClientRect();
+  const scale = replayActivityScale(state);
   for (const [index, card] of [...container.children].entries()) {
     if (!card.getClientRects().length) continue;
     const target = card.getBoundingClientRect();
@@ -1666,8 +1673,8 @@ function animateSuggestionFromBoard(state, container) {
     document.body.append(clone);
     const dx = origin.left + origin.width / 2 - (target.left + target.width / 2);
     const dy = origin.top + origin.height / 2 - (target.top + target.height / 2);
-    const duration = 850;
-    const delay = index * 100;
+    const duration = 850 * scale;
+    const delay = index * 100 * scale;
     const animation = clone.animate([
       { transform: `translate(${dx}px, ${dy}px) scale(.25)`, opacity: .35 },
       { transform: "translate(0, 0) scale(1)", opacity: 1 },
@@ -1682,7 +1689,7 @@ function animateSuggestionFromBoard(state, container) {
       const active = suggestionFlights.includes(flight);
       suggestionFlights = suggestionFlights.filter((item) => item !== flight);
       if (active && !suggestionFlights.length) {
-        cardActivityReadUntil = performance.now() + cardActivityReadTime;
+        cardActivityReadUntil = performance.now() + cardActivityReadTime * scale;
       }
     }, () => {
       clone.remove();
@@ -1812,7 +1819,11 @@ function renderMiniCards(container, cardIds, notes, shownCardId = null, animateR
     const face = createCardFace(card, { mini: true, notes });
     if (id === shownCardId) {
       face.classList.add("shown-card");
-      if (animateReveal) face.classList.add("reveal-enter");
+      if (animateReveal) {
+        face.classList.add("reveal-enter");
+        const scale = replayActivityScale(currentState);
+        if (scale < 1) face.style.animationDuration = `${650 * scale}ms`;
+      }
     }
     container.append(face);
   }
@@ -3130,7 +3141,8 @@ function scheduleReplayPlayback(generation, delay = Number($("replay-speed").val
     if (!replayPlaying || generation !== replayPlaybackGeneration || !currentState?.is_replay) return;
     if (cardActivityPending()) {
       const remaining = Math.max(0, cardActivityReadUntil - performance.now());
-      scheduleReplayPlayback(generation, suggestionFlights.length ? 100 : Math.max(1, remaining));
+      const flightPoll = Math.min(100, Number($("replay-speed").value) / 5);
+      scheduleReplayPlayback(generation, suggestionFlights.length ? flightPoll : Math.max(1, remaining));
       return;
     }
     $("replay-position").value = String(currentState.position + 1);
