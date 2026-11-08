@@ -6,7 +6,12 @@ import pytest
 from clue_engine.board_state import RoomPosition
 from clue_engine.board_turn import Move, Roll, UsePassage, legal_board_actions
 from clue_engine.knowledge import knowledge_for
-from clue_engine.learning_policy import LearningPolicy, LinearModel, suggestion_features
+from clue_engine.learning_policy import (
+    FEATURE_COUNT,
+    LearningPolicy,
+    LinearModel,
+    suggestion_features,
+)
 from clue_engine.models import Accuse, Combination, Reveal, Suggest
 from clue_engine.observations import Event, EventKind, view_for
 from clue_engine.session import create_board_game, create_game
@@ -16,7 +21,7 @@ def test_model_validates_dimensions_and_finite_values():
     with pytest.raises(ValueError):
         LinearModel((0.0,), (0.0,))
     with pytest.raises(ValueError):
-        LinearModel((float("nan"),) * 8, (0.0,) * 8)
+        LinearModel((float("nan"),) * FEATURE_COUNT, (0.0,) * FEATURE_COUNT)
 
 
 def test_policy_rejects_card_only_games():
@@ -37,7 +42,15 @@ def test_suggestions_use_only_legal_actions_and_player_visible_features():
     policy = LearningPolicy(random.Random(3), LinearModel.zeros())
     picked = policy._board_suggestion(view, knowledge, choices)
     assert picked in choices
-    assert len(suggestion_features(view, knowledge, picked)) == 8
+    components = policy._suggestion_components(
+        view, knowledge, choices, prefer_probe=False,
+    )
+    features = suggestion_features(view, knowledge, picked, components[picked])
+    assert len(features) == FEATURE_COUNT
+    assert features[9] == 1
+    assert features[12] > 0
+    assert features[13] == 1
+    assert 0 < features[14] <= 1
 
 
 def test_suggestion_selector_excludes_known_impossible_suspect_and_weapon():
@@ -114,7 +127,7 @@ def test_room_features_do_not_depend_on_hidden_solution():
     policy = LearningPolicy(random.Random(1), LinearModel.zeros())
     first = policy._room_candidates(view, knowledge_for(view, 4), engine.legal_actions())
     assert first
-    assert all(len(features) == 8 for _, features in first)
+    assert all(len(features) == FEATURE_COUNT for _, features in first)
     assert all(isinstance(room, int) for room, _ in first)
 
 

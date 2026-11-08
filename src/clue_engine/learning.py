@@ -13,7 +13,8 @@ from .session import create_board_game
 DEFAULT_OPPONENTS = ("deductive", "probing", "strategic")
 ANALYTICAL_OPPONENTS = ("deductive", "strategic", "analytical")
 TOURNAMENT_POOLS = (DEFAULT_OPPONENTS, ANALYTICAL_OPPONENTS)
-MODEL_SCHEMA = 1
+MODEL_SCHEMA = 2
+LEGACY_FEATURE_COUNT = 8
 
 
 def save_model(path: Path, model: LinearModel, metadata: dict[str, object]) -> None:
@@ -30,19 +31,25 @@ def save_model(path: Path, model: LinearModel, metadata: dict[str, object]) -> N
 
 def load_model(path: Path) -> LinearModel:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(data, dict) or type(data.get("schema")) is not int
-        or data["schema"] != MODEL_SCHEMA
-    ):
+    if not isinstance(data, dict) or type(data.get("schema")) is not int:
         raise ValueError("unsupported learned model schema")
+    schema = data["schema"]
+    if schema not in (1, MODEL_SCHEMA):
+        raise ValueError("unsupported learned model schema")
+    expected_count = LEGACY_FEATURE_COUNT if schema == 1 else FEATURE_COUNT
     weights = []
     for key in ("room_weights", "suggestion_weights"):
         values = data.get(key)
-        if not isinstance(values, list) or not all(
+        if (
+            not isinstance(values, list) or len(values) != expected_count or not all(
             type(value) in (int, float) and math.isfinite(value) for value in values
+            )
         ):
             raise ValueError(f"invalid {key}")
-        weights.append(tuple(float(value) for value in values))
+        converted = tuple(float(value) for value in values)
+        if schema == 1:
+            converted += (0.0,) * (FEATURE_COUNT - LEGACY_FEATURE_COUNT)
+        weights.append(converted)
     return LinearModel(weights[0], weights[1])
 
 
@@ -287,8 +294,14 @@ def tune(
 
     initial_values = flatten(initial_model)
     center = list(initial_values)
-    room_sigma = (0.75, 0.75, 0.75, 0.5, 1.5, 0.75, 0.4, 0.75)
-    suggestion_sigma = (1.25, 1.25, 1.25, 0.75, 1.0, 1.0, 0.75, 0.75)
+    room_sigma = (
+        0.75, 0.75, 0.75, 0.5, 1.5, 0.75, 0.4, 0.75,
+        *(0.0 for _ in range(FEATURE_COUNT - LEGACY_FEATURE_COUNT)),
+    )
+    suggestion_sigma = (
+        1.25, 1.25, 1.25, 0.75, 1.0, 1.0, 0.75, 0.75,
+        1.0, 1.0, 0.6, 0.6, 0.75, 0.75, 0.75, 0.5, 0.75,
+    )
     sigma = [*room_sigma, *suggestion_sigma]
     minimum_sigma = [item * 0.12 for item in sigma]
     rng = random.Random(f"{seed}:cross-entropy")

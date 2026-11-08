@@ -620,8 +620,11 @@ turns until reached or no longer reachable. This experimental model has not
 been established to outperform the existing bots.
 
 The model is tuned offline from player-visible features and terminal
-win/loss outcomes. Policy decisions never receive the solution or other
-players' hands. To fine-tune the packaged model, then evaluate the candidate:
+win/loss outcomes. Suggestion ranking includes the strategic bot's public
+information features, such as deal certainty, reachable responders, unresolved
+clauses, and deal diversity. Policy decisions never receive the solution or
+other players' hands. Schema-1 models remain loadable with zero weights for
+the additional features. To fine-tune the packaged model, then evaluate the candidate:
 
 ```powershell
 python -m clue_engine.learning tune --initial src\clue_engine\learned_model.json --games-per-pool 16 --population 8 --generations 4 --seed 42000 --output model.json

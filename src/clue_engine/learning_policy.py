@@ -12,7 +12,7 @@ from .models import Action, Reveal, Suggest
 from .observations import EventKind, PlayerView
 from .policies import StrategicPolicy
 
-FEATURE_COUNT = 8
+FEATURE_COUNT = 17
 T = TypeVar("T")
 
 
@@ -32,7 +32,10 @@ class LinearModel:
 
 
 def suggestion_features(
-    view: PlayerView, knowledge: Knowledge, suggestion: Suggest,
+    view: PlayerView,
+    knowledge: Knowledge,
+    suggestion: Suggest,
+    strategic: tuple[int | float, ...] | None = None,
 ) -> tuple[float, ...]:
     combo = suggestion.combination
     cards = (combo.suspect_id, combo.weapon_id, combo.room_id)
@@ -59,7 +62,7 @@ def suggestion_features(
         event.kind is EventKind.SUGGEST and event.actor == view.player and event.combo == combo
         for event in view.events
     )
-    return (
+    features = (
         envelope.count(Mark.UNKNOWN) / 3,
         envelope.count(Mark.HELD) / 3,
         envelope.count(Mark.NOT_HELD) / 3,
@@ -68,6 +71,20 @@ def suggestion_features(
         min(clauses, 6) / 6,
         min(repeats, 3) / 3,
         blockers / max(1, len(other_players)),
+    )
+    components = strategic or (0,) * 10
+    if len(components) != 10:
+        raise ValueError("strategic suggestion features must contain 10 values")
+    return features + (
+        float(components[1]),
+        float(components[2]),
+        math.log1p(components[3]) / 20,
+        min(components[4], 8) / 8,
+        components[5] / 3,
+        components[6] / max(1, len(other_players)),
+        components[7] / max(1, 3 * len(other_players)),
+        min(math.log1p(components[8]), 5) / 5,
+        float(components[9]),
     )
 
 
@@ -119,8 +136,12 @@ class LearningPolicy(StrategicPolicy):
     ) -> Action:
         self._goal = None
         candidates = self._board_candidates(knowledge, suggestions)
+        components = self._suggestion_components(
+            view, knowledge, candidates, prefer_probe=False,
+        )
         return self._select("suggestion", tuple(
-            (action, suggestion_features(view, knowledge, action)) for action in candidates
+            (action, suggestion_features(view, knowledge, action, components[action]))
+            for action in candidates
         ))
 
     def _routes(
@@ -185,7 +206,7 @@ class LearningPolicy(StrategicPolicy):
                 float(isinstance(location, RoomPosition) and location.room_id == room),
                 float(isinstance(location, RoomPosition)
                       and UsePassage() in options and board.layout.passage_from(location.room_id) == room),
-            )
+            ) + (0.0,) * (FEATURE_COUNT - 8)
             candidates.append((room, features))
         return tuple(candidates)
 

@@ -11,7 +11,7 @@ from clue_engine.learning import (
     train,
     tune,
 )
-from clue_engine.learning_policy import LinearModel
+from clue_engine.learning_policy import FEATURE_COUNT, LinearModel
 
 
 def test_model_round_trip_and_refuse_overwrite(tmp_path):
@@ -23,9 +23,23 @@ def test_model_round_trip_and_refuse_overwrite(tmp_path):
         save_model(path, model, {})
 
 
+def test_legacy_model_is_padded_with_zero_weights(tmp_path):
+    path = tmp_path / "legacy.json"
+    legacy_weights = [float(index) for index in range(8)]
+    path.write_text(json.dumps({
+        "schema": 1,
+        "room_weights": legacy_weights,
+        "suggestion_weights": legacy_weights,
+    }), encoding="utf-8")
+    model = load_model(path)
+    assert model.room_weights == tuple(legacy_weights) + (0.0,) * (FEATURE_COUNT - 8)
+    assert model.suggestion_weights == model.room_weights
+
+
 @pytest.mark.parametrize("data", [
     {},
-    {"schema": True, "room_weights": [0] * 8, "suggestion_weights": [0] * 8},
+    {"schema": True, "room_weights": [0] * FEATURE_COUNT,
+     "suggestion_weights": [0] * FEATURE_COUNT},
     {"schema": 2, "room_weights": [0] * 8, "suggestion_weights": [0] * 8},
     {"schema": 1, "room_weights": [float("inf")] * 8, "suggestion_weights": [0] * 8},
 ])
@@ -45,7 +59,7 @@ def test_training_reproducible_and_updates_weights():
 
 
 def test_training_can_continue_from_an_existing_model():
-    initial = LinearModel((1.0,) * 8, (2.0,) * 8)
+    initial = LinearModel((1.0,) * FEATURE_COUNT, (2.0,) * FEATURE_COUNT)
     _, summary = train(games=1, seed=3, opponents=("random",) * 3, initial_model=initial)
     assert summary["initial_room_weights"] == list(initial.room_weights)
     assert summary["initial_suggestion_weights"] == list(initial.suggestion_weights)
@@ -64,7 +78,7 @@ def test_evaluation_balances_seats_and_is_reproducible():
 
 
 def test_tuning_is_reproducible_and_keeps_best_observed_candidate():
-    initial = LinearModel((1.0,) * 8, (2.0,) * 8)
+    initial = LinearModel((1.0,) * FEATURE_COUNT, (2.0,) * FEATURE_COUNT)
     arguments = {
         "initial_model": initial,
         "games_per_pool": 4,
@@ -99,7 +113,7 @@ def test_benchmark_pairs_all_profiles_on_balanced_seats():
 
 
 def test_benchmark_pairs_candidate_with_incumbent_on_same_games():
-    model = LinearModel((1.0,) * 8, (2.0,) * 8)
+    model = LinearModel((1.0,) * FEATURE_COUNT, (2.0,) * FEATURE_COUNT)
     report = benchmark(model, games=4, seed=39, incumbent=model)
     for pool in report["pools"]:
         assert pool["profiles"]["learned"] == pool["profiles"]["incumbent"]

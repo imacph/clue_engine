@@ -461,6 +461,18 @@ class StrategicPolicy(ProbingPolicy):
         self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
         *, prefer_probe: bool,
     ) -> Action:
+        ranked = self._suggestion_components(
+            view, knowledge, suggestions, prefer_probe=prefer_probe,
+        )
+        best = max(ranked.values())
+        return self.rng.choice(tuple(
+            suggestion for suggestion, score in ranked.items() if score == best
+        ))
+
+    def _suggestion_components(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+        *, prefer_probe: bool,
+    ) -> dict[Suggest, tuple[int | float, ...]]:
         deals = consistent_deals(knowledge, self._deal_counts) if self._deal_counts else None
         hints, weights = self._suggestion_evidence(view, knowledge, deals)
         unresolved: dict[int, set[frozenset[int]]] = {}
@@ -524,9 +536,7 @@ class StrategicPolicy(ProbingPolicy):
                 relocation,
             )
 
-        ranked = [(score(suggestion), suggestion) for suggestion in suggestions]
-        best = max(item[0] for item in ranked)
-        return self.rng.choice(tuple(suggestion for value, suggestion in ranked if value == best))
+        return {suggestion: score(suggestion) for suggestion in suggestions}
 
 
 class AnalyticalPolicy(StrategicPolicy):
