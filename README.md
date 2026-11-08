@@ -14,8 +14,8 @@ No license granting redistribution rights is provided.
 ## Versions
 
 <!-- component-versions:start -->
-The game API and Python distribution are **0.6.2**, the shared browser/desktop
-frontend is **0.6.1**, and the Windows desktop wrapper is **0.4.1**.
+The game API and Python distribution are **0.6.3**, the shared browser/desktop
+frontend is **0.6.2**, and the Windows desktop wrapper is **0.4.1**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -34,8 +34,9 @@ caller for reproducibility.
 
 The [board rules contract](docs/board-rules.md) describes the board rules and
 documented interpretations. Board games are available through the local web
-interface, packaged Windows desktop app, and Python API; the original Tkinter,
-console, and batch interfaces remain card-only. The [card-only baseline](docs/card-only-baseline.md) records
+interface, packaged Windows desktop app, and Python API; the Tkinter game and
+console play interfaces remain card-only. Batch simulations also accept board
+setups as described below. The [card-only baseline](docs/card-only-baseline.md) records
 reproducible pre-board measurements.
 
 ```python
@@ -554,7 +555,7 @@ the risky-accusation setting.
 
 ## Batch statistics and private traces
 
-Run reproducible **card-only** simulations from the command line:
+Run reproducible card-only simulations with the existing command-line options:
 
 ```text
 python -m clue_engine.batch_cli --games 100 --players 4 --policies random,deductive,probing,strategic --seed 42 --trace batch-42.jsonl
@@ -569,15 +570,56 @@ file must be new: existing files are never overwritten. Errors and timeouts
 give the CLI a nonzero exit status. Ctrl+C requests cancellation between
 actions, saves the partial game and batch summary, and returns status 130.
 
-The desktop setup screen also has **Batch statistics**. Configure the batch
-and a new trace file there, start or cancel it, and inspect its progress and
-summary while it runs. The trace controls can also open an existing JSONL file
-and display one zero-based game number at a time. Trace loading and batch work
-run off the Tk thread. Closing the window requests cancellation.
+To run any supported browser/API game setup, provide a JSON setup object:
+
+```text
+python -m clue_engine.batch_cli --setup board-setup.json --games 100 --trace board-100.jsonl
+```
+
+The file accepts `game_type`, `players`, and one `bots` entry per seat (a
+named profile or a custom strategy object), plus `game_rules`, `board_rules`,
+`seat_suspects`, `shuffle_bots`, `seed`, and `max_steps`. For example:
+
+```json
+{
+  "game_type": "board",
+  "players": 4,
+  "bots": ["deductive", {"candidate_rooms": true, "deal_analysis": true}, "probing", "random"],
+  "game_rules": {"all_refute": true},
+  "board_rules": {"randomize_rooms": true, "procedural_map": true},
+  "seat_suspects": [0, 1, 2, 3],
+  "shuffle_bots": false,
+  "seed": 42,
+  "max_steps": 10000
+}
+```
+
+The shared browser and desktop app also provide **Batch simulation** from the
+main menu. The setup wizard exposes game type, player count, per-seat named or
+custom bots, game and board rules, suspect assignments, bot shuffling, seed,
+action limit, and game count. The results view reports progress, policy
+comparisons, summary statistics, and selectable count/percentage histograms.
+The Tkinter desktop **Batch statistics** window can also load the same JSON
+setup. CLI `--seed` and `--max-steps` and the Tkinter seed/action-limit fields
+override values in the file. Human-only setup fields (mode, human seat,
+notebook, progression, and debug) do not affect a batch; every seat must have
+a bot configuration. Board games support 3–6 players; card-only games support
+two or more, subject to the face-up-card rule requiring at least one card per
+player. Unsupported fields, invalid rule combinations, and incomplete bot
+lists are rejected before creating a trace. Each batch uses one selected setup
+across its games; use separate traces for setup comparisons rather than
+exhaustively enumerating the configuration space.
+
+The Tkinter desktop **Batch statistics** window also lets you configure a
+batch and new trace file, start or cancel it, and inspect progress and summary
+while it runs. Its trace controls can open an existing JSONL file and display
+one zero-based game at a time. Trace loading and batch work run off the Tk
+thread. Closing the window requests cancellation.
 
 After a batch finishes or is cancelled, the **Distributions** tab displays a
-histogram. Select actions, Player 0's completed turns, outcomes, or the action
-at which a player first learned the solution. Choose counts or percentages,
+histogram. Select actions, Player 0's completed turns, outcomes, the action at
+which a player first learned the solution, or board-specific rolls, moves,
+room entries, passages, and suspect/weapon relocations. Choose counts or percentages,
 set a positive bin width, and use **Refresh chart** (or press Enter in a
 setting). Deduction charts can be filtered by policy, seat, or both. To analyze
 an existing trace, choose it with **Existing...**, then select **Load trace
@@ -591,8 +633,9 @@ python -m clue_engine.batch_cli --games 100 --players 4 --trace batch-turns.json
 python -m clue_engine.distributions_cli --trace batch-42.jsonl --metric deduction --filter-policy strategic --filter-seat 2 --bin-width 10 --display percent
 ```
 
-Metrics are `actions`, `turns`, `outcomes`, and `deduction`; display modes are
-`count` and `percent`. Policy and seat filters apply only to deduction. Numeric
+Metrics are `actions`, `turns`, `outcomes`, `deduction`, `rolls`, `moves`,
+`room_entries`, `passages`, `suspect_relocations`, and `weapon_relocations`;
+display modes are `count` and `percent`. Policy and seat filters apply only to deduction. Numeric
 bins are inclusive at both displayed endpoints and empty bins are omitted.
 Chart percentages are empirical frequencies, not guaranteed probabilities.
 Action and turn charts use completed games only and report excluded timeouts,
@@ -629,7 +672,8 @@ separately. Only wins and all-eliminated games count as completed. Policy
 win rates divide wins by completed seat exposures, including multiple seats
 using the same policy; policy-by-seat rates use the corresponding seat
 exposures. Mean actions, mean completed turns per seat, suggestions, passes,
-and refutations use completed games only. The action median averages the two
+and refutations use completed games only. Board runs also report mean rolls,
+moves, room entries, passages, and token relocations. The action median averages the two
 middle values for an even sample; p90 uses the nearest-rank definition.
 Deduction totals use all started seat exposures, including partial games.
 Their mean first-solution step is averaged only over players who learned the
@@ -637,11 +681,14 @@ solution: step 0 means the initial hand was sufficient, and subsequent steps
 count actions, not events. Snapshot candidate counts and solution knowledge
 are calculated independently from each player's filtered view.
 
-The newline-delimited JSON trace begins with `batch_start`, followed by each
+Board event distributions include completed games with zero occurrences of
+the selected event and are unavailable for card-only runs. The newline-delimited
+JSON trace uses schema version 2 and begins with `batch_start`, followed by each
 `game_start` (deal and policy seeds), `initial_knowledge`, alternating `action`
 and `knowledge` records, and `game_result`. An action contains all events it
 produced; for example, one reveal may produce both refutation and private-show
-events. Expected failures may add `action_error` or `knowledge_error` records.
+events. Board traces additionally record the initial board state and movement
+event details. Schema-1 card-only traces remain readable. Expected failures may add `action_error` or `knowledge_error` records.
 The final `batch_result` contains the same aggregate data as the displayed
 summary, including policy-by-seat breakdowns. Unexpected errors are surfaced
 and may leave a partial trace without a final result; successfully applied

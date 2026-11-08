@@ -1,5 +1,16 @@
 # Changelog
 
+## Desktop 0.4.1 / App 0.6.2 / API 0.6.3 - Unreleased
+
+### Added
+
+- Extend batch simulations to support board and card-only setups, per-seat
+  named or custom bots, game and board rules, seeded bot shuffling, and board
+  event statistics. Add batch setup, progress, policy comparisons, and
+  distributions to the shared browser/desktop app, add JSON setup input to the
+  CLI and Tkinter batch window, and preserve schema-1 trace analysis while
+  writing schema-2 traces.
+
 ## Desktop 0.4.1 / App 0.6.1 / API 0.6.2 - 2026-11-07
 
 ### Added

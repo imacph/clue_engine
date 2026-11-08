@@ -3,21 +3,31 @@
 import hmac
 import random
 import secrets
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field, fields, replace
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 from flask import session as browser_session
 
 from .._version import DESKTOP_VERSION, FRONTEND_VERSION, __version__
+from ..batch import (
+    BatchConfig,
+    BatchSummary,
+    GameResult,
+    batch_config_from_setup,
+    run_batch,
+)
 from ..board import DEFAULT_BOARD, Square
 from ..board_setup import BoardSetup
 from ..board_state import RoomPosition, create_board
 from ..board_turn import BoardTurn, Move, Roll, UsePassage
 from ..cards import CARDS, CARDS_BY_ID
 from ..desktop_preferences import DesktopPreferences
+from ..distributions import BOARD_METRICS, Distributions
 from ..engine import Engine, IllegalActionError, replay_history
 from ..game_settings import BoardRules, BotStrategy, GameRules
 from ..knowledge import Knowledge, Mark, knowledge_for
@@ -55,6 +65,7 @@ from ..session import (
 
 _SESSION_TTL_SECONDS = 60 * 60
 _MAX_ACTIVE_SESSIONS = 64
+_MAX_ACTIVE_BATCH_RUNS = 1
 
 
 @dataclass
@@ -80,6 +91,20 @@ class WebGame:
     replay_knowledge_summaries: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+@dataclass
+class WebBatch:
+    owner: str
+    game_type: str
+    requested_games: int
+    last_access: float = field(default_factory=time.monotonic)
+    finished_games: int = 0
+    status: str = "queued"
+    cancel_requested: bool = False
+    summary: BatchSummary | None = None
+    error: str | None = None
+    distributions: Distributions = field(default_factory=Distributions)
 
 
 def _automatic_clauses(view: PlayerView, knowledge: Knowledge) -> list[dict[str, Any]]:
@@ -630,6 +655,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
     )
     games: dict[str, WebGame] = {}
     games_lock = threading.Lock()
+    batches: dict[str, WebBatch] = {}
+    batches_lock = threading.Lock()
 
     @app.before_request
     def protect_mutations():
@@ -674,6 +701,139 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 for start in DEFAULT_BOARD.starts
             ],
         )
+
+    def batch_for_request(batch_id: str) -> WebBatch | None:
+        owner = browser_session.get("batch_owner")
+        now = time.monotonic()
+        with batches_lock:
+            batch = batches.get(batch_id)
+            if batch is None or owner != batch.owner:
+                return None
+            batch.last_access = now
+            return batch
+
+    def run_batch_in_background(batch_id: str, config: BatchConfig, batch: WebBatch) -> None:
+        def cancelled() -> bool:
+            with batches_lock:
+                return batch.cancel_requested
+
+        def record_game(result: GameResult) -> None:
+            with batches_lock:
+                batch.finished_games += 1
+                batch.last_access = time.monotonic()
+                batch.distributions.add_game(result)
+
+        def update_progress(summary: BatchSummary) -> None:
+            with batches_lock:
+                batch.status = "running"
+                batch.summary = summary
+                batch.last_access = time.monotonic()
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="clue-engine-batch-") as directory:
+                summary = run_batch(
+                    config,
+                    Path(directory) / "trace.jsonl",
+                    progress=update_progress,
+                    cancelled=cancelled,
+                    on_game=record_game,
+                )
+            with batches_lock:
+                batch.summary = summary
+                batch.status = "cancelled" if summary["cancelled"] else "completed"
+                batch.last_access = time.monotonic()
+        except Exception as exc:
+            app.logger.exception("Batch simulation %s failed", batch_id)
+            with batches_lock:
+                batch.status = "error"
+                batch.error = f"{type(exc).__name__}: {exc}"
+                batch.last_access = time.monotonic()
+
+    @app.post("/api/batch")
+    def start_batch():
+        try:
+            body = _json_body()
+            if set(body) != {"setup", "games"}:
+                raise ValueError("Supply setup and games.")
+            games_requested = _integer(body, "games")
+            config = batch_config_from_setup(body["setup"], games=games_requested)
+        except (TypeError, ValueError) as exc:
+            return jsonify(error=str(exc)), 400
+
+        now = time.monotonic()
+        with batches_lock:
+            expired = [
+                key for key, current in batches.items()
+                if current.status not in {"queued", "running"}
+                and now - current.last_access > _SESSION_TTL_SECONDS
+            ]
+            for key in expired:
+                batches.pop(key, None)
+            if sum(current.status in {"queued", "running"} for current in batches.values()) >= _MAX_ACTIVE_BATCH_RUNS:
+                return jsonify(error="A batch simulation is already running."), 409
+            owner = browser_session.get("batch_owner")
+            if not isinstance(owner, str):
+                owner = secrets.token_urlsafe(24)
+                browser_session["batch_owner"] = owner
+            batch_id = secrets.token_urlsafe(24)
+            batch = WebBatch(owner, config.game_type, config.games)
+            batches[batch_id] = batch
+
+        worker = threading.Thread(
+            target=run_batch_in_background, args=(batch_id, config, batch), daemon=True,
+        )
+        try:
+            worker.start()
+        except RuntimeError:
+            app.logger.exception("Could not start batch simulation %s", batch_id)
+            with batches_lock:
+                batches.pop(batch_id, None)
+            return jsonify(error="The batch simulation could not be started."), 503
+        return jsonify(batch_id=batch_id, status=batch.status), 202
+
+    @app.get("/api/batch/<batch_id>")
+    def get_batch(batch_id: str):
+        batch = batch_for_request(batch_id)
+        if batch is None:
+            return jsonify(error="Batch simulation not found."), 404
+        with batches_lock:
+            return jsonify(
+                batch_id=batch_id,
+                status=batch.status,
+                game_type=batch.game_type,
+                requested_games=batch.requested_games,
+                finished_games=batch.finished_games,
+                cancel_requested=batch.cancel_requested,
+                summary=batch.summary,
+                error=batch.error,
+            )
+
+    @app.post("/api/batch/<batch_id>/cancel")
+    def cancel_batch(batch_id: str):
+        batch = batch_for_request(batch_id)
+        if batch is None:
+            return jsonify(error="Batch simulation not found."), 404
+        with batches_lock:
+            if batch.status not in {"queued", "running"}:
+                return jsonify(error="Batch simulation is no longer running."), 409
+            batch.cancel_requested = True
+            return jsonify(batch_id=batch_id, cancel_requested=True)
+
+    @app.get("/api/batch/<batch_id>/distribution")
+    def get_batch_distribution(batch_id: str):
+        batch = batch_for_request(batch_id)
+        if batch is None:
+            return jsonify(error="Batch simulation not found."), 404
+        metric = request.args.get("metric", "actions")
+        try:
+            width = int(request.args.get("width", "10"))
+            if metric in BOARD_METRICS and batch.game_type != "board":
+                raise ValueError("Board event distributions require a board simulation.")
+            with batches_lock:
+                chart = batch.distributions.chart(metric, width=width)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(asdict(chart))
 
     if desktop_preferences is not None:
         @app.post("/api/desktop/theme")

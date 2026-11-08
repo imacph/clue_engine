@@ -8,7 +8,19 @@ from pathlib import Path
 
 from .batch import GameResult
 
-METRICS = ("actions", "turns", "outcomes", "deduction")
+BOARD_METRICS = (
+    "rolls", "moves", "room_entries", "passages",
+    "suspect_relocations", "weapon_relocations",
+)
+METRIC_TITLES = {
+    "rolls": "Board dice rolls",
+    "moves": "Board movement actions",
+    "room_entries": "Room entries",
+    "passages": "Secret passage uses",
+    "suspect_relocations": "Suspect relocations",
+    "weapon_relocations": "Weapon relocations",
+}
+METRICS = ("actions", "turns", "outcomes", "deduction", *BOARD_METRICS)
 MODES = ("count", "percent")
 OUTCOMES = ("won", "all_eliminated", "timeout", "error", "cancelled")
 
@@ -51,20 +63,37 @@ class Distributions:
         self.outcomes: Counter[str] = Counter()
         self.actions: Counter[int] = Counter()
         self.turns: Counter[int] = Counter()
+        self.board_metrics = {metric: Counter[int]() for metric in BOARD_METRICS}
         self.first_steps: dict[tuple[str, int], Counter[int]] = {}
         self.exposures: Counter[tuple[str, int]] = Counter()
         self.incomplete_games = 0
         self.missing_batch_result = False
 
     def add_game(self, result: GameResult) -> None:
-        self._add(result.outcome, result.steps, result.turns, result.policies, result.first_solution_step)
+        self._add(
+            result.outcome, result.steps, result.turns, result.policies, result.first_solution_step,
+            game_type=result.game_type,
+            board_metrics={metric: getattr(result, metric) for metric in BOARD_METRICS},
+        )
 
     def _add(
         self, outcome: str, steps: int, turns: Sequence[int], policies: Sequence[str],
         first_steps: Sequence[int | None],
+        *,
+        game_type: str = "card_only",
+        board_metrics: dict[str, int] | None = None,
     ) -> None:
         if outcome not in OUTCOMES:
             raise ValueError(f"unknown outcome: {outcome}")
+        if game_type not in {"card_only", "board"}:
+            raise ValueError(f"unknown game type: {game_type}")
+        metrics = board_metrics or {}
+        if set(metrics) - set(BOARD_METRICS) or any(
+            type(value) is not int or value < 0 for value in metrics.values()
+        ):
+            raise ValueError("invalid board metrics")
+        if game_type == "card_only" and any(metrics.values()):
+            raise ValueError("card-only results cannot contain board metrics")
         if steps < 0 or len(turns) < 2 or len(turns) != len(policies) or len(turns) != len(first_steps):
             raise ValueError("invalid game result lengths or action count")
         if any(turn < 0 for turn in turns) or sum(turns) > steps or any(
@@ -77,6 +106,9 @@ class Distributions:
         if outcome in {"won", "all_eliminated"}:
             self.actions[steps] += 1
             self.turns[turns[0]] += 1
+            if game_type == "board":
+                for metric in BOARD_METRICS:
+                    self.board_metrics[metric][metrics.get(metric, 0)] += 1
         for seat, (name, first) in enumerate(zip(policies, first_steps, strict=True)):
             key = (name, seat)
             self.exposures[key] += 1
@@ -119,6 +151,15 @@ class Distributions:
             details = (
                 f"{exposures} seat exposures; {exposures - samples} not recorded as learned "
                 "(includes partial games)." + incomplete
+            )
+        elif metric in BOARD_METRICS:
+            counts = self.board_metrics[metric]
+            samples = sum(counts.values())
+            title = METRIC_TITLES[metric]
+            denominator = "completed board games"
+            details = (
+                f"Excluded: timeout={self.outcomes['timeout']}, error={self.outcomes['error']}, "
+                f"cancelled={self.outcomes['cancelled']}." + incomplete
             )
         else:
             counts = self.actions if metric == "actions" else self.turns
@@ -167,7 +208,7 @@ def _integer(value: object, field: str) -> int:
     return value
 
 
-def _read_result(data: Distributions, record: dict[str, object]) -> None:
+def _read_result(data: Distributions, record: dict[str, object], schema_version: int) -> None:
     outcome = record.get("outcome")
     turns = record.get("turns")
     policies = record.get("policies")
@@ -176,21 +217,31 @@ def _read_result(data: Distributions, record: dict[str, object]) -> None:
         raise TypeError("missing outcome, turns, or policies")
     if not isinstance(first, list) or any(not isinstance(name, str) for name in policies):
         raise TypeError("invalid first-solution steps or policies")
+    game_type = record.get("game_type", "card_only")
+    if not isinstance(game_type, str):
+        raise TypeError("game_type must be text")
+    board_metrics = {
+        metric: _integer(record.get(metric, 0), metric)
+        for metric in BOARD_METRICS
+    } if schema_version >= 2 else None
     data._add(
         outcome,
         _integer(record.get("steps"), "steps"),
         [_integer(turn, "turn") for turn in turns],
         policies,
         [_integer(step, "first-solution step") if step is not None else None for step in first],
+        game_type=game_type,
+        board_metrics=board_metrics,
     )
 
 
 def read_distributions(
     path: Path, *, cancelled: Callable[[], bool] | None = None,
 ) -> Distributions:
-    """Read schema-1 game results from a trace without retaining actions."""
+    """Read supported batch trace versions without retaining action histories."""
     data = Distributions()
     header = False
+    schema_version = 0
     finished = False
     active: int | None = None
     last_game = -1
@@ -204,8 +255,9 @@ def read_distributions(
                     raise TypeError("record must be an object with a type")
                 kind = record["type"]
                 if not header:
-                    if kind != "batch_start" or record.get("schema_version") != 1:
-                        raise ValueError("expected schema-1 batch_start")
+                    schema_version = _integer(record.get("schema_version"), "schema_version")
+                    if kind != "batch_start" or schema_version not in {1, 2}:
+                        raise ValueError("expected schema-1 or schema-2 batch_start")
                     header = True
                 elif finished:
                     raise ValueError("records follow batch_result")
@@ -219,7 +271,7 @@ def read_distributions(
                     game = _integer(record.get("game"), "game")
                     if active is None or game != active:
                         raise ValueError("game_result does not match game_start")
-                    _read_result(data, record)
+                    _read_result(data, record, schema_version)
                     active = None
                 elif kind == "batch_result":
                     if active is not None:

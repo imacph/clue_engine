@@ -297,8 +297,34 @@ input, select {
 .quickplay-summary { background: var(--blue-pale); border: 1px solid var(--secondary-border); border-radius: 9px; margin: 0 0 20px; max-height: min(50vh, 400px); overflow: auto; padding: 12px 16px; }
 .quickplay-summary p { font-size: .9rem; margin: 4px 0; }
 .quickplay-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.main-menu-actions .button span { display: block; font-size: .8rem; font-weight: 400; opacity: .85; }
+.batch-screen { max-width: 1100px; }
+.batch-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.batch-run-status { font-weight: 650; }
+#batch-progress { display: block; height: 18px; margin: 12px 0 24px; width: 100%; }
+.batch-summary-panel, .batch-distribution-panel { margin-top: 18px; padding: 18px; }
+.batch-summary-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.batch-stat { background: var(--blue-pale); border-radius: 7px; display: grid; gap: 3px; padding: 10px 12px; }
+.batch-stat strong { font-size: .82rem; }
+.batch-stat span { overflow-wrap: anywhere; }
+#batch-policy-summary { margin-top: 18px; overflow-x: auto; }
+.batch-policy-table { border-collapse: collapse; min-width: 560px; text-align: left; width: 100%; }
+.batch-policy-table th, .batch-policy-table td { border-bottom: 1px solid var(--line); padding: 8px; }
+.batch-policy-table th { color: var(--muted); font-size: .82rem; }
+.batch-chart-controls { align-items: end; display: flex; flex-wrap: wrap; gap: 12px; }
+.batch-chart-controls h3 { flex: 1 1 100%; margin: 0; }
+.batch-chart-controls label { flex: 1 1 150px; }
+.batch-chart-bars { display: grid; gap: 8px; list-style: none; margin: 18px 0 0; padding: 0; }
+.batch-chart-row { align-items: center; display: grid; gap: 10px; grid-template-columns: minmax(100px, 180px) minmax(80px, 1fr) 72px; }
+.batch-chart-label { overflow-wrap: anywhere; }
+.batch-chart-track { background: var(--line); border-radius: 99px; height: 12px; overflow: hidden; }
+.batch-chart-fill { background: var(--blue); border-radius: inherit; display: block; height: 100%; }
+.batch-chart-value { font-variant-numeric: tabular-nums; text-align: right; }
+.batch-chart-empty { color: var(--muted); padding: 10px 0; }
 @media (max-width: 700px) {
   .main-menu { gap: 24px; grid-template-columns: minmax(0, 1fr); padding: 24px; }
+  .batch-actions { justify-content: flex-start; }
+  .batch-chart-row { grid-template-columns: minmax(76px, 120px) minmax(54px, 1fr) 58px; }
 }
 
 .game-topbar { margin-bottom: 0; min-height: 68px; padding: 10px 16px; }

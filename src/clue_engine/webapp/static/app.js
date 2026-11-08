@@ -26,6 +26,11 @@ let advancing = false;
 let submitting = false;
 let starting = false;
 let mainMenuBusy = false;
+let batchPollTimer = null;
+let batchPolling = false;
+let activeBatchId = null;
+let batchFinished = false;
+let lastBatchChart = null;
 let refreshing = false;
 let requestVersion = 0;
 let lastError = "";
@@ -130,14 +135,261 @@ async function requestJson(path, { method = "GET", body } = {}) {
   return response.json();
 }
 
+function formatBatchNumber(value) {
+  return typeof value === "number"
+    ? value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    : "—";
+}
+
+function appendBatchStat(container, label, value) {
+  const item = document.createElement("div");
+  item.className = "batch-stat";
+  const name = document.createElement("strong");
+  name.textContent = label;
+  const result = document.createElement("span");
+  result.textContent = value;
+  item.append(name, result);
+  container.append(item);
+}
+
+function renderBatchSummary(data) {
+  const summary = data.summary;
+  $("batch-summary").replaceChildren();
+  $("batch-policy-summary").replaceChildren();
+  if (!summary) return;
+
+  const summaryGrid = document.createElement("div");
+  summaryGrid.className = "batch-summary-grid";
+  appendBatchStat(
+    summaryGrid, "Simulations finished",
+    `${data.finished_games} / ${data.requested_games}`,
+  );
+  appendBatchStat(summaryGrid, "Games completed", String(summary.completed_games));
+  appendBatchStat(
+    summaryGrid, "Outcomes",
+    Object.entries(summary.outcomes).map(([outcome, count]) => `${outcome}: ${count}`).join(" · "),
+  );
+  appendBatchStat(summaryGrid, "Mean actions", formatBatchNumber(summary.mean_actions));
+  appendBatchStat(summaryGrid, "Median actions", formatBatchNumber(summary.median_actions));
+  appendBatchStat(summaryGrid, "90th percentile actions", formatBatchNumber(summary.p90_actions));
+  appendBatchStat(
+    summaryGrid, "Mean turns by seat",
+    summary.mean_turns_by_seat
+      ? summary.mean_turns_by_seat.map((value, seat) => `P${seat + 1}: ${formatBatchNumber(value)}`).join(" · ")
+      : "—",
+  );
+  appendBatchStat(
+    summaryGrid, "Wins by seat",
+    summary.wins_by_seat.map((value, seat) => `P${seat + 1}: ${value}`).join(" · "),
+  );
+  for (const [label, key] of [
+    ["Mean suggestions", "mean_suggestions"],
+    ["Mean passes", "mean_passes"],
+    ["Mean refutations", "mean_refutations"],
+  ]) {
+    appendBatchStat(summaryGrid, label, formatBatchNumber(summary[key]));
+  }
+  if (data.game_type === "board") {
+    for (const [label, key] of [
+      ["Mean dice rolls", "mean_rolls"],
+      ["Mean movement actions", "mean_moves"],
+      ["Mean room entries", "mean_room_entries"],
+      ["Mean secret passages", "mean_passages"],
+      ["Mean suspect relocations", "mean_suspect_relocations"],
+      ["Mean weapon relocations", "mean_weapon_relocations"],
+    ]) {
+      appendBatchStat(summaryGrid, label, formatBatchNumber(summary[key]));
+    }
+  }
+  $("batch-summary").append(summaryGrid);
+
+  const entries = Object.entries(summary.policy_stats);
+  if (entries.length === 0) return;
+  const table = document.createElement("table");
+  table.className = "batch-policy-table";
+  table.setAttribute("aria-label", "Bot policy statistics");
+  const head = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const title of ["Bot", "Wins", "Completed seats", "Win rate", "Learned solution"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = title;
+    headerRow.append(cell);
+  }
+  head.append(headerRow);
+  const body = document.createElement("tbody");
+  for (const [name, stats] of entries) {
+    const row = document.createElement("tr");
+    const values = [
+      name,
+      String(stats.wins),
+      String(stats.completed_seats),
+      stats.win_rate_per_completed_seat === null
+        ? "—" : `${(stats.win_rate_per_completed_seat * 100).toFixed(1)}%`,
+      `${stats.learned_solution} / ${stats.seat_games}`,
+    ];
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  $("batch-policy-summary").append(table);
+}
+
+function renderBatchChart() {
+  const chart = lastBatchChart;
+  const bars = $("batch-chart-bars");
+  bars.replaceChildren();
+  if (!chart) return;
+  $("batch-distribution-title").textContent = chart.title;
+  const mode = $("batch-display-mode").value;
+  $("batch-chart-details").textContent =
+    `${chart.samples} samples · ${chart.denominator}. ${chart.details}`;
+  if (chart.bins.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "batch-chart-empty";
+    empty.textContent = "No samples are available for this distribution.";
+    bars.append(empty);
+    return;
+  }
+  for (const bin of chart.bins) {
+    const item = document.createElement("li");
+    item.className = "batch-chart-row";
+    const label = document.createElement("span");
+    label.className = "batch-chart-label";
+    label.textContent = bin.label;
+    const track = document.createElement("span");
+    track.className = "batch-chart-track";
+    const fill = document.createElement("span");
+    fill.className = "batch-chart-fill";
+    fill.style.width = `${Math.max(0, Math.min(100, bin.probability * 100))}%`;
+    track.append(fill);
+    const value = document.createElement("span");
+    value.className = "batch-chart-value";
+    value.textContent = mode === "percent"
+      ? `${(bin.probability * 100).toFixed(1)}%`
+      : formatBatchNumber(bin.count);
+    item.append(label, track, value);
+    bars.append(item);
+  }
+}
+
+async function loadBatchChart() {
+  if (!activeBatchId || !batchFinished) return;
+  const width = Number($("batch-bin-width").value);
+  if (!Number.isInteger(width) || width < 1) {
+    throw new Error("Histogram bin width must be a positive whole number.");
+  }
+  const query = new URLSearchParams({
+    metric: $("batch-metric").value,
+    width: String(width),
+  });
+  lastBatchChart = await requestJson(
+    `/api/batch/${encodeURIComponent(activeBatchId)}/distribution?${query}`,
+  );
+  renderBatchChart();
+}
+
+function updateBatchScreen(data) {
+  const running = data.status === "queued" || data.status === "running";
+  const progress = data.requested_games > 0
+    ? Math.min(100, data.finished_games / data.requested_games * 100) : 0;
+  $("batch-progress").value = progress;
+  if (running) {
+    $("batch-run-status").textContent =
+      `Running ${data.finished_games} of ${data.requested_games} games…`;
+  } else if (data.status === "completed") {
+    $("batch-run-status").textContent =
+      `Finished ${data.finished_games} of ${data.requested_games} games.`;
+  } else if (data.status === "cancelled") {
+    $("batch-run-status").textContent =
+      `Cancelled after ${data.finished_games} of ${data.requested_games} games.`;
+  } else {
+    $("batch-run-status").textContent = data.error || "The batch simulation failed.";
+  }
+  $("batch-cancel").hidden = !running;
+  $("batch-cancel").disabled = data.cancel_requested;
+  $("batch-new-run").hidden = running;
+  $("batch-main-menu").hidden = running;
+  $("batch-metric").disabled = running;
+  $("batch-bin-width").disabled = running;
+  batchFinished = !running;
+  if (data.summary) renderBatchSummary(data);
+  if (data.game_type === "board") {
+    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = false;
+  } else {
+    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = true;
+    if ($("batch-metric").selectedOptions[0]?.hasAttribute("data-board-only")) {
+      $("batch-metric").value = "outcomes";
+    }
+  }
+}
+
+async function pollBatch() {
+  if (!activeBatchId || batchPolling) return;
+  batchPolling = true;
+  try {
+    const data = await requestJson(`/api/batch/${encodeURIComponent(activeBatchId)}`);
+    updateBatchScreen(data);
+    if (data.status === "completed" || data.status === "cancelled" || data.status === "error") {
+      clearInterval(batchPollTimer);
+      batchPollTimer = null;
+      await loadBatchChart();
+    }
+  } catch (error) {
+    clearInterval(batchPollTimer);
+    batchPollTimer = null;
+    showError(`Could not update batch results: ${error.message}`);
+  } finally {
+    batchPolling = false;
+  }
+}
+
+async function submitBatch(setup) {
+  const startedBatch = await requestJson("/api/batch", {
+    method: "POST",
+    body: { setup, games: window.setupWizard.batchGames() },
+  });
+  activeBatchId = startedBatch.batch_id;
+  batchFinished = false;
+  lastBatchChart = null;
+  window.setupWizard.rememberStarted(setup);
+  $("main-menu").hidden = true;
+  $("setup-screen").hidden = true;
+  $("game-screen").hidden = true;
+  $("batch-screen").hidden = false;
+  $("batch-title").focus();
+  $("batch-run-status").textContent = "Starting batch…";
+  $("batch-progress").value = 0;
+  $("batch-summary").replaceChildren();
+  $("batch-policy-summary").replaceChildren();
+  $("batch-chart-bars").replaceChildren();
+  $("batch-chart-details").textContent = "Distributions will be available when the batch finishes.";
+  $("batch-new-run").hidden = true;
+  $("batch-main-menu").hidden = true;
+  clearInterval(batchPollTimer);
+  batchPollTimer = setInterval(pollBatch, 500);
+  await pollBatch();
+}
+
 async function startGame(event) {
   event?.preventDefault();
   if (starting) return;
   starting = true;
   try {
-    const debug = $("debug").checked;
+    const batchMode = window.setupWizard.isBatchMode();
+    const debug = !batchMode && $("debug").checked;
     if (debug && !await confirmAction("Debug mode reveals every hand, the solution, and private events. Continue?")) {
       $("debug").checked = false;
+      return;
+    }
+    showError("");
+    const setup = window.setupWizard.payload();
+    if (batchMode) {
+      await submitBatch(setup);
       return;
     }
     notebookGeneration++;
@@ -164,13 +416,13 @@ async function startGame(event) {
     lastSuggestionRoom = null;
     hadReveal = false;
     hadBoardResponse = false;
-    const setup = window.setupWizard.resolveBotSeats(window.setupWizard.payload());
+    const gameSetup = window.setupWizard.resolveBotSeats(setup);
     const state = await requestJson("/api/game", {
       method: "POST",
-      body: setup,
+      body: gameSetup,
     });
     if (version !== requestVersion) return;
-    window.setupWizard.rememberStarted(setup);
+    window.setupWizard.rememberStarted(gameSetup);
     sessionStorage.setItem(activeGameKey, "1");
     activateGame(state);
   } catch (error) {
@@ -654,17 +906,24 @@ function renderBoard(state) {
   for (const room of board.layout.rooms) {
     const bounds = roomBounds(room);
     const center = (bounds.minX + bounds.maxX + 1) / 2;
+    const rectangular = room.squares.length
+      === (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1);
+    const stem = rectangular ? [] : room.squares.filter((square) => square.y === bounds.maxY);
+    const pawnCenter = rectangular ? center
+      : (Math.min(...stem.map((square) => square.x)) + Math.max(...stem.map((square) => square.x)) + 1) / 2;
     const pawns = board.suspects.filter((pawn) =>
       pawn.location.kind === "room" && pawn.location.room_id === room.id);
-    const baseY = bounds.minY + Math.max(1.7, (bounds.maxY - bounds.minY + 1) / 2 + .35);
+    const baseY = rectangular ? bounds.minY + Math.max(1.7, (bounds.maxY - bounds.minY + 1) / 2 + .35)
+      : bounds.maxY - .5;
     pawns.forEach((pawn, index) => appendPawn(
-      dynamic, pawn, state, center + (index % 3 - 1) * .75, baseY + Math.floor(index / 3) * .72,
+      dynamic, pawn, state, pawnCenter + (index % 3 - 1) * .75, baseY + Math.floor(index / 3) * .72,
       turnFocus !== null && pawn.seat === turnFocus, .34,
     ));
     const weapons = board.weapons.filter((weapon) => weapon.room_id === room.id);
     if (weapons.length) {
       dynamic.append(svgElement("text", {
-        x: center, y: bounds.maxY + .78, class: "board-room-contents", "aria-hidden": "true",
+        x: center, y: rectangular ? bounds.maxY + .78 : bounds.minY + 2.7,
+        class: "board-room-contents", "aria-hidden": "true",
       }, `◆ ${weapons.length} weapon${weapons.length === 1 ? "" : "s"}`));
     }
   }
@@ -2115,14 +2374,16 @@ function newGame() {
 
 function showMainMenu() {
   $("setup-screen").hidden = true;
+  $("batch-screen").hidden = true;
   $("main-menu").hidden = false;
   $("main-menu-title").focus();
 }
 
-function showSetup() {
+function showSetup(batch = false) {
   $("main-menu").hidden = true;
+  $("batch-screen").hidden = true;
   $("setup-screen").hidden = false;
-  window.setupWizard.beginFresh();
+  window.setupWizard.beginFresh(batch);
   $("setup-game-title").focus();
 }
 
@@ -2639,6 +2900,7 @@ function updateMode(restoreNotebook = true) {
     notebook.disabled = false;
   }
   $("seat-field").hidden = spectating;
+  $("shuffle-seat-field").hidden = spectating;
   $("notebook-mode-field").hidden = spectating;
   $("notebook-mode-hint").hidden = spectating;
   $("spectator-warning").hidden = !spectating;
@@ -2766,12 +3028,15 @@ $("confirm-dialog").addEventListener("keydown", (event) => {
   }
 });
 $("setup-form").addEventListener("submit", startGame);
-$("main-setup").addEventListener("click", showSetup);
+$("main-setup").addEventListener("click", () => showSetup());
+$("main-batch").addEventListener("click", () => showSetup(true));
 $("setup-menu").addEventListener("click", showMainMenu);
 $("main-quick-play").addEventListener("click", async () => {
   if (mainMenuBusy) return;
   mainMenuBusy = true;
-  for (const id of ["main-quick-play", "main-setup", "replay-import-button"]) $(id).disabled = true;
+  for (const id of ["main-quick-play", "main-setup", "main-batch", "replay-import-button"]) {
+    $(id).disabled = true;
+  }
   try {
     await window.setupWizard.loadQuickplay();
     window.setupWizard.renderReview($("quickplay-summary"), false);
@@ -2781,9 +3046,36 @@ $("main-quick-play").addEventListener("click", async () => {
     showError(`Could not load quickplay defaults: ${error.message}`);
   } finally {
     mainMenuBusy = false;
-    for (const id of ["main-quick-play", "main-setup", "replay-import-button"]) $(id).disabled = false;
+    for (const id of ["main-quick-play", "main-setup", "main-batch", "replay-import-button"]) {
+      $(id).disabled = false;
+    }
   }
 });
+$("batch-cancel").addEventListener("click", async () => {
+  if (!activeBatchId) return;
+  $("batch-cancel").disabled = true;
+  try {
+    await requestJson(`/api/batch/${encodeURIComponent(activeBatchId)}/cancel`, {
+      method: "POST", body: {},
+    });
+    await pollBatch();
+  } catch (error) {
+    showError(`Could not cancel batch: ${error.message}`);
+    $("batch-cancel").disabled = false;
+  }
+});
+$("batch-new-run").addEventListener("click", () => showSetup(true));
+$("batch-main-menu").addEventListener("click", () => {
+  activeBatchId = null;
+  showMainMenu();
+});
+$("batch-metric").addEventListener("change", () => {
+  loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+});
+$("batch-bin-width").addEventListener("change", () => {
+  loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+});
+$("batch-display-mode").addEventListener("change", renderBatchChart);
 $("quickplay-cancel").addEventListener("click", () => $("quickplay-dialog").close());
 $("main-edit-default").addEventListener("click", () => {
   $("quickplay-dialog").close();

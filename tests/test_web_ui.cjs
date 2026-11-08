@@ -829,7 +829,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
       mode: { value: "play" }, "notebook-mode": { value: "manual" },
       players: { value: "6" }, seat: { value: "0" }, seed: { value: "42" },
       progress: { value: "turn" }, "max-steps": { value: "10000" }, debug: { checked: false },
-      "shuffle-bots": { checked: false },
+      "shuffle-bots": { checked: false }, "shuffle-seat": { checked: false },
       "rule-reverse-refutation": { checked: false },
       "rule-public-refutations": { checked: false },
       "rule-all-refute": { checked: false },
@@ -839,6 +839,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   vm.runInContext(`
     const $ = (id) => fields[id];
     let bots = [], characters = [0, 1, 2, 3, 4, 5], valid = true, syncCount = 0;
+    let batchMode = false;
     let lastError = "";
     const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
     const validBasics = () => valid;
@@ -857,9 +858,21 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   assert.deepEqual(Array.from(result.bots), Array(6).fill("random"));
   assert.deepEqual(Array.from(result.seat_suspects), [0, 1, 2, 3, 4, 5]);
   assert.equal(vm.runInContext("syncCount", context), 1);
+  vm.runInContext(`
+    batchMode = true;
+    fields["shuffle-bots"].checked = true;
+    fields.debug.checked = true;
+    fields.progress.value = "turn";
+  `, context);
+  const batch = vm.runInContext("payload()", context);
+  assert.equal(batch.mode, "spectate");
+  assert.equal(batch.progress, "auto");
+  assert.equal(batch.debug, false);
+  assert.equal(batch.shuffle_bots, true);
+  assert.equal(batch.bots.length, 6);
   vm.runInContext("valid = false", context);
   assert.throws(() => vm.runInContext("payload()", context), /Correct the game settings/);
-  assert.equal(vm.runInContext("syncCount", context), 1);
+  assert.equal(vm.runInContext("syncCount", context), 2);
   vm.runInContext("lastError = missingBoardSetup", context);
   assert.throws(() => vm.runInContext("payload()", context), /Board starting positions are unavailable/);
 });
@@ -890,6 +903,38 @@ test("seeded bot seat shuffling preserves styles, human seat, and replay reprodu
   assert.deepEqual(Array.from(spectate.bots).map(JSON.stringify).sort(), input.bots.map(JSON.stringify).sort());
 });
 
+test("random human seat preserves characters and every bot with or without bot shuffling", () => {
+  const start = setupSource.indexOf("  function resolveBotSeats(");
+  const end = setupSource.indexOf("  function renderReview(", start);
+  const context = vm.createContext({});
+  vm.runInContext(`const copy = (value) => JSON.parse(JSON.stringify(value)); ${setupSource.slice(start, end)}`, context);
+  const input = {
+    mode: "play", players: 4, seat: 0, seed: 42, shuffle_seat: true, shuffle_bots: false,
+    seat_suspects: [2, 0, 3, 1],
+    bots: ["human-placeholder", "deductive", "probing", { deal_analysis: true }],
+  };
+  const expectedBots = input.bots.slice(1).map(JSON.stringify).sort();
+  for (const shuffle of [false, true]) {
+    const counts = Array(4).fill(0);
+    for (let seed = 0; seed < 200; seed++) {
+      const source = { ...input, seed, shuffle_bots: shuffle };
+      const result = context.resolveBotSeats(source);
+      assert.deepEqual(JSON.parse(JSON.stringify(result)), JSON.parse(JSON.stringify(context.resolveBotSeats(source))));
+      counts[result.seat]++;
+      assert.deepEqual(Array.from(result.seat_suspects), input.seat_suspects);
+      assert.equal(result.bots[result.seat], "human-placeholder");
+      assert.deepEqual(Array.from(result.bots).filter((_, i) => i !== result.seat).map(JSON.stringify).sort(), expectedBots);
+      assert.equal(result.shuffle_seat, undefined);
+      assert.deepEqual(JSON.parse(JSON.stringify(context.resolveBotSeats(result))), JSON.parse(JSON.stringify(result)));
+    }
+    assert.ok(counts.every((count) => count >= 25 && count <= 75), counts.join(", "));
+  }
+  const spectate = context.resolveBotSeats({ ...input, mode: "spectate" });
+  assert.equal(spectate.seat, input.seat);
+  assert.deepEqual(JSON.parse(JSON.stringify(spectate.bots)), input.bots);
+  assert.equal(input.seat, 0);
+});
+
 test("factory quickplay uses four board players and the three requested bot styles", () => {
   const start = setupSource.indexOf("  function defaultQuickplay()");
   const end = setupSource.indexOf("  async function loadQuickplay()", start);
@@ -909,6 +954,7 @@ test("quickplay review describes shuffled styles without claiming assigned bot s
   const end = setupSource.indexOf("  function showStep(", start);
   const context = vm.createContext({});
   const result = vm.runInContext(`(() => {
+    let batchMode = false;
     const data = { game_type: "card_only", mode: "play", players: 3, seat: 0,
       notebook_mode: "manual", bots: ["random", "probing", "strategic"],
       shuffle_bots: true, seed: 12, progress: "turn", max_steps: 100, debug: false, game_rules: {} };
@@ -929,7 +975,7 @@ test("quickplay review describes shuffled styles without claiming assigned bot s
 
 test("setup profiles validate and persist in browser and desktop storage", async () => {
   const start = setupSource.indexOf("  function validateProfile(");
-  const end = setupSource.indexOf("  function beginFresh()", start);
+  const end = setupSource.indexOf("  function beginFresh(", start);
   assert.ok(start !== -1 && end !== -1);
   const context = vm.createContext({});
   const result = await vm.runInContext(`(async () => {

@@ -48,6 +48,7 @@
         <div class="main-menu-actions">
           <button id="main-quick-play" class="button button-primary main-menu-primary" type="button">Quick play <span>Review your defaults and start</span></button>
           <button id="main-setup" class="button button-secondary" type="button">Game setup</button>
+          <button id="main-batch" class="button button-secondary" type="button">Batch simulation <span>Run games and inspect statistics</span></button>
           <button id="replay-import-button" class="button button-secondary" type="button">Load replay</button>
         </div>
         <div class="main-menu-settings" aria-label="Display and application options">
@@ -62,7 +63,7 @@
       <div class="section-heading">
         <div>
           <p class="eyebrow">Get started</p>
-          <h2>New game</h2>
+          <h2 id="setup-heading">New game</h2>
         </div>
         <button id="setup-menu" class="button button-quiet" type="button">Main menu</button>
       </div>
@@ -101,7 +102,7 @@
                 <p id="game-style-hint" class="hint">Cards only supports two or more players.</p>
               </fieldset>
               <div class="form-grid">
-                <label>Mode
+                <label id="mode-field">Mode
                   <select id="mode">
                     <option value="play">Play against bots</option>
                     <option value="spectate">Spectate bots</option>
@@ -139,7 +140,7 @@
               <details class="setup-advanced">
                 <summary>Advanced options</summary>
                 <div class="form-grid">
-                  <label>Bot progression
+                  <label id="progress-field">Bot progression
                     <select id="progress" aria-describedby="progress-hint">
                       <option value="turn">Turn-by-turn</option>
                       <option value="auto">Automatic (continuous in spectator mode)</option>
@@ -151,7 +152,7 @@
                   </label>
                 </div>
                 <p id="progress-hint" class="hint">In play mode, confirm after each bot turn. Your own End turn starts the next seat.</p>
-                <label class="check-row">
+                <label id="debug-field" class="check-row">
                   <input id="debug" type="checkbox">
                   <span><strong>Omniscient debug</strong><small>Reveals all hands, the solution, and private events.</small></span>
                 </label>
@@ -177,6 +178,10 @@
           <h3 id="setup-seats-title" tabindex="-1">Seats and characters</h3>
           <label id="seat-field">Your seat
             <select id="seat"></select>
+          </label>
+          <label id="shuffle-seat-field" class="check-row">
+            <input id="shuffle-seat" type="checkbox">
+            <span><strong>Randomize your seat</strong><small>Choose your seat at startup; its character stays at that seat and its bot moves to your configured seat.</small></span>
           </label>
           <p id="seat-notice" class="hint" role="status"></p>
           <div class="setup-seats-layout">
@@ -238,6 +243,7 @@
             <h4>Board layout</h4>
             <div class="setup-rules-grid">
               <label class="check-row"><input type="checkbox" id="rule-randomize-rooms"><span><strong>Scramble rooms</strong><small>Shuffle room identities among board locations.</small></span></label>
+              <label class="check-row"><input type="checkbox" id="rule-procedural-map" disabled><span><strong>Generate board layout</strong><small>Requires Scramble rooms. Vary room sizes, shapes, and connected hallways.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-randomize-doors"><span><strong>Randomize doors</strong><small>Keep each room's door count, with at most one per side and away from corners.</small></span></label>
               <label class="check-row"><input type="checkbox" id="rule-randomize-passages"><span><strong>Randomize passages</strong><small>Pair random rooms; each room can have at most one passage.</small></span></label>
               <label>Number of passages
@@ -269,9 +275,68 @@
         </section>
         <section class="setup-step" data-step="4" aria-labelledby="setup-review-title" hidden>
           <h3 id="setup-review-title" tabindex="-1">Review your game</h3>
+          <div id="batch-games-field" hidden>
+            <label>Games to simulate
+              <input id="batch-games" type="number" min="1" value="100" required>
+            </label>
+            <p class="hint">Every seat uses its selected bot. The same setup is used for each game.</p>
+          </div>
           <div id="setup-review"></div>
         </section>
       </form>
+    </section>
+
+    <section id="batch-screen" class="setup-card batch-screen" aria-labelledby="batch-title" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Simulation results</p>
+          <h2 id="batch-title" tabindex="-1">Batch simulation</h2>
+        </div>
+        <div class="batch-actions">
+          <button id="batch-cancel" class="button button-secondary" type="button" hidden>Cancel batch</button>
+          <button id="batch-new-run" class="button button-primary" type="button" hidden>New batch</button>
+          <button id="batch-main-menu" class="button button-quiet" type="button" hidden>Main menu</button>
+        </div>
+      </div>
+      <p id="batch-run-status" class="batch-run-status" role="status" aria-live="polite">Starting batch…</p>
+      <progress id="batch-progress" max="100" value="0" aria-label="Batch progress"></progress>
+      <section class="panel batch-summary-panel" aria-labelledby="batch-summary-title">
+        <h3 id="batch-summary-title">Summary</h3>
+        <div id="batch-summary"></div>
+        <div id="batch-policy-summary"></div>
+      </section>
+      <section class="panel batch-distribution-panel" aria-labelledby="batch-distribution-title">
+        <div class="batch-chart-controls">
+          <h3 id="batch-distribution-title">Observed distributions</h3>
+          <label>Measure
+            <select id="batch-metric">
+              <option value="outcomes">Outcomes</option>
+              <option value="actions">Actions per game</option>
+              <option value="turns">Player 1 turns</option>
+              <option value="deduction">First solution action</option>
+              <optgroup label="Board events">
+                <option value="rolls" data-board-only>Dice rolls</option>
+                <option value="moves" data-board-only>Movement actions</option>
+                <option value="room_entries" data-board-only>Room entries</option>
+                <option value="passages" data-board-only>Secret passages</option>
+                <option value="suspect_relocations" data-board-only>Suspect relocations</option>
+                <option value="weapon_relocations" data-board-only>Weapon relocations</option>
+              </optgroup>
+            </select>
+          </label>
+          <label>Bin width
+            <input id="batch-bin-width" type="number" min="1" value="10">
+          </label>
+          <label>Display
+            <select id="batch-display-mode">
+              <option value="count">Counts</option>
+              <option value="percent">Percentages</option>
+            </select>
+          </label>
+        </div>
+        <p id="batch-chart-details" class="hint"></p>
+        <ol id="batch-chart-bars" class="batch-chart-bars" aria-label="Distribution bins"></ol>
+      </section>
     </section>
 
     <section id="game-screen" hidden>

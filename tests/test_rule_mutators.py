@@ -251,6 +251,98 @@ def test_door_randomization_rejects_layouts_with_too_few_sides():
         randomize_board_layout(layout, random.Random(42), doors=True)
 
 
+@pytest.mark.parametrize("seed", range(24))
+@pytest.mark.parametrize("randomize_doors", [False, True])
+def test_generated_board_is_reproducible_connected_and_has_no_dead_ends(seed, randomize_doors):
+    rules = BoardRules(randomize_rooms=True, procedural_map=True, randomize_doors=randomize_doors)
+    engine, _ = create_board_game(4, seed, "random", board_rules=rules)
+    same, _ = create_board_game(4, seed, "random", board_rules=rules)
+    original, _ = create_board_game(4, seed, "random")
+    layout = engine.state.board.board.layout
+    assert layout == same.state.board.board.layout
+    assert engine.state.player_hands == original.state.player_hands
+    assert engine.state.solution == original.state.solution
+    assert (layout.width, layout.height) == (25, 27)
+    assert layout.starts == DEFAULT_BOARD.starts
+    assert len(layout.walls) >= 55
+    assert {room.card_id for room in layout.rooms} == {room.card_id for room in DEFAULT_BOARD.rooms}
+    for square in layout.hallways:
+        neighbors = (
+            Square(square.x - 1, square.y), Square(square.x + 1, square.y),
+            Square(square.x, square.y - 1), Square(square.x, square.y + 1),
+        )
+        assert sum(neighbor in layout.hallways for neighbor in neighbors) >= 2
+    for room, original_room in zip(layout.rooms, DEFAULT_BOARD.rooms, strict=True):
+        doors = layout.doors_for(room.card_id)
+        assert len(doors) == len(DEFAULT_BOARD.doors_for(original_room.card_id))
+        directions = set()
+        for door in doors:
+            dx = door.hallway_square.x - door.room_square.x
+            dy = door.hallway_square.y - door.room_square.y
+            directions.add((dx, dy))
+            for offset in (-1, 1):
+                assert Square(door.room_square.x - offset * dy, door.room_square.y + offset * dx) in room.squares
+                assert Square(
+                    door.hallway_square.x - offset * dy, door.hallway_square.y + offset * dx
+                ) in layout.hallways
+        assert len(directions) == len(doors)
+
+
+def test_generated_maps_vary_room_shapes_and_route_lengths():
+    from collections import deque
+
+    layouts = [
+        create_board_game(4, seed, "random", board_rules=BoardRules(
+            randomize_rooms=True, procedural_map=True,
+        ))[0].state.board.board.layout
+        for seed in range(20)
+    ]
+    assert len({layout.hallways for layout in layouts}) == len(layouts)
+    shapes = set()
+    distances = set()
+    for layout in layouts:
+        for room in layout.rooms:
+            xs = [square.x for square in room.squares]
+            ys = [square.y for square in room.squares]
+            width, height = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+            if len(room.squares) == width * height:
+                shapes.add("rectangle")
+            else:
+                bottom = [square.x for square in room.squares if square.y == max(ys)]
+                shapes.add("tee" if min(bottom) > min(xs) and max(bottom) < max(xs) else "ell")
+        start, destination = layout.starts[0].square, layout.starts[2].square
+        queue = deque([(start, 0)])
+        seen = {start}
+        while queue:
+            square, distance = queue.popleft()
+            if square == destination:
+                distances.add(distance)
+                break
+            for neighbor in layout.hallway_neighbors(square):
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    queue.append((neighbor, distance + 1))
+        else:
+            pytest.fail("starting positions are disconnected")
+    assert shapes == {"rectangle", "ell", "tee"}
+    assert len(distances) >= 2
+
+
+def test_generated_board_requires_room_shuffle_and_round_trips(tmp_path):
+    with pytest.raises(ValueError, match="require scrambled rooms"):
+        BoardRules(procedural_map=True)
+    rules = BoardRules(randomize_rooms=True, procedural_map=True, randomize_passages=True, passage_count=4)
+    engine, _ = create_board_game(4, 42, "random", board_rules=rules)
+    initial = deepcopy(engine.state)
+    engine.step(Roll())
+    restored = decode_replay(encode_replay(Replay(initial, engine.history, None, "automatic", ())))
+    assert restored.initial.board.board.layout == initial.board.board.layout
+    assert restored.initial.board_rules == rules
+    path = tmp_path / "generated-board.json"
+    write_board_record(path, initial, engine.history)
+    assert read_board_record(path).state.board.board.layout == initial.board.board.layout
+
+
 def test_randomized_passage_is_a_legal_move_to_its_generated_destination():
     rules = BoardRules(randomize_passages=True, passage_count=4)
     engine, _ = create_board_game(4, 42, "random", board_rules=rules)

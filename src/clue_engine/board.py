@@ -286,16 +286,47 @@ def _make_default_board() -> BoardLayout:
 DEFAULT_BOARD = _make_default_board()
 
 
+def _door_candidates(room: Room, hallways: frozenset[Square]) -> dict[tuple[int, int], list[Door]]:
+    candidates: dict[tuple[int, int], list[Door]] = {}
+    for square in sorted(room.squares):
+        for neighbor in _neighbors(square):
+            if neighbor in hallways:
+                side = (neighbor.x - square.x, neighbor.y - square.y)
+                dx, dy = side
+                if all(
+                    Square(square.x - offset * dy, square.y + offset * dx) in room.squares
+                    and Square(neighbor.x - offset * dy, neighbor.y + offset * dx) in hallways
+                    for offset in (-1, 1)
+                ):
+                    candidates.setdefault(side, []).append(Door(room.card_id, square, neighbor))
+    return candidates
+
+
+def _random_doors(layout: BoardLayout, rng: random.Random) -> tuple[Door, ...]:
+    result = []
+    for room in layout.rooms:
+        candidates = _door_candidates(room, layout.hallways)
+        count = len(layout.doors_for(room.card_id))
+        if count > len(candidates):
+            raise ValueError(f"Room {room.card_id} has too few eligible sides for {count} doors")
+        for side in rng.sample(sorted(candidates), count):
+            result.append(rng.choice(candidates[side]))
+    return tuple(result)
+
+
 def randomize_board_layout(
     layout: BoardLayout, rng: random.Random, *,
     rooms: bool = False, doors: bool = False, passages: bool = False, passage_count: int = 2,
+    procedural: bool = False,
 ) -> BoardLayout:
-    """Randomize independent aspects of a layout without altering its geometry."""
+    """Randomize selected aspects of a layout using independent seeded streams."""
     if type(passage_count) is not int:
         raise TypeError("passage_count must be an integer")
     if not 0 <= passage_count <= len(layout.rooms) // 2:
         raise ValueError("passage_count exceeds the number of available room pairs")
-    if not (rooms or doors or passages):
+    if procedural and not rooms:
+        raise ValueError("procedural maps require scrambled rooms")
+    if not (rooms or doors or passages or procedural):
         return layout
     seed = rng.getrandbits(256)
     if rooms:
@@ -308,29 +339,14 @@ def randomize_board_layout(
             doors=tuple(replace(door, room_id=mapping[door.room_id]) for door in layout.doors),
             passages=tuple((mapping[first], mapping[second]) for first, second in layout.passages),
         )
-    if doors:
-        door_rng = random.Random(f"{seed}:doors")
-        randomized_doors = []
-        for room in layout.rooms:
-            candidates: dict[tuple[int, int], list[Door]] = {}
-            for square in sorted(room.squares):
-                for neighbor in _neighbors(square):
-                    if neighbor in layout.hallways:
-                        side = (neighbor.x - square.x, neighbor.y - square.y)
-                        dx, dy = side
-                        if all(
-                            Square(square.x - offset * dy, square.y + offset * dx) in room.squares
-                            and Square(neighbor.x - offset * dy, neighbor.y + offset * dx)
-                            in layout.hallways
-                            for offset in (-1, 1)
-                        ):
-                            candidates.setdefault(side, []).append(Door(room.card_id, square, neighbor))
-            count = len(layout.doors_for(room.card_id))
-            if count > len(candidates):
-                raise ValueError(f"Room {room.card_id} has too few eligible sides for {count} doors")
-            for side in door_rng.sample(sorted(candidates), count):
-                randomized_doors.append(door_rng.choice(candidates[side]))
-        layout = replace(layout, doors=tuple(randomized_doors))
+    if procedural:
+        from .board_generation import generate_board_layout
+
+        layout = generate_board_layout(layout, random.Random(f"{seed}:map"), random.Random(
+            f"{seed}:map-doors:{int(doors)}",
+        ))
+    elif doors:
+        layout = replace(layout, doors=_random_doors(layout, random.Random(f"{seed}:doors")))
     if passages:
         room_ids = [room.card_id for room in layout.rooms]
         random.Random(f"{seed}:passages").shuffle(room_ids)
