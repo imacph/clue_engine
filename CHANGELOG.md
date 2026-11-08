@@ -1,6 +1,6 @@
 # Changelog
 
-## Desktop 0.4.1 / App 0.6.2 / API 0.6.3 - Unreleased
+## Desktop 0.4.1 / App 0.6.2 / API 0.6.3 - 2026-11-08
 
 ### Added
 
