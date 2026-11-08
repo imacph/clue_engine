@@ -2,7 +2,14 @@ import json
 
 import pytest
 
-from clue_engine.learning import evaluate, load_model, save_model, train
+from clue_engine.learning import (
+    benchmark,
+    evaluate,
+    load_model,
+    save_model,
+    train,
+    tune,
+)
 from clue_engine.learning_policy import LinearModel
 
 
@@ -53,3 +60,48 @@ def test_evaluation_balances_seats_and_is_reproducible():
         assert seat["wins"] + seat["losses"] + seat["timeouts"] == seat["games"]
         assert seat["win_rate"] in (0.0, 1.0)
         assert 0 <= seat["win_rate_ci95"][0] <= seat["win_rate_ci95"][1] <= 1
+
+
+def test_tuning_is_reproducible_and_keeps_best_observed_candidate():
+    initial = LinearModel((1.0,) * 8, (2.0,) * 8)
+    arguments = {
+        "initial_model": initial,
+        "games_per_pool": 4,
+        "seed": 31,
+        "population": 4,
+        "generations": 1,
+    }
+    first, first_summary = tune(**arguments)
+    second, second_summary = tune(**arguments)
+    assert first == second
+    assert first_summary == second_summary
+    assert first_summary["best_score"] >= first_summary["initial_score"]
+    assert len(first_summary["generation_history"]) == 1
+
+
+def test_benchmark_pairs_all_profiles_on_balanced_seats():
+    report = benchmark(LinearModel.zeros(), games=4, seed=38)
+    assert len(report["pools"]) == 2
+    for pool in report["pools"]:
+        assert pool["games"] == 4
+        assert "learned" in pool["profiles"]
+        for result in pool["profiles"].values():
+            assert sum(result["seat_wins"]) == result["wins"]
+            assert len(result["seat_wins"]) == 4
+        for comparison in pool["paired_vs_learned"].values():
+            assert (
+                comparison["learned_only_wins"]
+                + comparison["profile_only_wins"]
+                + comparison["ties"] == 4
+            )
+            assert -1 <= comparison["win_rate_delta"] <= 1
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"games_per_pool": 3, "population": 4, "generations": 1},
+    {"games_per_pool": 4, "population": 3, "generations": 1},
+    {"games_per_pool": 4, "population": 4, "generations": 0},
+])
+def test_tuning_rejects_unbalanced_or_invalid_searches(kwargs):
+    with pytest.raises(ValueError):
+        tune(initial_model=LinearModel.zeros(), seed=1, **kwargs)

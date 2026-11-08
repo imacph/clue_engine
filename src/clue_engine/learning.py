@@ -7,10 +7,12 @@ import random
 from pathlib import Path
 
 from .learning_policy import FEATURE_COUNT, LearningPolicy, LinearModel
-from .policies import Policy, make_policy, validate_policy_names
+from .policies import POLICY_NAMES, Policy, make_policy, validate_policy_names
 from .session import create_board_game
 
 DEFAULT_OPPONENTS = ("deductive", "probing", "strategic")
+ANALYTICAL_OPPONENTS = ("deductive", "strategic", "analytical")
+TOURNAMENT_POOLS = (DEFAULT_OPPONENTS, ANALYTICAL_OPPONENTS)
 MODEL_SCHEMA = 1
 
 
@@ -172,6 +174,192 @@ def evaluate(
     }
 
 
+def benchmark(
+    model: LinearModel, *, games: int, seed: int, max_steps: int = 10_000,
+) -> dict[str, object]:
+    """Compare every named policy on identical seeds, seats, and opponent pools."""
+    if type(games) is not int or games < 4 or games % 4:
+        raise ValueError("benchmark games must be a positive multiple of four")
+    _validate(games, max_steps, DEFAULT_OPPONENTS)
+    profiles = ("learned", *POLICY_NAMES)
+    reports = []
+    for pool_index, opponents in enumerate(TOURNAMENT_POOLS):
+        outcomes: dict[str, list[int]] = {}
+        seat_wins: dict[str, list[int]] = {}
+        timeouts: dict[str, int] = {}
+        for profile in profiles:
+            profile_outcomes = []
+            profile_seat_wins = [0, 0, 0, 0]
+            profile_timeouts = 0
+            for game in range(games):
+                game_seed = seed + pool_index * 100_000 + game
+                seat = game % 4
+                rng = random.Random(f"{game_seed}:learner:{seat}")
+                policy: Policy = (
+                    LearningPolicy(rng, model) if profile == "learned"
+                    else make_policy(profile, rng)
+                )
+                winner, _, timeout = _game(policy, seat, game_seed, opponents, max_steps)
+                won = int(not timeout and winner == seat)
+                profile_outcomes.append(won)
+                profile_seat_wins[seat] += won
+                profile_timeouts += timeout
+            outcomes[profile] = profile_outcomes
+            seat_wins[profile] = profile_seat_wins
+            timeouts[profile] = profile_timeouts
+
+        profile_report = {}
+        learned_outcomes = outcomes["learned"]
+        paired = {}
+        for profile in profiles:
+            wins = sum(outcomes[profile])
+            completed = games - timeouts[profile]
+            profile_report[profile] = {
+                "wins": wins,
+                "losses": completed - wins,
+                "timeouts": timeouts[profile],
+                "win_rate": wins / completed if completed else None,
+                "win_rate_ci95": _wilson(wins, completed),
+                "seat_wins": seat_wins[profile],
+            }
+            if profile == "learned":
+                continue
+            differences = [
+                learned - baseline
+                for learned, baseline in zip(learned_outcomes, outcomes[profile], strict=True)
+            ]
+            delta = sum(differences) / games
+            variance = sum((value - delta) ** 2 for value in differences) / max(1, games - 1)
+            radius = 1.959963984540054 * math.sqrt(variance / games)
+            paired[profile] = {
+                "learned_only_wins": differences.count(1),
+                "profile_only_wins": differences.count(-1),
+                "ties": differences.count(0),
+                "win_rate_delta": delta,
+                "win_rate_delta_ci95": (max(-1.0, delta - radius), min(1.0, delta + radius)),
+            }
+        reports.append({
+            "opponents": list(opponents),
+            "games": games,
+            "profiles": profile_report,
+            "paired_vs_learned": paired,
+        })
+    return {"seed": seed, "max_steps": max_steps, "pools": reports}
+
+
+def _tuning_score(
+    model: LinearModel, *, games: int, seed: int, max_steps: int,
+) -> tuple[float, list[dict[str, object]]]:
+    reports = [
+        evaluate(
+            model, games=games, seed=seed + pool_index * 100_000,
+            opponents=opponents, max_steps=max_steps,
+        )
+        for pool_index, opponents in enumerate(TOURNAMENT_POOLS)
+    ]
+    return sum(report["wins"] / games for report in reports) / len(reports), reports
+
+
+def tune(
+    *, initial_model: LinearModel, games_per_pool: int, seed: int,
+    population: int = 8, generations: int = 4, max_steps: int = 10_000,
+) -> tuple[LinearModel, dict[str, object]]:
+    """Use common-random-number cross-entropy search over both policy heads."""
+    if type(games_per_pool) is not int or games_per_pool < 4 or games_per_pool % 4:
+        raise ValueError("games_per_pool must be a positive multiple of four")
+    if type(population) is not int or population < 4:
+        raise ValueError("population must be an integer of at least four")
+    if type(generations) is not int or generations < 1:
+        raise ValueError("generations must be a positive integer")
+    _validate(games_per_pool, max_steps, DEFAULT_OPPONENTS)
+
+    def flatten(model: LinearModel) -> tuple[float, ...]:
+        return (*model.room_weights, *model.suggestion_weights)
+
+    def expand(values: tuple[float, ...]) -> LinearModel:
+        return LinearModel(values[:FEATURE_COUNT], values[FEATURE_COUNT:])
+
+    initial_values = flatten(initial_model)
+    center = list(initial_values)
+    room_sigma = (0.75, 0.75, 0.75, 0.5, 1.5, 0.75, 0.4, 0.75)
+    suggestion_sigma = (1.25, 1.25, 1.25, 0.75, 1.0, 1.0, 0.75, 0.75)
+    sigma = [*room_sigma, *suggestion_sigma]
+    minimum_sigma = [item * 0.12 for item in sigma]
+    rng = random.Random(f"{seed}:cross-entropy")
+    best_model = initial_model
+    initial_score: float | None = None
+    best_score = float("-inf")
+    generation_reports = []
+
+    for generation in range(generations):
+        generation_seed = seed + generation * 10_000_000
+        candidates = [tuple(center)]
+        for _ in range(population - 1):
+            candidates.append(tuple(
+                max(-12.0, min(12.0, value + rng.gauss(0, spread)))
+                for value, spread in zip(center, sigma, strict=True)
+            ))
+        scored = []
+        for index, values in enumerate(candidates):
+            candidate = expand(values)
+            score, pool_reports = _tuning_score(
+                candidate, games=games_per_pool, seed=generation_seed, max_steps=max_steps,
+            )
+            scored.append((score, index, values, pool_reports))
+            if generation == 0 and index == 0:
+                initial_score = score
+            if score > best_score:
+                best_score = score
+                best_model = candidate
+        scored.sort(key=lambda result: (-result[0], result[1]))
+        elite_count = max(2, population // 4)
+        elites = scored[:elite_count]
+        center = [
+            sum(values[index] for _, _, values, _ in elites) / elite_count
+            for index in range(FEATURE_COUNT * 2)
+        ]
+        elite_sigma = [
+            math.sqrt(sum((values[index] - center[index]) ** 2 for _, _, values, _ in elites)
+                      / elite_count)
+            for index in range(FEATURE_COUNT * 2)
+        ]
+        sigma = [
+            max(minimum_sigma[index], 0.65 * sigma[index] + 0.35 * elite_sigma[index])
+            for index in range(FEATURE_COUNT * 2)
+        ]
+        generation_reports.append({
+            "generation": generation + 1,
+            "seed": generation_seed,
+            "best_score": scored[0][0],
+            "mean_score": sum(score for score, _, _, _ in scored) / population,
+            "incumbent_score": next(score for score, index, _, _ in scored if index == 0),
+            "incumbent_rank": next(
+                rank for rank, (_, index, _, _) in enumerate(scored, 1) if index == 0
+            ),
+            "elite_count": elite_count,
+            "pool_scores": [
+                {
+                    "opponents": report["opponents"],
+                    "wins": report["wins"],
+                    "games": report["games"],
+                }
+                for report in scored[0][3]
+            ],
+        })
+    return best_model, {
+        "algorithm": "common-random-cross-entropy-v1",
+        "seed": seed,
+        "population": population,
+        "generations": generations,
+        "games_per_pool": games_per_pool,
+        "max_steps": max_steps,
+        "opponent_pools": [list(pool) for pool in TOURNAMENT_POOLS],
+        "initial_score": initial_score,
+        "best_score": best_score,
+        "generation_history": generation_reports,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -188,6 +376,19 @@ def main(argv: list[str] | None = None) -> int:
         else:
             child.add_argument("--model", type=Path, required=True)
             child.add_argument("--baseline")
+    tuner = commands.add_parser("tune")
+    tuner.add_argument("--initial", type=Path, required=True)
+    tuner.add_argument("--output", type=Path, required=True)
+    tuner.add_argument("--games-per-pool", type=int, default=16)
+    tuner.add_argument("--seed", type=int, required=True)
+    tuner.add_argument("--population", type=int, default=8)
+    tuner.add_argument("--generations", type=int, default=4)
+    tuner.add_argument("--max-steps", type=int, default=10_000)
+    tournament = commands.add_parser("benchmark")
+    tournament.add_argument("--model", type=Path, required=True)
+    tournament.add_argument("--games", type=int, default=64)
+    tournament.add_argument("--seed", type=int, required=True)
+    tournament.add_argument("--max-steps", type=int, default=10_000)
     args = parser.parse_args(argv)
     opponents = tuple(name.strip() for name in args.opponents.split(","))
     if args.command == "train":
@@ -197,10 +398,21 @@ def main(argv: list[str] | None = None) -> int:
             initial_model=load_model(args.initial) if args.initial else None,
         )
         save_model(args.output, model, summary)
-    else:
+    elif args.command == "evaluate":
         summary = evaluate(
             load_model(args.model), games=args.games, seed=args.seed, opponents=opponents,
             max_steps=args.max_steps, baseline=args.baseline,
+        )
+    elif args.command == "tune":
+        model, summary = tune(
+            initial_model=load_model(args.initial), games_per_pool=args.games_per_pool,
+            seed=args.seed, population=args.population, generations=args.generations,
+            max_steps=args.max_steps,
+        )
+        save_model(args.output, model, summary)
+    else:
+        summary = benchmark(
+            load_model(args.model), games=args.games, seed=args.seed, max_steps=args.max_steps,
         )
     print(json.dumps(summary, indent=2, allow_nan=False))
     return 0
