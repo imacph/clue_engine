@@ -1146,6 +1146,20 @@ test("factory quickplay uses four board players and the three requested bot styl
   assert.deepEqual(Array.from(config.bots).slice(1).sort(), ["deductive", "probing", "strategic"]);
 });
 
+test("setup exposes the analytical preset with its additional reasoning described", () => {
+  const start = setupSource.indexOf("  const presets = {");
+  const end = setupSource.indexOf("  const weights = {", start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  const preset = vm.runInContext(`${setupSource.slice(start, end)}
+    ({ settings: presets.analytical, description: presetDescriptions.analytical })`, context);
+  assert.equal(preset.settings.deal_analysis, true);
+  assert.equal(preset.settings.rank_suggestions, true);
+  assert.equal(preset.settings.risk_accusation, true);
+  assert.match(preset.description, /opponent modeling/);
+  assert.match(preset.description, /50% estimated confidence/);
+});
+
 test("quickplay review describes shuffled styles without claiming assigned bot seats", () => {
   const start = setupSource.indexOf("  function renderReview(");
   const end = setupSource.indexOf("  function showStep(", start);
@@ -1168,6 +1182,28 @@ test("quickplay review describes shuffled styles without claiming assigned bot s
   assert.ok(result.some((row) => row.includes("probing, strategic · randomly assigned")));
   assert.ok(result.some((row) => row === "Player 2: Bot (random style)"));
   assert.ok(!result.some((row) => row.startsWith("Seed:")));
+});
+
+test("review warns when an analytical bot can make risky accusations", () => {
+  const start = setupSource.indexOf("  function renderReview(");
+  const end = setupSource.indexOf("  function showStep(", start);
+  const context = vm.createContext({});
+  const result = vm.runInContext(`(() => {
+    let batchMode = false;
+    const data = { game_type: "card_only", mode: "spectate", players: 2, seat: 0,
+      notebook_mode: "automatic", bots: ["analytical", "random"], seed: 12,
+      progress: "turn", max_steps: 100, debug: false, game_rules: {} };
+    const payload = () => data, score = () => 50, standardRules = {};
+    const document = { createElement: () => ({ textContent: "", children: [],
+      append(...items) { this.children.push(...items); } }),
+      createTextNode: (text) => ({ textContent: text }) };
+    ${setupSource.slice(start, end)}
+    const review = { children: [], replaceChildren() { this.children = []; },
+      append(child) { this.children.push(child); } };
+    renderReview(review, false);
+    return review.children.map((row) => row.children.map((item) => item.textContent).join(""));
+  })()`, context);
+  assert.ok(result.some((row) => /Analytical risk: .*50%.*eliminates/.test(row)));
 });
 
 test("setup profiles validate and persist in browser and desktop storage", async () => {

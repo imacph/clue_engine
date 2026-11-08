@@ -506,8 +506,9 @@ remains unchanged even if they continue to refute.
 
 Every player's hand size is public and appears beside their notebook column.
 All profiles use only their own player view, including public hand sizes.
-By default, bots accuse only when the solution is established and an
-accusation is legal. They use seeded randomness for choices and ties.
+Except for the analytical profile, named bots accuse only when the solution is
+established and an accusation is legal. They use seeded randomness for choices
+and ties.
 
 - `random`: chooses among legal card-only non-accusation actions at random.
 - `deductive`: randomly suggests cards still possible in the envelope.
@@ -523,6 +524,17 @@ accusation is legal. They use seeded randomness for choices and ties.
   the expected information in possible suggestion responses, assuming each
   matching reveal is equally likely. This is a strategy model, not a guarantee
   of how opponents will respond.
+- `analytical`: adds a larger bounded deal-counting budget and uses opponents'
+  suggested cards as tentative evidence when ranking suggestions. It assumes
+  opponents are somewhat less likely to suggest their own cards, but allows for
+  controlled probes and other strategies. Repeated suggestions by the same
+  opponent do not multiply this signal, and fixed board rooms are excluded.
+  When a small complete deal space is available, this evidence softly weights
+  deals for response planning; otherwise it is a tie-breaker. When a completed
+  analysis gives a solution at least 50% estimated support, it may accuse
+  without proof, using opponent-weighted deals when available and unweighted
+  deal counts otherwise. The estimate is model-dependent, and a wrong
+  accusation eliminates the bot. Assumptions are never added to notebook facts.
 
 The shared deduction engine uses hand sizes as well as observed cards and
 clauses. Strategic deal analysis can combine overlapping clauses with hand
@@ -550,7 +562,8 @@ equally likely and does not model how opponents choose actions; it is not a
 guaranteed probability and a wrong accusation eliminates the bot. Custom bots
 use response analysis when suggestion ranking is enabled together with deal
 analysis or calculated accusations, and enhanced routing when candidate-room
-preference is enabled. Guessing is off in every named preset. The toolkit score is
+preference is enabled. Among named presets, only analytical makes calculated
+accusations. The toolkit score is
 a weighted summary of applicable
 enabled choices, not a measured difficulty or win probability; it excludes
 the risky-accusation setting.
@@ -564,8 +577,8 @@ python -m clue_engine.batch_cli --games 100 --players 4 --policies random,deduct
 ```
 
 Provide one policy name to use it for every player, or a comma-separated policy
-for every seat. Available profiles are `random`, `deductive`, `probing`, and
-`strategic`. The default limit is 10,000 actions per game; change it with
+for every seat. Available profiles are `random`, `deductive`, `probing`,
+`strategic`, and `analytical`. The default limit is 10,000 actions per game; change it with
 `--max-steps`. A game that
 reaches the limit is reported as a timeout, not a completed game. The trace
 file must be new: existing files are never overwritten. Errors and timeouts

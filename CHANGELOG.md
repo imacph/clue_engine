@@ -10,6 +10,8 @@
   distributions to the shared browser/desktop app, add JSON setup input to the
   CLI and Tkinter batch window, and preserve schema-1 trace analysis while
   writing schema-2 traces.
+- Add an analytical bot profile with deeper bounded deal counting, tentative
+  opponent modeling, and calculated accusations at 50% estimated confidence.
 
 ### Changed
 

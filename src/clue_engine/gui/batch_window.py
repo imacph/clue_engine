@@ -64,7 +64,7 @@ class BatchWindow(tk.Toplevel):
         setup.columnconfigure(1, weight=1)
         fields = (
             ("Games", self.games), ("Players", self.players),
-            ("Policies (random/deductive/probing/strategic)", self.policies),
+            ("Policies (random/deductive/probing/strategic/analytical)", self.policies),
             ("Seed", self.seed), ("Action limit per game", self.limit),
             ("Game setup JSON (optional)", self.setup_json), ("Private JSONL trace", self.trace),
         )

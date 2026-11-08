@@ -76,6 +76,22 @@ def test_batch_api_runs_setup_and_returns_summary_and_distributions(client):
     ).status_code == 400
 
 
+@pytest.mark.parametrize("game_type,players", [("card_only", 2), ("board", 3)])
+def test_batch_api_accepts_analytical_bots(client, game_type, players):
+    token = csrf_token(client)
+    setup = {
+        "game_type": game_type, "players": players,
+        "bots": ["analytical"] + ["random"] * (players - 1),
+        "seed": 13, "max_steps": 1,
+    }
+    started = post(client, token, "/api/batch", {"setup": setup, "games": 1})
+    assert started.status_code == 202
+    result = wait_for_batch(client, started.get_json()["batch_id"])
+    assert result["status"] == "completed"
+    assert result["summary"]["outcomes"]["error"] == 0
+    assert result["summary"]["policy_stats"]["analytical"]["seat_games"] == 1
+
+
 def test_batch_api_accepts_full_board_setup_and_rejects_invalid_requests(client):
     token = csrf_token(client)
     invalid = post(client, token, "/api/batch", {

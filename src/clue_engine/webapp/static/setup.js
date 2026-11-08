@@ -9,7 +9,7 @@ window.setupWizard = (() => {
     candidate_rooms: "Favor possible solution rooms (board only)",
     prefer_suggest: "Favor suggesting when possible (cards only)",
     deal_analysis: "Analyze possible deals for deeper deductions",
-    risk_accusation: "Allow calculated accusations (may eliminate the bot)",
+    risk_accusation: "Allow calculated accusations at 75% (may eliminate the bot)",
   };
   const presets = {
     random: {},
@@ -23,12 +23,18 @@ window.setupWizard = (() => {
       repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
       deal_analysis: true,
     },
+    analytical: {
+      candidate_suggestions: true, rank_suggestions: true,
+      repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
+      deal_analysis: true, risk_accusation: true,
+    },
   };
   const presetDescriptions = {
     random: "Random decisions; shared deduction and movement.",
     deductive: "Favors possible solution cards and useful rooms.",
     probing: "Adds controlled probes and repeats previously shown cards.",
     strategic: "Ranks suggestions and analyzes possible deals when practical; never guesses.",
+    analytical: "Adds deeper deal counting and opponent modeling; risks accusations at 50% estimated confidence.",
   };
   const weights = {
     candidate_suggestions: 20, probe_suggestions: 15, rank_suggestions: 15,
@@ -252,11 +258,12 @@ window.setupWizard = (() => {
       const summary = document.createElement("p");
       summary.className = "hint bot-score";
       summary.dataset.botScore = String(i);
-      summary.textContent = `Toolkit: ${score(value)}/100`;
+      summary.textContent = `Toolkit: ${score(value)}/100`
+        + (value === "analytical" ? " · may accuse at 50%" : "");
       const description = document.createElement("p");
       description.className = "hint";
       description.textContent = typeof value === "string" ? presetDescriptions[value]
-        : "Custom choices use probes first, then candidate filtering, followed by optional ranking.";
+        : "Custom choices use probes first, then candidate filtering, followed by optional ranking; they do not include analytical opponent modeling.";
       const details = document.createElement("details");
       details.dataset.botDetails = String(i);
       details.open = expanded.has(String(i));
@@ -399,6 +406,9 @@ window.setupWizard = (() => {
       const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
         .map((bot) => typeof bot === "string" ? bot : "custom");
       add("Bot styles", `${styles.join(", ")}${data.shuffle_bots ? " · randomly assigned to bot seats" : ""}`);
+    }
+    if (data.bots.some((bot, i) => bot === "analytical" && (data.mode !== "play" || i !== data.seat))) {
+      add("Analytical risk", "May accuse at 50% estimated confidence; a wrong accusation eliminates the bot");
     }
     for (let i = 0; i < data.players; i++) {
       const randomHuman = data.mode === "play" && data.shuffle_seat;
