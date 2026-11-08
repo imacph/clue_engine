@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from clue_engine import learning
 from clue_engine.learning import (
     benchmark,
     evaluate,
@@ -105,3 +106,40 @@ def test_benchmark_pairs_all_profiles_on_balanced_seats():
 def test_tuning_rejects_unbalanced_or_invalid_searches(kwargs):
     with pytest.raises(ValueError):
         tune(initial_model=LinearModel.zeros(), seed=1, **kwargs)
+
+
+def test_tune_cli_dispatches_without_opponents_argument(tmp_path, monkeypatch, capsys):
+    initial = tmp_path / "initial.json"
+    output = tmp_path / "candidate.json"
+    save_model(initial, LinearModel.zeros(), {})
+    calls = []
+
+    def fake_tune(**kwargs):
+        calls.append(kwargs)
+        return LinearModel.zeros(), {"status": "tuned"}
+
+    monkeypatch.setattr(learning, "tune", fake_tune)
+    assert learning.main([
+        "tune", "--initial", str(initial), "--output", str(output),
+        "--games-per-pool", "4", "--seed", "1",
+    ]) == 0
+    assert calls[0]["games_per_pool"] == 4
+    assert load_model(output) == LinearModel.zeros()
+    assert '"status": "tuned"' in capsys.readouterr().out
+
+
+def test_benchmark_cli_dispatches_without_opponents_argument(tmp_path, monkeypatch, capsys):
+    model_path = tmp_path / "model.json"
+    save_model(model_path, LinearModel.zeros(), {})
+    calls = []
+
+    def fake_benchmark(model, **kwargs):
+        calls.append(kwargs)
+        return {"seed": kwargs["seed"]}
+
+    monkeypatch.setattr(learning, "benchmark", fake_benchmark)
+    assert learning.main([
+        "benchmark", "--model", str(model_path), "--games", "4", "--seed", "2",
+    ]) == 0
+    assert calls == [{"games": 4, "seed": 2, "max_steps": 10_000}]
+    assert '"seed": 2' in capsys.readouterr().out

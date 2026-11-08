@@ -390,8 +390,8 @@ def main(argv: list[str] | None = None) -> int:
     tournament.add_argument("--seed", type=int, required=True)
     tournament.add_argument("--max-steps", type=int, default=10_000)
     args = parser.parse_args(argv)
-    opponents = tuple(name.strip() for name in args.opponents.split(","))
     if args.command == "train":
+        opponents = tuple(name.strip() for name in args.opponents.split(","))
         model, summary = train(
             games=args.games, seed=args.seed, opponents=opponents, max_steps=args.max_steps,
             learning_rate=args.learning_rate,
@@ -399,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         save_model(args.output, model, summary)
     elif args.command == "evaluate":
+        opponents = tuple(name.strip() for name in args.opponents.split(","))
         summary = evaluate(
             load_model(args.model), games=args.games, seed=args.seed, opponents=opponents,
             max_steps=args.max_steps, baseline=args.baseline,
