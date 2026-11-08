@@ -28,7 +28,10 @@ def save_model(path: Path, model: LinearModel, metadata: dict[str, object]) -> N
 
 def load_model(path: Path) -> LinearModel:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("schema") != MODEL_SCHEMA:
+    if (
+        not isinstance(data, dict) or type(data.get("schema")) is not int
+        or data["schema"] != MODEL_SCHEMA
+    ):
         raise ValueError("unsupported learned model schema")
     weights = []
     for key in ("room_weights", "suggestion_weights"):
@@ -152,9 +155,18 @@ def evaluate(
         else:
             losses += 1
     completed = wins + losses
+    seat_results = []
+    for seat in seats:
+        seat_completed = seat["games"] - seat["timeouts"]
+        seat_results.append({
+            **seat,
+            "losses": seat_completed - seat["wins"],
+            "win_rate": seat["wins"] / seat_completed if seat_completed else None,
+            "win_rate_ci95": _wilson(seat["wins"], seat_completed),
+        })
     return {
         "games": games, "seed": seed, "opponents": list(opponents), "baseline": baseline,
-        "wins": wins, "losses": losses, "timeouts": timeouts, "seats": seats,
+        "wins": wins, "losses": losses, "timeouts": timeouts, "seats": seat_results,
         "win_rate": wins / completed if completed else None,
         "win_rate_ci95": _wilson(wins, completed),
     }

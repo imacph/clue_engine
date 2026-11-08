@@ -17,6 +17,7 @@ def test_model_round_trip_and_refuse_overwrite(tmp_path):
 
 @pytest.mark.parametrize("data", [
     {},
+    {"schema": True, "room_weights": [0] * 8, "suggestion_weights": [0] * 8},
     {"schema": 2, "room_weights": [0] * 8, "suggestion_weights": [0] * 8},
     {"schema": 1, "room_weights": [float("inf")] * 8, "suggestion_weights": [0] * 8},
 ])
@@ -48,3 +49,7 @@ def test_evaluation_balances_seats_and_is_reproducible():
     assert [seat["games"] for seat in result["seats"]] == [1, 1, 1, 1]
     assert result["wins"] + result["losses"] + result["timeouts"] == 4
     assert 0 <= result["win_rate_ci95"][0] <= result["win_rate_ci95"][1] <= 1
+    for seat in result["seats"]:
+        assert seat["wins"] + seat["losses"] + seat["timeouts"] == seat["games"]
+        assert seat["win_rate"] in (0.0, 1.0)
+        assert 0 <= seat["win_rate_ci95"][0] <= seat["win_rate_ci95"][1] <= 1
