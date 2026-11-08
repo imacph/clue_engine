@@ -290,11 +290,11 @@
       </form>
     </section>
 
-    <section id="batch-screen" class="setup-card batch-screen" aria-labelledby="batch-title" hidden>
-      <div class="section-heading">
+    <section id="batch-screen" class="batch-screen" aria-labelledby="batch-title" hidden>
+      <div class="game-topbar batch-topbar">
         <div>
-          <p class="eyebrow">Simulation results</p>
           <h2 id="batch-title" tabindex="-1">Batch simulation</h2>
+          <p id="batch-run-status" class="muted" role="status" aria-live="polite">Starting batch…</p>
         </div>
         <div class="batch-actions">
           <button id="batch-cancel" class="button button-secondary" type="button" hidden>Cancel batch</button>
@@ -302,9 +302,24 @@
           <button id="batch-main-menu" class="button button-quiet" type="button" hidden>Main menu</button>
         </div>
       </div>
-      <p id="batch-run-status" class="batch-run-status" role="status" aria-live="polite">Starting batch…</p>
       <progress id="batch-progress" max="100" value="0" aria-label="Batch progress"></progress>
-      <section class="panel batch-summary-panel" aria-labelledby="batch-summary-title">
+      <div class="batch-filter-bar">
+        <strong>Filter results</strong>
+        <label>Bot profile
+          <select id="batch-policy-filter"><option value="">All profiles</option></select>
+        </label>
+        <label>Seat
+          <select id="batch-seat-filter"><option value="">All seats</option></select>
+        </label>
+        <span class="hint">Applies to distributions and runs</span>
+      </div>
+      <div class="batch-tabs" role="tablist" aria-label="Batch analysis">
+        <button id="batch-tab-distribution" type="button" role="tab" aria-selected="true" aria-controls="batch-panel-distribution">Distribution</button>
+        <button id="batch-tab-summary" type="button" role="tab" aria-selected="false" aria-controls="batch-panel-summary" tabindex="-1">Summary &amp; bots</button>
+        <button id="batch-tab-runs" type="button" role="tab" aria-selected="false" aria-controls="batch-panel-runs" tabindex="-1">Individual runs</button>
+      </div>
+      <div class="batch-workspace">
+      <section id="batch-panel-summary" class="panel batch-summary-panel" role="tabpanel" aria-labelledby="batch-tab-summary" hidden>
         <h3 id="batch-summary-title">Summary</h3>
         <div id="batch-summary"></div>
         <p class="hint">Win rates use completed seat appearances. Relative to equal share compares each
@@ -312,7 +327,7 @@
           not a measure of causation or bot strength. Games with no winner lower the reference.</p>
         <div id="batch-policy-summary"></div>
       </section>
-      <section class="panel batch-distribution-panel" aria-labelledby="batch-distribution-title">
+      <section id="batch-panel-distribution" class="panel batch-distribution-panel" role="tabpanel" aria-labelledby="batch-tab-distribution">
         <div class="batch-chart-controls">
           <h3 id="batch-distribution-title">Observed distributions</h3>
           <label>Measure
@@ -332,12 +347,6 @@
               </optgroup>
             </select>
           </label>
-          <label>Bot profile
-            <select id="batch-policy-filter"><option value="">All profiles</option></select>
-          </label>
-          <label>Seat
-            <select id="batch-seat-filter"><option value="">All seats</option></select>
-          </label>
           <label>Bin width
             <input id="batch-bin-width" type="number" min="1" value="10">
           </label>
@@ -348,15 +357,31 @@
             </select>
           </label>
         </div>
-        <p class="hint">Game measures select games containing the chosen profile at the chosen seat
-          (each game counts once). Bot seat outcomes and deduction count matching seat appearances.
-          Player 1 turns always means Player 1, regardless of filter.</p>
         <p id="batch-chart-details" class="hint" role="status"></p>
         <div id="batch-chart-stats" class="batch-summary-grid" aria-label="Distribution statistics"></div>
-        <p class="batch-chart-key hint">Bars are scaled to the largest bin; each row shows its count and share of samples. Numeric bins also show the cumulative share through that bin.</p>
-        <ol id="batch-chart-bars" class="batch-chart-bars" aria-label="Distribution bins"></ol>
+        <div class="batch-graph-frame">
+          <svg id="batch-chart-graph" class="batch-chart-graph" role="group" aria-label="Distribution graph" aria-describedby="batch-chart-inspection"></svg>
+          <p id="batch-chart-empty" class="batch-chart-empty" hidden>No samples are available for this distribution.</p>
+        </div>
+        <p id="batch-chart-inspection" class="batch-chart-inspection hint">Hover or focus a bar to inspect its count and share.</p>
+        <p id="batch-chart-grouping" class="hint"></p>
+        <details id="batch-chart-values" class="batch-chart-values">
+          <summary>View exact bin data</summary>
+          <p id="batch-bin-status" class="hint" role="status"></p>
+          <div id="batch-chart-table" class="batch-chart-table"></div>
+          <div class="batch-runs-pages">
+            <button id="batch-bin-previous" class="button button-quiet" type="button" disabled>Previous bins</button>
+            <button id="batch-bin-next" class="button button-quiet" type="button" disabled>Next bins</button>
+          </div>
+        </details>
+        <details class="batch-chart-method">
+          <summary>How filters and samples work</summary>
+          <p class="hint">Game measures select games containing the chosen profile at the chosen seat
+            (each game counts once). Bot seat outcomes and deduction count matching seat appearances.
+            Player 1 turns always means Player 1, regardless of filter.</p>
+        </details>
       </section>
-      <section class="panel batch-runs-panel" aria-labelledby="batch-runs-title">
+      <section id="batch-panel-runs" class="panel batch-runs-panel" role="tabpanel" aria-labelledby="batch-tab-runs" hidden>
         <h3 id="batch-runs-title">Individual runs</h3>
         <p class="hint">The profile and seat filters above also select runs here. Replays contain private hands and the solution and remain available while this batch is retained.</p>
         <div class="batch-chart-controls">
@@ -392,6 +417,7 @@
           <button id="batch-runs-next" class="button button-quiet" type="button" disabled>Next</button>
         </div>
       </section>
+      </div>
     </section>
 
     <section id="game-screen" hidden>

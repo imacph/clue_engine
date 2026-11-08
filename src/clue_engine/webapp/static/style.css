@@ -298,39 +298,40 @@ input, select {
 .quickplay-summary p { font-size: .9rem; margin: 4px 0; }
 .quickplay-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .main-menu-actions .button span { display: block; font-size: .8rem; font-weight: 400; opacity: .85; }
-body.batch-active main { max-width: none; }
-.batch-screen { max-width: none; }
-.batch-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.batch-run-status { font-weight: 650; }
-#batch-progress { display: block; height: 18px; margin: 12px 0 24px; width: 100%; }
-.batch-summary-panel, .batch-distribution-panel, .batch-runs-panel { margin-top: 18px; padding: 18px; }
-.batch-summary-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-.batch-stat { background: var(--blue-pale); border-radius: 7px; display: grid; gap: 3px; padding: 10px 12px; }
-.batch-stat strong { font-size: .82rem; }
+.batch-actions { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+.batch-summary-grid { display: grid; gap: 5px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.batch-stat { background: var(--clauses-bg); border: 1px solid var(--line); display: grid; gap: 1px; padding: 5px 8px; }
+.batch-stat strong { color: var(--muted); font-size: .72rem; }
 .batch-stat span { overflow-wrap: anywhere; }
-#batch-policy-summary { margin-top: 18px; overflow-x: auto; }
+#batch-policy-summary { margin-top: 8px; overflow-x: auto; }
 .batch-policy-table { border-collapse: collapse; min-width: 560px; text-align: left; width: 100%; }
-.batch-policy-table th, .batch-policy-table td { border-bottom: 1px solid var(--line); padding: 8px; }
-.batch-policy-table th { color: var(--muted); font-size: .82rem; }
+.batch-policy-table th, .batch-policy-table td { border-bottom: 1px solid var(--line); padding: 5px 7px; }
+.batch-policy-table th { background: var(--table-head); color: var(--table-head-ink); font-size: .75rem; }
 .batch-policy-table td:first-child { max-width: 300px; overflow-wrap: anywhere; }
-.batch-chart-controls { align-items: end; display: flex; flex-wrap: wrap; gap: 12px; }
-.batch-chart-controls h3 { flex: 1 1 100%; margin: 0; }
-.batch-chart-controls label { flex: 1 1 150px; }
-.batch-chart-key { margin: 18px 0 4px; }
-.batch-chart-bars { border-top: 1px solid var(--line); display: grid; list-style: none; margin: 0; padding: 0; }
-.batch-chart-row { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: minmax(100px, 180px) minmax(80px, 1fr) 150px; padding: 9px 4px; }
-.batch-chart-label { font-weight: 650; overflow-wrap: anywhere; }
-.batch-chart-track { background: var(--blue-pale); border-radius: 4px; height: 22px; overflow: hidden; }
-.batch-chart-fill { background: linear-gradient(90deg, var(--blue), var(--blue-dark)); border-radius: 4px; display: block; height: 100%; }
-.batch-chart-value { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.batch-chart-value small { color: var(--muted); display: block; font-size: .75rem; }
-.batch-chart-empty { color: var(--muted); padding: 10px 0; }
+.batch-chart-controls { align-items: end; display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.batch-chart-controls h3 { flex: 1 1 100%; font-size: 1rem; margin: 0; }
+.batch-chart-controls label { flex: 1 1 120px; }
+.batch-graph-frame { background: var(--clauses-bg); border: 1px solid var(--line); height: clamp(190px, 31vh, 300px); margin-top: 8px; position: relative; }
+.batch-chart-graph { display: block; height: 100%; width: 100%; }
+.batch-chart-grid { stroke: var(--line); stroke-width: 1; }
+.batch-chart-axis { fill: var(--muted); font-size: 11px; }
+.batch-chart-bar { fill: var(--blue); }
+.batch-chart-bin:hover .batch-chart-bar, .batch-chart-bin:focus .batch-chart-bar { fill: var(--green); }
+.batch-chart-bin:focus { outline: none; }
+.batch-chart-bin:focus .batch-chart-hit { stroke: var(--focus); stroke-width: 2; }
+.batch-chart-hit { fill: transparent; }
+.batch-chart-empty { color: var(--muted); left: 50%; margin: 0; position: absolute; text-align: center; top: 50%; transform: translate(-50%, -50%); }
+.batch-chart-inspection, #batch-chart-grouping { margin: 4px 0; min-height: 1.3em; }
+.batch-chart-values, .batch-chart-method { font-size: .8rem; margin-top: 6px; }
+.batch-chart-values summary, .batch-chart-method summary { color: var(--blue); cursor: pointer; font-weight: 650; }
+.batch-chart-values .hint { margin: 4px 0; }
+.batch-chart-table { max-height: 220px; overflow: auto; }
+.batch-chart-table .batch-policy-table { min-width: 360px; }
 .batch-runs-table { overflow-x: auto; }
-.batch-runs-pages { display: flex; gap: 8px; margin-top: 12px; }
+.batch-runs-pages { display: flex; gap: 8px; margin-top: 8px; }
 @media (max-width: 700px) {
   .main-menu { gap: 24px; grid-template-columns: minmax(0, 1fr); padding: 24px; }
   .batch-actions { justify-content: flex-start; }
-  .batch-chart-row { grid-template-columns: minmax(70px, 100px) minmax(40px, 1fr) 110px; gap: 6px; font-size: .8rem; }
 }
 
 .game-topbar { margin-bottom: 0; min-height: 68px; padding: 10px 16px; }
@@ -1362,4 +1363,37 @@ body.game-active.board-game.replay-active .playing-card.mini-card { min-height: 
 }
 @media (max-width: 1100px) {
   body.game-active.board-game.replay-active #replay-timeline { position: sticky; }
+}
+
+body.batch-active { min-height: 100vh; overflow: hidden; }
+body.batch-active .site-header, body.batch-active .footer-note { display: none; }
+body.batch-active main { height: calc(100vh - 24px); height: calc(100dvh - 24px); margin: 0 auto; max-width: 1600px; overflow: hidden; padding: 4px 12px; }
+body.batch-active #error-message { bottom: 28px; left: 50%; max-width: min(680px, calc(100vw - 24px)); position: fixed; transform: translateX(-50%); z-index: 20; }
+.batch-screen { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.batch-topbar { border-bottom: 0; min-height: 40px; padding: 4px 8px; }
+.batch-topbar h2 { font-size: 1rem; }
+.batch-topbar .muted { font-size: .75rem; margin: 0; }
+.batch-topbar .button, .batch-runs-pages .button, .batch-runs-table .button { font-size: .78rem; min-height: 32px; padding: 4px 8px; }
+#batch-progress { display: block; flex: 0 0 4px; height: 4px; margin: 0; width: 100%; }
+.batch-filter-bar { align-items: end; background: var(--panel); border: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 5px 12px; padding: 6px 8px; }
+.batch-filter-bar strong { align-self: center; font-size: .8rem; }
+.batch-filter-bar label, .batch-chart-controls label { font-size: .75rem; gap: 2px; }
+.batch-filter-bar label { flex: 0 1 190px; min-width: 115px; }
+.batch-filter-bar select, .batch-chart-controls select, .batch-chart-controls input { font-size: .8rem; min-height: 30px; padding: 3px 6px; }
+.batch-filter-bar .hint { align-self: center; font-size: .72rem; }
+.batch-tabs { background: var(--panel); border: 1px solid var(--line); border-top: 0; display: flex; gap: 0; overflow-x: auto; }
+.batch-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; flex: 0 0 auto; font-size: .8rem; font-weight: 650; padding: 6px 12px; }
+.batch-tabs button[aria-selected="true"] { background: var(--blue-pale); border-bottom-color: var(--blue); color: var(--ink); }
+.batch-workspace { background: var(--panel); border: 1px solid var(--line); border-top: 0; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.batch-workspace > .panel { border: 0; height: 100%; min-height: 0; overflow: auto; padding: 10px 12px; }
+.batch-workspace .hint { font-size: .75rem; }
+.batch-summary-panel > .hint, .batch-runs-panel > .hint { margin: 8px 0; }
+#batch-chart-details { margin: 6px 0; }
+@media (max-width: 700px), (max-height: 620px) {
+  body.batch-active { overflow: auto; }
+  body.batch-active main { height: auto; min-height: calc(100dvh - 24px); overflow: visible; }
+  .batch-screen { height: auto; min-height: calc(100dvh - 32px); }
+  .batch-workspace { overflow: visible; }
+  .batch-workspace > .panel { height: auto; overflow: visible; }
+  .batch-topbar { align-items: flex-start; gap: 6px; }
 }

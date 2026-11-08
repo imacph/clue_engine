@@ -107,6 +107,7 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       return elements.get(id);
     },
     createElement(tag) { const result = element(); result.tagName = tag.toUpperCase(); return result; },
+    createElementNS(namespace, tag) { const result = element(); result.tagName = tag.toUpperCase(); return result; },
     querySelector() { return { content: "" }; },
   };
   document.getElementById("board-locations-panel").parentElement = element();
@@ -948,6 +949,7 @@ test("batch comparison and chart show meaningful rates and exact statistics", ()
   assert.equal(ui.evaluate("batchRelativeRate(0, 0, 8)"), "—");
   ui.element("batch-metric").value = "actions";
   ui.element("batch-display-mode").value = "count";
+  ui.element("batch-chart-values").open = true;
   ui.evaluate(`
     lastBatchChart = {
       title: "Game actions", samples: 4, denominator: "completed games", details: "Excluded: timeout=1.",
@@ -956,15 +958,68 @@ test("batch comparison and chart show meaningful rates and exact statistics", ()
     };
     renderBatchChart();
   `);
-  const rows = ui.element("batch-chart-bars").children;
-  assert.equal(rows[0].children[1].children[0].style.width, "100%");
-  assert.ok(Math.abs(parseFloat(rows[1].children[1].children[0].style.width) - 100 / 3) < 1e-10);
-  assert.equal(rows[0].children[2].textContent, "3 · 75.0%");
-  assert.equal(rows[0].children[2].children[0].textContent, "75.0% cumulative");
-  assert.equal(rows[1].children[2].children[0].textContent, "100.0% cumulative");
+  const bars = ui.element("batch-chart-graph").children.filter((child) => child.class === "batch-chart-bin");
+  assert.equal(bars.length, 2);
+  assert.match(bars[0]["aria-label"], /0-9: 3 of 4 \(75.0%\).*75.0% cumulative/);
+  assert.match(bars[1]["aria-label"], /10-19: 1 of 4 \(25.0%\).*100.0% cumulative/);
+  assert.ok(Number(bars[0].children[1].height) > Number(bars[1].children[1].height));
+  const tableRows = ui.element("batch-chart-table").children[0].children[1].children;
+  assert.deepEqual(tableRows.map((row) => row.children.map((cell) => cell.textContent)), [
+    ["0-9", "3", "75.0%", "75.0%"], ["10-19", "1", "25.0%", "100.0%"],
+  ]);
   assert.equal(ui.element("batch-chart-stats").children.length, 5);
   ui.evaluate("lastBatchChart = { samples: 0, title: 'Empty', denominator: 'games', details: '', bins: [] }; renderBatchChart()");
-  assert.match(ui.element("batch-chart-bars").children[0].textContent, /No samples/);
+  assert.equal(ui.element("batch-chart-empty").hidden, false);
+  assert.equal(ui.element("batch-chart-graph").children.length, 0);
+});
+
+test("distribution graph preserves gaps and groups dense bins without losing counts", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const sparse = batchGraphBuckets({
+      numeric_summary: {}, bins: [{ label: "0", count: 2 }, { label: "500", count: 3 }],
+    }, 500);
+    const dense = batchGraphBuckets({
+      numeric_summary: {}, bins: Array.from({ length: 1000 }, (_, i) => ({ label: String(i), count: 1 })),
+    }, 500);
+    return {
+      sparse: sparse.bars, denseCount: dense.bars.length, group: dense.binsPerBar,
+      samples: dense.bars.reduce((sum, bar) => sum + bar.count, 0),
+    };
+  })()`);
+  assert.ok(result.sparse[1].start - result.sparse[0].end > 400);
+  assert.ok(result.denseCount <= 80);
+  assert.ok(result.group > 1);
+  assert.equal(result.samples, 1000);
+});
+
+test("exact distribution data is paginated with cumulative counts across pages", () => {
+  const ui = frontend();
+  ui.element("batch-chart-values").open = true;
+  ui.evaluate(`
+    lastBatchChart = {
+      samples: 120, numeric_summary: {},
+      bins: Array.from({ length: 120 }, (_, i) => ({ label: String(i), count: 1, probability: 1 / 120 })),
+    };
+    batchBinOffset = 50;
+    renderBatchBinTable();
+  `);
+  const rows = ui.element("batch-chart-table").children[0].children[1].children;
+  assert.equal(rows.length, 50);
+  assert.equal(rows[0].children[0].textContent, "50");
+  assert.equal(rows[0].children[3].textContent, "42.5%");
+  assert.equal(ui.element("batch-bin-status").textContent, "Showing 51–100 of 120 bins.");
+  assert.equal(ui.element("batch-bin-previous").disabled, false);
+  assert.equal(ui.element("batch-bin-next").disabled, false);
+});
+
+test("batch workspace tabs switch visible panels without losing the selection", () => {
+  const ui = frontend();
+  ui.evaluate('switchBatchTab("runs")');
+  assert.equal(ui.element("batch-panel-runs").hidden, false);
+  assert.equal(ui.element("batch-panel-distribution").hidden, true);
+  assert.equal(ui.element("batch-tab-runs")["aria-selected"], "true");
+  assert.equal(ui.element("batch-tab-summary").tabIndex, -1);
 });
 
 test("batch filter requests ignore out-of-order results", async () => {

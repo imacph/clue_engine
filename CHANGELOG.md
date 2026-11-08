@@ -20,6 +20,9 @@
   readable count/percentage charts to browser and desktop batch analysis.
 - Offer batch play from the shared spectator setup, and allow individual batch
   runs to be filtered, sorted, paged, and opened in the existing replay viewer.
+- Restyle batch results as a compact, tabbed game workspace and replace the
+  scrolling bin list with a fixed-height distribution graph and accessible
+  exact-bin data.
 
 ## Desktop 0.4.1 / App 0.6.1 / API 0.6.2 - 2026-11-07
 

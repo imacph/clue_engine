@@ -32,6 +32,7 @@ let activeBatchId = null;
 let batchFinished = false;
 let lastBatchChart = null;
 let batchChartVersion = 0;
+let batchBinOffset = 0;
 let batchRunsVersion = 0;
 let batchRunsOffset = 0;
 let batchRunsTotal = 0;
@@ -283,16 +284,191 @@ function renderBatchSummary(data) {
   $("batch-policy-summary").append(table);
 }
 
+const batchTabs = ["distribution", "summary", "runs"];
+
+function switchBatchTab(name) {
+  for (const tab of batchTabs) {
+    const active = tab === name;
+    $(`batch-tab-${tab}`).setAttribute("aria-selected", String(active));
+    $(`batch-tab-${tab}`).tabIndex = active ? 0 : -1;
+    $(`batch-panel-${tab}`).hidden = !active;
+  }
+  if (name === "distribution" && lastBatchChart) drawBatchGraph(lastBatchChart);
+}
+
+function batchGraphBuckets(chart, plotWidth) {
+  if (!chart.numeric_summary) {
+    return {
+      numeric: false, binsPerBar: 1,
+      bars: chart.bins.map((bin, index) => ({
+        label: bin.label.replaceAll("_", " "), count: bin.count, start: index, end: index + 1,
+      })),
+      start: 0, end: chart.bins.length,
+    };
+  }
+  const ranges = chart.bins.map((bin) => {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(bin.label);
+    if (!match) throw new Error(`Invalid numeric distribution bin: ${bin.label}`);
+    return { start: Number(match[1]), end: Number(match[2] ?? match[1]), count: bin.count };
+  });
+  const start = ranges[0].start;
+  const last = ranges[ranges.length - 1];
+  const width = ranges[0].end - start + 1;
+  const slots = Math.round((last.start - start) / width) + 1;
+  const maxBars = Math.max(1, Math.min(80, Math.floor(plotWidth / 6)));
+  const binsPerBar = Math.max(1, Math.ceil(slots / maxBars));
+  const groupWidth = binsPerBar * width;
+  const grouped = new Map();
+  for (const bin of ranges) {
+    const index = Math.floor((bin.start - start) / groupWidth);
+    grouped.set(index, (grouped.get(index) || 0) + bin.count);
+  }
+  const bars = [...grouped].map(([index, count]) => {
+    const first = start + index * groupWidth;
+    const lastValue = Math.min(last.end, first + groupWidth - 1);
+    return {
+      label: first === lastValue ? String(first) : `${first}-${lastValue}`,
+      count, start: first, end: lastValue + 1,
+    };
+  });
+  return { numeric: true, binsPerBar, bars, start, end: last.end + 1 };
+}
+
+function drawBatchGraph(chart) {
+  const graph = $("batch-chart-graph");
+  graph.replaceChildren();
+  $("batch-chart-grouping").textContent = "";
+  if (!chart || !chart.samples) return;
+  const width = Math.max(240, graph.clientWidth || 900);
+  const height = Math.max(190, graph.clientHeight || 240);
+  graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const left = 60, right = 18, top = 24, bottom = height - 38;
+  const plotWidth = width - left - right;
+  const plotHeight = bottom - top;
+  const buckets = batchGraphBuckets(chart, plotWidth);
+  const maximum = buckets.bars.reduce((value, bar) => Math.max(value, bar.count), 0);
+  const mode = $("batch-display-mode").value;
+  graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
+    mode === "percent" ? "Share (%)" : "Count"));
+  const ticks = new Set([0, ...[1, 2, 3, 4].map((step) => Math.round(maximum * step / 4))]);
+  for (const count of ticks) {
+    const y = bottom - count / maximum * plotHeight;
+    graph.append(svgElement("line", { x1: left, y1: y, x2: width - right, y2: y, class: "batch-chart-grid" }));
+    const label = mode === "percent" ? `${formatBatchNumber(count / chart.samples * 100)}%` : String(count);
+    graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" }, label));
+  }
+  const domain = buckets.end - buckets.start;
+  let cumulative = 0;
+  for (const bar of buckets.bars) {
+    cumulative += bar.count;
+    const x = left + (bar.start - buckets.start) / domain * plotWidth;
+    const barWidth = (bar.end - bar.start) / domain * plotWidth;
+    const barHeight = bar.count / maximum * plotHeight;
+    const share = (bar.count / chart.samples * 100).toFixed(1);
+    const description = `${bar.label}: ${formatBatchNumber(bar.count)} of ${formatBatchNumber(chart.samples)} `
+      + `(${share}%)${buckets.numeric ? ` · ${(cumulative / chart.samples * 100).toFixed(1)}% cumulative` : ""}`;
+    const group = svgElement("g", {
+      class: "batch-chart-bin", tabindex: 0, role: "img", "aria-label": description,
+    });
+    group.append(
+      svgElement("title", {}, description),
+      svgElement("rect", {
+        x: x + 1, y: bottom - barHeight, width: Math.max(0, barWidth - 2),
+        height: barHeight, class: "batch-chart-bar",
+      }),
+      svgElement("rect", { x, y: top, width: barWidth, height: plotHeight, class: "batch-chart-hit" }),
+    );
+    const inspect = () => { $("batch-chart-inspection").textContent = description; };
+    group.addEventListener("mouseenter", inspect);
+    group.addEventListener("focus", inspect);
+    graph.append(group);
+    if (!buckets.numeric) {
+      const center = x + barWidth / 2;
+      const label = svgElement("text", {
+        x: center, y: bottom + 15, "text-anchor": "middle", class: "batch-chart-axis",
+      });
+      bar.label.split(" ").forEach((word, index) => {
+        const attrs = { x: center, dy: index ? 12 : 0 };
+        if (word.length * 6 > barWidth - 4) {
+          attrs.textLength = Math.max(1, barWidth - 4);
+          attrs.lengthAdjust = "spacingAndGlyphs";
+        }
+        label.append(svgElement("tspan", attrs, word));
+      });
+      graph.append(label);
+    }
+  }
+  if (buckets.numeric) {
+    const intervals = width < 500 ? 2 : 4;
+    for (let index = 0; index <= intervals; index++) {
+      const fraction = index / intervals;
+      const value = Math.round(buckets.start + fraction * domain);
+      graph.append(svgElement("text", {
+        x: left + fraction * plotWidth, y: bottom + 17,
+        "text-anchor": index === 0 ? "start" : index === intervals ? "end" : "middle",
+        class: "batch-chart-axis",
+      }, formatBatchNumber(value)));
+    }
+    if (buckets.binsPerBar > 1) {
+      $("batch-chart-grouping").textContent =
+        `Graph combines up to ${formatBatchNumber(buckets.binsPerBar)} adjacent bins per bar; exact bins are available below.`;
+    }
+  }
+}
+
+function renderBatchBinTable() {
+  const container = $("batch-chart-table");
+  container.replaceChildren();
+  const chart = lastBatchChart;
+  if (!chart || !chart.samples || !$("batch-chart-values").open) return;
+  const end = Math.min(batchBinOffset + 50, chart.bins.length);
+  $("batch-bin-status").textContent =
+    `Showing ${batchBinOffset + 1}–${end} of ${chart.bins.length} bins.`;
+  $("batch-bin-previous").disabled = batchBinOffset === 0;
+  $("batch-bin-next").disabled = end >= chart.bins.length;
+  const table = document.createElement("table");
+  table.className = "batch-policy-table";
+  table.setAttribute("aria-label", "Exact distribution bins");
+  const head = document.createElement("thead");
+  const header = document.createElement("tr");
+  for (const label of ["Bin", "Count", "Share", ...(chart.numeric_summary ? ["Cumulative"] : [])]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    header.append(cell);
+  }
+  head.append(header);
+  const body = document.createElement("tbody");
+  let cumulative = chart.bins.slice(0, batchBinOffset).reduce((sum, bin) => sum + bin.count, 0);
+  for (const bin of chart.bins.slice(batchBinOffset, end)) {
+    cumulative += bin.count;
+    const row = document.createElement("tr");
+    const values = [bin.label.replaceAll("_", " "), formatBatchNumber(bin.count), `${(bin.probability * 100).toFixed(1)}%`];
+    if (chart.numeric_summary) values.push(`${(cumulative / chart.samples * 100).toFixed(1)}%`);
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  container.append(table);
+}
+
 function renderBatchChart() {
   const chart = lastBatchChart;
-  const bars = $("batch-chart-bars");
-  bars.replaceChildren();
   const stats = $("batch-chart-stats");
   stats.replaceChildren();
+  $("batch-chart-graph").replaceChildren();
+  $("batch-chart-table").replaceChildren();
+  $("batch-chart-empty").hidden = !chart || Boolean(chart.samples);
+  $("batch-chart-values").hidden = !chart || !chart.samples;
+  $("batch-chart-grouping").textContent = "";
+  $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
   if (!chart) return;
   $("batch-distribution-title").textContent =
     $("batch-metric").value === "deduction" ? "First solution action" : displayPlayerText(chart.title);
-  const mode = $("batch-display-mode").value;
   $("batch-chart-details").textContent =
     `${chart.samples} samples · ${chart.denominator}. ${chart.details}`;
   if (chart.numeric_summary) {
@@ -301,52 +477,20 @@ function renderBatchChart() {
       ["90th percentile", "p90"], ["Maximum", "maximum"],
     ]) appendBatchStat(stats, label, formatBatchNumber(chart.numeric_summary[key]));
   }
-  if (!chart.samples) {
-    const empty = document.createElement("li");
-    empty.className = "batch-chart-empty";
-    empty.textContent = "No samples are available for this distribution.";
-    bars.append(empty);
-    return;
-  }
-  const largest = chart.bins.reduce((maximum, bin) => Math.max(maximum, bin.count), 0);
-  let cumulative = 0;
-  for (const bin of chart.bins) {
-    const item = document.createElement("li");
-    item.className = "batch-chart-row";
-    const label = document.createElement("span");
-    label.className = "batch-chart-label";
-    label.textContent = bin.label;
-    const track = document.createElement("span");
-    track.className = "batch-chart-track";
-    const fill = document.createElement("span");
-    fill.className = "batch-chart-fill";
-    fill.style.width = `${largest ? bin.count / largest * 100 : 0}%`;
-    track.append(fill);
-    const value = document.createElement("span");
-    value.className = "batch-chart-value";
-    value.textContent = mode === "percent"
-      ? `${(bin.probability * 100).toFixed(1)}% · ${formatBatchNumber(bin.count)}`
-      : `${formatBatchNumber(bin.count)} · ${(bin.probability * 100).toFixed(1)}%`;
-    cumulative += bin.count;
-    if (chart.numeric_summary) {
-      const cumulativeValue = document.createElement("small");
-      cumulativeValue.textContent = `${(cumulative / chart.samples * 100).toFixed(1)}% cumulative`;
-      value.append(cumulativeValue);
-    }
-    item.append(label, track, value);
-    bars.append(item);
-  }
+  drawBatchGraph(chart);
+  renderBatchBinTable();
 }
 
 async function loadBatchChart() {
   if (!activeBatchId || !batchFinished) return;
   const version = ++batchChartVersion;
   const batchId = activeBatchId;
+  batchBinOffset = 0;
   lastBatchChart = null;
   renderBatchChart();
   $("batch-chart-details").textContent = "Loading distribution…";
   const width = Number($("batch-bin-width").value);
-  if (!Number.isInteger(width) || width < 1) {
+  if (!Number.isSafeInteger(width) || width < 1) {
     $("batch-chart-details").textContent = "Histogram bin width must be a positive whole number.";
     throw new Error("Histogram bin width must be a positive whole number.");
   }
@@ -549,6 +693,7 @@ async function submitBatch(setup) {
   batchChartVersion++;
   batchRunsVersion++;
   batchRunsOffset = 0;
+  batchBinOffset = 0;
   batchFinished = false;
   lastBatchChart = null;
   window.setupWizard.rememberStarted(setup);
@@ -557,12 +702,19 @@ async function submitBatch(setup) {
   $("game-screen").hidden = true;
   $("batch-screen").hidden = false;
   document.body.classList.add("batch-active");
+  switchBatchTab("distribution");
   $("batch-title").focus();
   $("batch-run-status").textContent = "Starting batch…";
   $("batch-progress").value = 0;
   $("batch-summary").replaceChildren();
   $("batch-policy-summary").replaceChildren();
-  $("batch-chart-bars").replaceChildren();
+  $("batch-chart-graph").replaceChildren();
+  $("batch-chart-table").replaceChildren();
+  $("batch-chart-empty").hidden = true;
+  $("batch-chart-values").hidden = true;
+  $("batch-chart-values").open = false;
+  $("batch-chart-grouping").textContent = "";
+  $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
   $("batch-chart-stats").replaceChildren();
   $("batch-policy-filter").replaceChildren(option("", "All profiles"));
   $("batch-seat-filter").replaceChildren(option("", "All seats"));
@@ -3317,6 +3469,37 @@ $("batch-replay-return").addEventListener("click", () => {
   $("batch-title").focus();
 });
 $("batch-display-mode").addEventListener("change", renderBatchChart);
+for (const name of batchTabs) {
+  const tab = $(`batch-tab-${name}`);
+  tab.addEventListener("click", () => switchBatchTab(name));
+  tab.addEventListener("keydown", (event) => {
+    let index = batchTabs.indexOf(name);
+    if (event.key === "ArrowRight") index = (index + 1) % batchTabs.length;
+    else if (event.key === "ArrowLeft") index = (index + batchTabs.length - 1) % batchTabs.length;
+    else if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = batchTabs.length - 1;
+    else return;
+    event.preventDefault();
+    switchBatchTab(batchTabs[index]);
+    $(`batch-tab-${batchTabs[index]}`).focus();
+  });
+}
+$("batch-chart-values").addEventListener("toggle", renderBatchBinTable);
+$("batch-bin-previous").addEventListener("click", () => {
+  batchBinOffset = Math.max(0, batchBinOffset - 50);
+  renderBatchBinTable();
+});
+$("batch-bin-next").addEventListener("click", () => {
+  if (!lastBatchChart || batchBinOffset + 50 >= lastBatchChart.bins.length) return;
+  batchBinOffset += 50;
+  renderBatchBinTable();
+});
+if (window.ResizeObserver) {
+  const batchChartObserver = new ResizeObserver(() => {
+    if (lastBatchChart && !$("batch-panel-distribution").hidden) drawBatchGraph(lastBatchChart);
+  });
+  batchChartObserver.observe($("batch-chart-graph"));
+}
 $("quickplay-cancel").addEventListener("click", () => $("quickplay-dialog").close());
 $("main-edit-default").addEventListener("click", () => {
   $("quickplay-dialog").close();

@@ -615,8 +615,12 @@ latter includes only appearances recorded as learned in the histogram and
 reports the number not learned, including incomplete games. Game-length and
 board-event measures exclude incomplete games; outcomes include them. Numeric
 statistics are calculated from the original observations, not histogram bins.
-Bars are scaled to the largest bin, and each bin shows its count and percentage;
-numeric bins also show the cumulative share.
+The fixed-height distribution graph plots numeric bins on a continuous axis,
+including gaps. Hover or focus a bar for its count, percentage, and cumulative
+share. When bins are too numerous to display individually, adjacent bins are
+combined for the graph; **View exact bin data** retains and pages through the
+original bins.
+Use the workspace tabs to switch between the distribution, summary, and runs.
 The individual-runs table can be filtered, paged, and sorted by outcome, action
 count, turns, winner, learned seats, earliest solution action, and event counts.
 Open a run in the replay
