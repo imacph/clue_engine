@@ -1,5 +1,18 @@
 # Changelog
 
+## Desktop 0.4.1 / App 0.6.1 / API 0.6.2 - 2026-11-07
+
+### Added
+
+- Highlight players who passed a suggestion in purple and players who refuted
+  it in green, including multiple responders and replay. Highlights remain
+  visible during turn review and clear when the suggestion is no longer active.
+
+### Notes
+
+- Completed passes and refutations are public; these highlights do not reveal
+  privately shown cards or the acting player in an unrelated private response.
+
 ## Desktop 0.4.1 / App 0.6.0 / API 0.6.2 - 2026-11-07
 
 ### Added

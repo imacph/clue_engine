@@ -991,14 +991,19 @@ function cardActivity(state) {
   return activity;
 }
 
-function renderActivityPasses(state) {
-  const suggestionIndex = state.events.findIndex((event) => event.kind === "suggest" || event.kind === "accuse");
-  const suggestion = state.events[suggestionIndex];
-  const responses = suggestion?.kind === "suggest" ? state.events.slice(0, suggestionIndex) : [];
+function currentSuggestionResponses(state) {
+  const events = state.events || [];
+  const suggestionIndex = events.findIndex((event) => event.kind === "suggest" || event.kind === "accuse");
+  const suggestion = events[suggestionIndex];
+  const responses = suggestion?.kind === "suggest" ? events.slice(0, suggestionIndex) : [];
   const ends = responses.filter((event) => event.kind === "end_turn");
   const current = !ends.length || (state.waiting_for_turn && ends.length === 1
-    && ends[0].actor === suggestion.actor);
-  const passed = current ? responses.filter((event) => event.kind === "pass").reverse() : [];
+    && ends[0].actor === suggestion?.actor);
+  return current ? responses : [];
+}
+
+function renderActivityPasses(state) {
+  const passed = currentSuggestionResponses(state).filter((event) => event.kind === "pass").reverse();
   const summary = passed.length
     ? `Passed: ${passed.map((event) => `P${event.actor + 1}`).join(" · ")}` : "";
   setText("activity-passes", summary);
@@ -1343,14 +1348,33 @@ function notebookDisplayMatrix(state) {
   }));
 }
 
-function updateNotebookMark(button, card, holder, mark, state, draft) {
+function notebookResponseRoles(state) {
+  const roles = Array(state.num_players).fill(null);
+  if (state.notebook_focus?.kind !== "suggest") return roles;
+  for (const event of currentSuggestionResponses(state).reverse()) {
+    if (Number.isInteger(event.actor) && event.actor >= 0 && event.actor < state.num_players) {
+      if (event.kind === "pass") roles[event.actor] = "pass";
+      else if (event.kind === "refute") roles[event.actor] = "refute";
+    }
+  }
+  return roles;
+}
+
+function notebookColumnRoles(holder, focus, responses) {
+  const roles = [];
+  if (holder === focus.turn) roles.push(["notebook-turn", "turn owner"]);
+  if (holder === focus.actor) roles.push(["notebook-actor", "acting now"]);
+  if (responses[holder] === "pass") roles.push(["notebook-pass", "passed"]);
+  if (responses[holder] === "refute") roles.push(["notebook-refute", "refuted"]);
+  return roles;
+}
+
+function updateNotebookMark(button, card, holder, mark, state, draft, responses) {
   const cell = button.parentElement;
   cell.classList.remove("mark-held", "mark-not-held", "mark-unknown");
   cell.classList.add(mark === "+" ? "mark-held" : mark === "-" ? "mark-not-held" : "mark-unknown");
   const focus = state.notebook_focus || { cards: [] };
-  const roles = [];
-  if (holder === focus.turn) roles.push("turn owner");
-  if (holder === focus.actor) roles.push("acting now");
+  const roles = notebookColumnRoles(holder, focus, responses).map(([, label]) => label);
   const cardContext = focus.cards.includes(card.id)
     ? `; ${focus.kind === "accuse" ? "current accusation" : "current suggestion"}` : "";
   const shown = focus.shown?.holder === holder && focus.shown?.card === card.id;
@@ -1373,18 +1397,19 @@ function updateNotebookMark(button, card, holder, mark, state, draft) {
 function renderNotebook(state) {
   const notebook = $("notebook");
   const focus = state.notebook_focus || { cards: [] };
+  const responses = notebookResponseRoles(state);
   const focusCards = new Set(focus.cards);
   const matrix = notebookDisplayMatrix(state);
   updateClauseEntryControls(state);
   const fingerprint = JSON.stringify([
     state.notebook_mode, state.num_players, state.hand_sizes, matrix, state.notebook_clauses,
-    state.notebook_focus, selectedClause, clauseDraft,
+    state.notebook_focus, responses, selectedClause, clauseDraft,
   ]);
   if (fingerprint === lastNotebookFingerprint) return;
   const structure = JSON.stringify([
     state.notebook_mode, state.num_players, state.hand_sizes,
     matrix.map(({ marks, ...card }) => card), state.notebook_clauses,
-    state.notebook_focus, selectedClause, Boolean(clauseDraft),
+    state.notebook_focus, responses, selectedClause, Boolean(clauseDraft),
   ]);
   const marks = matrix.map((card) => card.marks.slice());
   const draft = clauseDraft ? { holder: clauseDraft.holder, cards: { ...clauseDraft.cards } } : null;
@@ -1411,7 +1436,7 @@ function renderNotebook(state) {
     }
     if (canUpdate) {
       for (const [button, card, holder, mark] of changes) {
-        updateNotebookMark(button, card, holder, mark, state, draft);
+        updateNotebookMark(button, card, holder, mark, state, draft, responses);
       }
       lastNotebookFingerprint = fingerprint;
       lastNotebookMarks = marks;
@@ -1441,15 +1466,9 @@ function renderNotebook(state) {
     th.scope = "col";
     th.dataset.notebookSeat = String(seat);
     th.textContent = `P${seat + 1} (${state.hand_sizes[seat]})`;
-    const roles = [];
-    if (seat === focus.turn) {
-      th.classList.add("notebook-turn");
-      roles.push("turn owner");
-    }
-    if (seat === focus.actor) {
-      th.classList.add("notebook-actor");
-      roles.push("acting now");
-    }
+    const columnRoles = notebookColumnRoles(seat, focus, responses);
+    for (const [className] of columnRoles) th.classList.add(className);
+    const roles = columnRoles.map(([, label]) => label);
     th.title = `Player ${seat + 1}: ${state.hand_sizes[seat]} cards`
       + (roles.length ? `; ${roles.join(", ")}` : "");
     th.setAttribute("aria-label", th.title);
@@ -1498,15 +1517,9 @@ function renderNotebook(state) {
       for (const [holder, mark] of card.marks.entries()) {
         const cell = document.createElement("td");
         cell.className = mark === "+" ? "mark-held" : mark === "-" ? "mark-not-held" : "mark-unknown";
-        const roles = [];
-        if (holder === focus.turn) {
-          cell.classList.add("notebook-turn");
-          roles.push("turn owner");
-        }
-        if (holder === focus.actor) {
-          cell.classList.add("notebook-actor");
-          roles.push("acting now");
-        }
+        const columnRoles = notebookColumnRoles(holder, focus, responses);
+        for (const [className] of columnRoles) cell.classList.add(className);
+        const roles = columnRoles.map(([, label]) => label);
         const shown = focus.shown?.holder === holder && focus.shown?.card === card.id;
         if (shown) cell.classList.add("notebook-shown");
         const cellContext = (roles.length ? `; ${roles.join(", ")}` : "")

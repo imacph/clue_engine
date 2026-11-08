@@ -1845,6 +1845,67 @@ test("notebook actor highlighting uses inset decoration instead of changing bord
   assert.match(stylesheet, /\.notebook-table th\.notebook-turn\.notebook-actor\s*\{\s*box-shadow:/);
 });
 
+test("notebook highlights every completed response and clears it at the right boundary", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 4, hand_sizes: [5, 5, 4, 4],
+    matrix: [{ id: 0, name: "Miss Scarlet", type: "suspect",
+      marks: ["?", "?", "?", "?", "?"], editable: [true, true, true, true, true] }],
+    notebook_clauses: [],
+    notebook_focus: { turn: 0, actor: 2, kind: "suggest", cards: [0], shown: null },
+    events: [{ kind: "suggest", actor: 0 }],
+    waiting_for_turn: false,
+  };
+  const descendants = (node) => [node, ...node.children.flatMap(descendants)];
+  const column = (seat) => descendants(ui.element("notebook"))
+    .find((node) => node.dataset.notebookSeat === String(seat));
+  const cell = (seat) => descendants(ui.element("notebook"))
+    .find((node) => node.dataset.cardId === "0").children[seat + 1];
+  ui.renderNotebook(state);
+  assert.ok(!column(1).classList.contains("notebook-pass"));
+
+  state.events.unshift({ kind: "pass", actor: 1 });
+  ui.renderNotebook(state);
+  assert.ok(column(1).classList.contains("notebook-pass"));
+  assert.ok(cell(1).classList.contains("notebook-pass"));
+  assert.match(column(1)["aria-label"], /passed/);
+  assert.match(cell(1).children[0]["aria-label"], /passed/);
+  assert.ok(column(2).classList.contains("notebook-actor"));
+
+  state.events.unshift({ kind: "show", actor: 2 }, { kind: "refute", actor: 2 });
+  ui.renderNotebook(state);
+  assert.ok(column(1).classList.contains("notebook-pass"));
+  assert.ok(column(2).classList.contains("notebook-refute"));
+  assert.ok(column(2).classList.contains("notebook-actor"));
+  assert.match(cell(2).children[0]["aria-label"], /acting now, refuted/);
+  state.events.unshift({ kind: "refute", actor: 3 });
+  ui.renderNotebook(state);
+  assert.ok(column(2).classList.contains("notebook-refute"));
+  assert.ok(column(3).classList.contains("notebook-refute"));
+
+  state.events.unshift({ kind: "end_turn", actor: 0 });
+  state.waiting_for_turn = true;
+  ui.renderNotebook(state);
+  assert.ok(column(1).classList.contains("notebook-pass"));
+  assert.ok(column(3).classList.contains("notebook-refute"));
+
+  state.waiting_for_turn = false;
+  state.notebook_focus = { turn: 1, actor: 1, kind: null, cards: [], shown: null };
+  ui.renderNotebook(state);
+  assert.ok(!column(1).classList.contains("notebook-pass"));
+  assert.ok(!column(2).classList.contains("notebook-refute"));
+
+  state.notebook_focus = { turn: 1, actor: 2, kind: "suggest", cards: [0], shown: null };
+  state.events.unshift({ kind: "suggest", actor: 1 });
+  ui.renderNotebook(state);
+  assert.ok(!column(1).classList.contains("notebook-pass"));
+  assert.ok(!column(2).classList.contains("notebook-refute"));
+  state.events.unshift({ kind: "pass", actor: 3 });
+  ui.renderNotebook(state);
+  assert.ok(column(3).classList.contains("notebook-pass"));
+  assert.ok(!column(3).classList.contains("notebook-refute"));
+});
+
 test("stale refresh preserves the entire manual notebook snapshot", () => {
   const ui = frontend();
   const current = {

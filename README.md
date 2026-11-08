@@ -15,7 +15,7 @@ No license granting redistribution rights is provided.
 
 <!-- component-versions:start -->
 The game API and Python distribution are **0.6.2**, the shared browser/desktop
-frontend is **0.6.0**, and the Windows desktop wrapper is **0.4.1**.
+frontend is **0.6.1**, and the Windows desktop wrapper is **0.4.1**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -315,7 +315,9 @@ reverted unless a later edit supersedes it. Your notes do not affect the bots.
 The right-side **Help** tab summarizes action, notebook, and clause controls.
 In the browser and Windows app, the notebook highlights the turn owner's column
 in blue, the acting player's column in gold, and the cards in the current
-suggestion or accusation.
+suggestion or accusation. Players who passed the current suggestion appear in
+purple; those who refuted it appear in green, including when all players respond.
+These completed responses are public and remain highlighted through turn review.
 An underlined cell marks a card visibly shown to the selected perspective.
 While a bot turn awaits **Next turn**, its column and suggestion rows remain
 highlighted for review; the board marks the same player and labels the turn as
