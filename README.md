@@ -609,6 +609,49 @@ named profile or a custom strategy object), plus `game_rules`, `board_rules`,
 }
 ```
 
+Board batches also accept the experimental `learned` policy in a setup JSON
+object, for example `"bots": ["learned", "deductive", "probing", "strategic"]`.
+It is a batch-only policy; it is not offered in the normal game setup UI and
+is rejected for card-only games. It uses a fixed packaged model to choose
+suggestions and room goals from the player's visible hand, deductions, event
+history, and public board. Existing rules validate actions, route movement,
+handle reveals, and allow only sound accusations. Room goals persist across
+turns until reached or no longer reachable. This experimental model has not
+been established to outperform the existing bots.
+
+The model is trained offline with a linear REINFORCE policy and terminal
+win/loss outcomes. Training never passes the solution or other hands to the
+policy. To train a new model and evaluate it separately:
+
+```powershell
+python -m clue_engine.learning train --games 1000 --seed 42000 --output model.json
+python -m clue_engine.learning evaluate --games 200 --seed 110000 --model model.json
+python -m clue_engine.learning evaluate --games 200 --seed 110000 --model model.json --baseline strategic
+python -m clue_engine.learning evaluate --games 200 --seed 110000 --model model.json --baseline analytical
+```
+
+Choose evaluation seeds not used for training or model selection. Each command
+uses four players and rotates the evaluated player through the four seats;
+the other seats default to `deductive,probing,strategic` in that order. Use
+`--opponents random,random,random` to change this fixed pool and `--initial
+model.json` to continue training from a saved model. Training uses a stochastic
+softmax policy; evaluation chooses highest-scoring actions with seeded
+tie-breaking. Model files include the weights, schema, and training metadata and
+are never overwritten. The batch policy always uses the packaged model; saving
+a new model does not automatically replace it. The evaluation reports wins,
+losses, timeouts, win rates by seat, and 95% Wilson intervals over completed
+games. Timeouts are excluded
+from the win-rate denominator and reported separately. Small samples and
+overlapping intervals do not establish which policy is stronger.
+
+The packaged model started from hand-designed weights and trained for 96 games
+against the default pool (9 wins). On 32 separate seeds beginning at 97000,
+with eight games per seat and no timeouts, it won 8 games (25%; 95% Wilson
+interval 13.3–42.1%). On the same seeds and opponent pool, `strategic` won
+12/32 and `analytical` won 18/32. This is a small initial benchmark, not
+evidence of superiority; unlike the learned policy, `analytical` can make risky
+accusations before the solution is certain.
+
 The shared browser and desktop app also provide **Batch simulation** from the
 main menu, or by selecting **Spectate bots** and **Run a batch of games** in
 the normal setup wizard. The wizard exposes game type, player count, per-seat named or

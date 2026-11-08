@@ -7,6 +7,7 @@ a = Analysis(
     pathex=[str(root / "src")],
     binaries=[],
     datas=[
+        (str(root / "src" / "clue_engine" / "learned_model.json"), "clue_engine"),
         (str(root / "src" / "clue_engine" / "webapp" / "templates"), "clue_engine/webapp/templates"),
         (str(root / "src" / "clue_engine" / "webapp" / "static"), "clue_engine/webapp/static"),
     ],

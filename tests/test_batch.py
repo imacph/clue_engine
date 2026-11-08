@@ -51,6 +51,26 @@ def test_batch_accepts_rotated_advanced_profiles(tmp_path):
     assert summary["policy_stats"]["strategic"]["seat_games"] == 4
 
 
+def test_learned_policy_runs_in_board_batch_and_rejects_card_only(tmp_path):
+    from clue_engine.replay import replay_from_batch_trace
+
+    with pytest.raises(ValueError, match="board"):
+        BatchConfig(1, ("learned", "random", "random", "random")).validate()
+    config = batch_config_from_setup(
+        {"game_type": "board", "players": 4, "policies": "learned,random,random,random"},
+        games=1, seed=2,
+    )
+    trace = tmp_path / "learned.jsonl"
+    summary = run_batch(config, trace)
+    assert summary["outcomes"]["error"] == 0
+    assert summary["outcomes"]["timeout"] == 0
+    assert summary["policy_stats"]["learned"]["seat_games"] == 1
+    assert replay_from_batch_trace(trace, 0).history
+    second = tmp_path / "learned-repeat.jsonl"
+    assert run_batch(config, second) == summary
+    assert second.read_text(encoding="utf-8") == trace.read_text(encoding="utf-8")
+
+
 def test_action_counts_and_trace_preserve_multi_event_refutation(tmp_path, monkeypatch):
     from clue_engine import batch
 

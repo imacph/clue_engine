@@ -680,19 +680,23 @@ POLICY_TYPES: dict[str, type[RandomPolicy]] = {
 POLICY_NAMES = tuple(POLICY_TYPES)
 
 
-def validate_policy_names(names: Sequence[str]) -> None:
+def validate_policy_names(names: Sequence[str], *, additional: Sequence[str] = ()) -> None:
     for name in names:
-        if name not in POLICY_TYPES:
-            raise ValueError(f"unknown policy {name!r}; choose from {', '.join(POLICY_NAMES)}")
+        if name not in POLICY_TYPES and name not in additional:
+            raise ValueError(
+                f"unknown policy {name!r}; choose from {', '.join((*POLICY_NAMES, *additional))}"
+            )
 
 
-def policies_for_players(value: str, players: int) -> tuple[str, ...]:
+def policies_for_players(
+    value: str, players: int, *, additional: Sequence[str] = (),
+) -> tuple[str, ...]:
     names = tuple(name.strip().lower() for name in value.split(","))
     if len(names) == 1:
         names = names * players
     if len(names) != players:
         raise ValueError("supply one policy or one policy per player")
-    validate_policy_names(names)
+    validate_policy_names(names, additional=additional)
     return names
 
 

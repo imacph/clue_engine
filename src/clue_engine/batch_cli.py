@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Event
 
 from .batch import (
+    BATCH_POLICY_NAMES,
     BatchConfig,
     BatchSummary,
     batch_config_from_setup,
@@ -21,7 +22,6 @@ from .distributions_cli import (
     render_options,
     validate_options,
 )
-from .policies import POLICY_NAMES
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--players", type=int, help="card-only player count (default: 4)")
     parser.add_argument(
         "--policies",
-        help=f"one policy or comma-separated policies: {', '.join(POLICY_NAMES)}",
+        help=f"one policy or comma-separated policies: {', '.join(BATCH_POLICY_NAMES)}",
     )
     parser.add_argument(
         "--setup", type=Path,

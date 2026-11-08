@@ -66,6 +66,22 @@ def test_nonlearned_actions_use_sound_rules():
     assert not isinstance(policy.choose(view, 4, engine.legal_actions()), Accuse)
 
 
+def test_known_solution_is_accused_by_deterministic_rules():
+    engine, _ = create_board_game(4, 4, "random")
+    solution = Combination(0, 6, 12)
+    view = replace(
+        engine.view(0), own_hand=frozenset({1, 2, 3, 4, 5}), hand_sizes=None,
+        events=(
+            Event(EventKind.SUGGEST, 0, combo=solution),
+            Event(EventKind.PASS, 1),
+            Event(EventKind.PASS, 2),
+            Event(EventKind.PASS, 3),
+        ),
+    )
+    policy = LearningPolicy(random.Random(2), LinearModel.zeros())
+    assert policy.choose(view, 4, (Accuse(solution),)) == Accuse(solution)
+
+
 def test_goal_router_moves_towards_selected_room():
     engine, _ = create_board_game(4, 7, "random")
     player = engine.to_move
