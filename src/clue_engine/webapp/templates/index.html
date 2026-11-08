@@ -112,6 +112,10 @@
                   <input id="players" type="number" min="2" value="4" required>
                 </label>
               </div>
+              <label id="batch-option-field" class="check-row" hidden>
+                <input id="batch-enabled" type="checkbox">
+                <span><strong>Run a batch of games</strong><small>Simulate multiple spectator games and analyze their results.</small></span>
+              </label>
               <label id="notebook-mode-field">Detective notebook
                 <select id="notebook-mode" aria-describedby="notebook-mode-hint">
                   <option value="manual">Manual - make your own deductions</option>
@@ -303,6 +307,9 @@
       <section class="panel batch-summary-panel" aria-labelledby="batch-summary-title">
         <h3 id="batch-summary-title">Summary</h3>
         <div id="batch-summary"></div>
+        <p class="hint">Win rates use completed seat appearances. Relative to equal share compares each
+          rate with the observed overall wins per completed seat; 100% is the equal-share reference,
+          not a measure of causation or bot strength. Games with no winner lower the reference.</p>
         <div id="batch-policy-summary"></div>
       </section>
       <section class="panel batch-distribution-panel" aria-labelledby="batch-distribution-title">
@@ -311,6 +318,7 @@
           <label>Measure
             <select id="batch-metric">
               <option value="outcomes">Outcomes</option>
+              <option value="seat_outcomes">Bot seat outcomes</option>
               <option value="actions">Actions per game</option>
               <option value="turns">Player 1 turns</option>
               <option value="deduction">First solution action</option>
@@ -324,6 +332,12 @@
               </optgroup>
             </select>
           </label>
+          <label>Bot profile
+            <select id="batch-policy-filter"><option value="">All profiles</option></select>
+          </label>
+          <label>Seat
+            <select id="batch-seat-filter"><option value="">All seats</option></select>
+          </label>
           <label>Bin width
             <input id="batch-bin-width" type="number" min="1" value="10">
           </label>
@@ -334,8 +348,49 @@
             </select>
           </label>
         </div>
-        <p id="batch-chart-details" class="hint"></p>
+        <p class="hint">Game measures select games containing the chosen profile at the chosen seat
+          (each game counts once). Bot seat outcomes and deduction count matching seat appearances.
+          Player 1 turns always means Player 1, regardless of filter.</p>
+        <p id="batch-chart-details" class="hint" role="status"></p>
+        <div id="batch-chart-stats" class="batch-summary-grid" aria-label="Distribution statistics"></div>
+        <p class="batch-chart-key hint">Bars are scaled to the largest bin; each row shows its count and share of samples. Numeric bins also show the cumulative share through that bin.</p>
         <ol id="batch-chart-bars" class="batch-chart-bars" aria-label="Distribution bins"></ol>
+      </section>
+      <section class="panel batch-runs-panel" aria-labelledby="batch-runs-title">
+        <h3 id="batch-runs-title">Individual runs</h3>
+        <p class="hint">The profile and seat filters above also select runs here. Replays contain private hands and the solution and remain available while this batch is retained.</p>
+        <div class="batch-chart-controls">
+          <label>Sort by
+            <select id="batch-runs-sort">
+              <option value="game">Run number</option>
+              <option value="outcome">Outcome</option>
+              <option value="steps">Actions</option>
+              <option value="winner">Winning seat</option>
+              <option value="turns">Total turns</option>
+              <option value="learned">Seats that learned the solution</option>
+              <option value="first_solution">Earliest solution action</option>
+              <option value="suggestions">Suggestions</option>
+              <option value="passes">Passes</option>
+              <option value="refutations">Refutations</option>
+              <option value="rolls" data-board-only>Dice rolls</option>
+              <option value="moves" data-board-only>Movement actions</option>
+              <option value="room_entries" data-board-only>Room entries</option>
+              <option value="passages" data-board-only>Secret passages</option>
+              <option value="suspect_relocations" data-board-only>Suspect relocations</option>
+              <option value="weapon_relocations" data-board-only>Weapon relocations</option>
+            </select>
+          </label>
+          <label>Order
+            <select id="batch-runs-order"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
+          </label>
+        </div>
+        <p class="hint">When sorting by winner or earliest solution, runs without one come first in ascending order.</p>
+        <p id="batch-runs-status" class="hint" role="status">Runs will be available when the batch finishes.</p>
+        <div id="batch-runs-table" class="batch-runs-table"></div>
+        <div class="batch-runs-pages">
+          <button id="batch-runs-previous" class="button button-quiet" type="button" disabled>Previous</button>
+          <button id="batch-runs-next" class="button button-quiet" type="button" disabled>Next</button>
+        </div>
       </section>
     </section>
 
@@ -353,6 +408,7 @@
             <button id="next-button" class="button button-secondary" type="button" hidden>Next action</button>
           </div>
           <button id="replay-open" class="button button-secondary" type="button" hidden>Replay</button>
+          <button id="batch-replay-return" class="button button-secondary" type="button" hidden>Back to batch results</button>
           <button id="game-options-open" class="button button-quiet" type="button">Game options</button>
         </div>
       </div>

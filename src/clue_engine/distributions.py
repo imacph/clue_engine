@@ -1,6 +1,7 @@
 """Streaming empirical distributions for batch results and saved traces."""
 
 import json
+import math
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -33,12 +34,44 @@ class DistributionBin:
 
 
 @dataclass(frozen=True)
+class NumericSummary:
+    minimum: int
+    maximum: int
+    mean: float
+    median: float
+    p90: int
+
+
+@dataclass(frozen=True)
 class Distribution:
     title: str
     denominator: str
     samples: int
     details: str
     bins: tuple[DistributionBin, ...]
+    numeric_summary: NumericSummary | None = None
+
+
+def _numeric_summary(counts: Counter[int]) -> NumericSummary | None:
+    samples = sum(counts.values())
+    if not samples:
+        return None
+    ordered = sorted(counts.items())
+
+    def at_rank(rank: int) -> int:
+        seen = 0
+        for value, count in ordered:
+            seen += count
+            if seen >= rank:
+                return value
+        raise RuntimeError("invalid distribution counts")
+
+    return NumericSummary(
+        minimum=ordered[0][0], maximum=ordered[-1][0],
+        mean=sum(value * count for value, count in ordered) / samples,
+        median=(at_rank((samples + 1) // 2) + at_rank(samples // 2 + 1)) / 2,
+        p90=at_rank(math.ceil(0.9 * samples)),
+    )
 
 
 def validate_distribution_options(
@@ -180,7 +213,10 @@ class Distributions:
             )
             for start, count in sorted(grouped.items())
         )
-        return Distribution(title, denominator, samples, details + " Empty bins omitted.", bins)
+        return Distribution(
+            title, denominator, samples, details + " Empty bins omitted.", bins,
+            _numeric_summary(counts),
+        )
 
 
 def format_distribution(chart: Distribution, *, mode: str = "count") -> str:

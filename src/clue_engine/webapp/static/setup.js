@@ -231,6 +231,9 @@ window.setupWizard = (() => {
     if (!Number.isInteger(count) || count < 2 || (isBoard() && count > 6)) return;
     const human = $("mode").value === "play" ? Number($("seat").value) : null;
     const list = $("bot-list");
+    const expanded = new Set(
+      [...list.querySelectorAll("details[open]")].map((item) => item.dataset.botDetails),
+    );
     list.replaceChildren();
     list.dataset.botCount = String(count - (human === null ? 0 : 1));
     for (let i = 0; i < count; i++) {
@@ -254,6 +257,12 @@ window.setupWizard = (() => {
       description.className = "hint";
       description.textContent = typeof value === "string" ? presetDescriptions[value]
         : "Custom choices use probes first, then candidate filtering, followed by optional ranking.";
+      const details = document.createElement("details");
+      details.dataset.botDetails = String(i);
+      details.open = expanded.has(String(i));
+      const detailsTitle = document.createElement("summary");
+      detailsTitle.textContent = typeof value === "string" ? "Strategy details" : "Edit strategy";
+      details.append(detailsTitle, description);
       const copyLabel = document.createElement("label");
       copyLabel.className = "bot-copy";
       copyLabel.textContent = "Copy from";
@@ -266,7 +275,7 @@ window.setupWizard = (() => {
         if (j !== i && j !== human) copySelect.append(option(j, `Player ${j + 1}`));
       }
       copyLabel.append(copySelect);
-      row.append(label, summary, description, copyLabel);
+      row.append(label, summary, copyLabel, details);
       if (typeof value !== "string") {
         const options = document.createElement("fieldset");
         const legend = document.createElement("legend");
@@ -286,7 +295,7 @@ window.setupWizard = (() => {
           item.append(input, textNode);
           options.append(item);
         }
-        row.append(options);
+        details.append(options);
       }
       list.append(row);
     }
@@ -420,14 +429,20 @@ window.setupWizard = (() => {
   }
 
   function renderBatchMode() {
+    const spectating = $("mode").value === "spectate";
+    if (!spectating) {
+      batchMode = false;
+      $("batch-enabled").checked = false;
+    }
+    $("batch-option-field").hidden = !spectating;
     $("setup-heading").textContent = batchMode ? "Batch simulation setup" : "New game";
     $("setup-review-title").textContent = batchMode ? "Review batch setup" : "Review your game";
     $("batch-games-field").hidden = !batchMode;
     $("setup-quick-play").hidden = batchMode;
+    $("save-quickplay-default").hidden = batchMode;
     $("setup-start").textContent = batchMode ? "Run batch" : "Start game";
-    $("mode-field").hidden = batchMode;
-    $("notebook-mode-field").hidden = batchMode;
-    $("notebook-mode-hint").hidden = batchMode || $("mode").value === "spectate";
+    $("notebook-mode-field").hidden = spectating;
+    $("notebook-mode-hint").hidden = spectating;
     $("progress-field").hidden = batchMode;
     $("debug-field").hidden = batchMode;
     $("spectator-warning").hidden = batchMode || $("mode").value !== "spectate";
@@ -579,6 +594,7 @@ window.setupWizard = (() => {
 
   function beginFresh(batch = false) {
     batchMode = batch;
+    $("batch-enabled").checked = batch;
     if (batchMode) {
       $("mode").value = "spectate";
       $("notebook-mode").value = "automatic";
@@ -661,6 +677,11 @@ window.setupWizard = (() => {
   for (const element of [$("players"), $("mode"), $("seat"), ...document.querySelectorAll('input[name="game-type"]')]) {
     element.addEventListener("change", syncSeats);
   }
+  $("mode").addEventListener("change", renderBatchMode);
+  $("batch-enabled").addEventListener("change", () => {
+    batchMode = $("mode").value === "spectate" && $("batch-enabled").checked;
+    renderBatchMode();
+  });
   $("shuffle-seat").addEventListener("change", renderSeats);
   $("seat-list").addEventListener("change", (event) => {
     if (event.target.dataset.characterSeat !== undefined) {

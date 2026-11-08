@@ -11,6 +11,16 @@
   CLI and Tkinter batch window, and preserve schema-1 trace analysis while
   writing schema-2 traces.
 
+### Changed
+
+- Expand the batch setup and results to use the available window, keep bot
+  controls aligned with strategy details disclosed on demand, and compare
+  profile win rates with an observed equal-share reference.
+- Add profile and seat filters, seat outcomes, exact numeric summaries, and
+  readable count/percentage charts to browser and desktop batch analysis.
+- Offer batch play from the shared spectator setup, and allow individual batch
+  runs to be filtered, sorted, paged, and opened in the existing replay viewer.
+
 ## Desktop 0.4.1 / App 0.6.1 / API 0.6.2 - 2026-11-07
 
 ### Added

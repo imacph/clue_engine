@@ -298,11 +298,12 @@ input, select {
 .quickplay-summary p { font-size: .9rem; margin: 4px 0; }
 .quickplay-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .main-menu-actions .button span { display: block; font-size: .8rem; font-weight: 400; opacity: .85; }
-.batch-screen { max-width: 1100px; }
+body.batch-active main { max-width: none; }
+.batch-screen { max-width: none; }
 .batch-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .batch-run-status { font-weight: 650; }
 #batch-progress { display: block; height: 18px; margin: 12px 0 24px; width: 100%; }
-.batch-summary-panel, .batch-distribution-panel { margin-top: 18px; padding: 18px; }
+.batch-summary-panel, .batch-distribution-panel, .batch-runs-panel { margin-top: 18px; padding: 18px; }
 .batch-summary-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .batch-stat { background: var(--blue-pale); border-radius: 7px; display: grid; gap: 3px; padding: 10px 12px; }
 .batch-stat strong { font-size: .82rem; }
@@ -311,20 +312,25 @@ input, select {
 .batch-policy-table { border-collapse: collapse; min-width: 560px; text-align: left; width: 100%; }
 .batch-policy-table th, .batch-policy-table td { border-bottom: 1px solid var(--line); padding: 8px; }
 .batch-policy-table th { color: var(--muted); font-size: .82rem; }
+.batch-policy-table td:first-child { max-width: 300px; overflow-wrap: anywhere; }
 .batch-chart-controls { align-items: end; display: flex; flex-wrap: wrap; gap: 12px; }
 .batch-chart-controls h3 { flex: 1 1 100%; margin: 0; }
 .batch-chart-controls label { flex: 1 1 150px; }
-.batch-chart-bars { display: grid; gap: 8px; list-style: none; margin: 18px 0 0; padding: 0; }
-.batch-chart-row { align-items: center; display: grid; gap: 10px; grid-template-columns: minmax(100px, 180px) minmax(80px, 1fr) 72px; }
-.batch-chart-label { overflow-wrap: anywhere; }
-.batch-chart-track { background: var(--line); border-radius: 99px; height: 12px; overflow: hidden; }
-.batch-chart-fill { background: var(--blue); border-radius: inherit; display: block; height: 100%; }
-.batch-chart-value { font-variant-numeric: tabular-nums; text-align: right; }
+.batch-chart-key { margin: 18px 0 4px; }
+.batch-chart-bars { border-top: 1px solid var(--line); display: grid; list-style: none; margin: 0; padding: 0; }
+.batch-chart-row { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: minmax(100px, 180px) minmax(80px, 1fr) 150px; padding: 9px 4px; }
+.batch-chart-label { font-weight: 650; overflow-wrap: anywhere; }
+.batch-chart-track { background: var(--blue-pale); border-radius: 4px; height: 22px; overflow: hidden; }
+.batch-chart-fill { background: linear-gradient(90deg, var(--blue), var(--blue-dark)); border-radius: 4px; display: block; height: 100%; }
+.batch-chart-value { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.batch-chart-value small { color: var(--muted); display: block; font-size: .75rem; }
 .batch-chart-empty { color: var(--muted); padding: 10px 0; }
+.batch-runs-table { overflow-x: auto; }
+.batch-runs-pages { display: flex; gap: 8px; margin-top: 12px; }
 @media (max-width: 700px) {
   .main-menu { gap: 24px; grid-template-columns: minmax(0, 1fr); padding: 24px; }
   .batch-actions { justify-content: flex-start; }
-  .batch-chart-row { grid-template-columns: minmax(76px, 120px) minmax(54px, 1fr) 58px; }
+  .batch-chart-row { grid-template-columns: minmax(70px, 100px) minmax(40px, 1fr) 110px; gap: 6px; font-size: .8rem; }
 }
 
 .game-topbar { margin-bottom: 0; min-height: 68px; padding: 10px 16px; }
@@ -1103,7 +1109,7 @@ body:not(.game-active) #error-message { bottom: 96px; left: 50%; max-width: min(
 #setup-screen #bot-list {
   align-items: stretch;
   gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
 }
 #setup-screen #bot-list .setup-seat { display: flex; flex-direction: column; gap: 6px; }
 #setup-screen #bot-list label { min-width: 0; }
@@ -1116,7 +1122,10 @@ body:not(.game-active) #error-message { bottom: 96px; left: 50%; max-width: min(
   align-self: flex-start;
   padding: 3px 7px;
 }
-#setup-screen #bot-list .bot-copy { font-size: .8rem; margin-top: auto; }
+#setup-screen #bot-list .bot-copy { font-size: .8rem; }
+#setup-screen #bot-list details { font-size: .8rem; min-width: 0; overflow-wrap: anywhere; }
+#setup-screen #bot-list details summary { color: var(--blue); cursor: pointer; font-weight: 650; }
+#setup-screen #bot-list details .hint { margin-top: 8px; }
 #setup-screen #bot-list fieldset { margin-top: 4px; }
 #setup-screen #bot-list fieldset .check-row { align-items: flex-start; margin: 8px 0; }
 #setup-screen #bot-list fieldset .check-row input { flex: 0 0 18px; margin: 2px 0 0; }

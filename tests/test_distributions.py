@@ -36,6 +36,12 @@ def test_game_length_bins_exclude_incomplete_games(distributions):
     ]
     assert "timeout=1" in chart.details
     assert "error=1" in chart.details
+    assert chart.numeric_summary is not None
+    assert chart.numeric_summary.minimum == 9
+    assert chart.numeric_summary.maximum == 10
+    assert chart.numeric_summary.mean == 9.5
+    assert chart.numeric_summary.median == 9.5
+    assert chart.numeric_summary.p90 == 10
     turns = distributions.chart("turns", width=2)
     assert [(row.label, row.count) for row in turns.bins] == [("2-3", 2)]
 
@@ -64,6 +70,7 @@ def test_deduction_filters_use_seat_exposures_and_report_unlearned(distributions
 
 
 def test_empty_charts_and_invalid_settings_are_explicit(distributions):
+    assert Distributions().chart("actions").numeric_summary is None
     assert distributions.chart("deduction", policy="absent").samples == 0
     assert "No observations" in format_distribution(Distributions().chart("actions"))
     with pytest.raises(ValueError, match="width"):

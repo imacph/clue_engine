@@ -877,6 +877,148 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   assert.throws(() => vm.runInContext("payload()", context), /Board starting positions are unavailable/);
 });
 
+test("bot cards keep common controls in place and disclose custom options", () => {
+  const start = setupSource.indexOf("  function renderBots() {");
+  const end = setupSource.indexOf("  function rules()", start);
+  const context = vm.createContext({});
+  vm.runInContext(`
+    const make = (tag) => ({
+      tag, children: [], dataset: {}, open: false,
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return this.children.flatMap((row) =>
+        row.children.filter((child) => child.tag === "details" && child.open)); },
+    });
+    const list = make("div");
+    const fields = { players: { value: "2" }, mode: { value: "spectate" }, "bot-list": list };
+    const $ = (id) => fields[id];
+    const document = { createElement: make };
+    const option = (value, label) => ({ value, label });
+    const isBoard = () => false;
+    const presets = { random: {}, deductive: {} };
+    const presetDescriptions = { random: "Random", deductive: "Deductive" };
+    const strategyLabels = { candidate_suggestions: "Candidate cards" };
+    const score = () => 50;
+    const bots = ["random", { candidate_suggestions: true }];
+    ${setupSource.slice(start, end)}
+    renderBots();
+  `, context);
+  const cards = vm.runInContext("list.children", context);
+  assert.deepEqual(Array.from(cards, (card) => Array.from(card.children, (child) => child.tag)),
+    [["label", "p", "label", "details"], ["label", "p", "label", "details"]]);
+  assert.equal(cards[0].children[3].open, false);
+  assert.equal(cards[1].children[3].children[0].textContent, "Edit strategy");
+  assert.equal(cards[1].children[3].children[2].tag, "fieldset");
+  cards[1].children[3].open = true;
+  vm.runInContext("renderBots()", context);
+  assert.equal(vm.runInContext("list.children[1].children[3].open", context), true);
+});
+
+test("batch mode is an option within spectator setup only", () => {
+  const start = setupSource.indexOf("  function renderBatchMode() {");
+  const end = setupSource.indexOf("  function showStep(", start);
+  const context = vm.createContext({});
+  vm.runInContext(`
+    const fields = Object.fromEntries([
+      "mode", "batch-enabled", "batch-option-field", "setup-heading", "setup-review-title",
+      "batch-games-field", "setup-quick-play", "save-quickplay-default", "setup-start",
+      "notebook-mode-field", "notebook-mode-hint", "progress-field", "debug-field", "spectator-warning",
+    ].map(id => [id, {}]));
+    const $ = (id) => fields[id];
+    let batchMode = true;
+    fields.mode.value = "spectate";
+    fields["batch-enabled"].checked = true;
+    ${setupSource.slice(start, end)}
+    renderBatchMode();
+  `, context);
+  assert.equal(vm.runInContext('fields["batch-option-field"].hidden', context), false);
+  assert.equal(vm.runInContext('fields["batch-games-field"].hidden', context), false);
+  vm.runInContext('fields.mode.value = "play"; renderBatchMode()', context);
+  assert.equal(vm.runInContext("batchMode", context), false);
+  assert.equal(vm.runInContext('fields["batch-enabled"].checked', context), false);
+  assert.equal(vm.runInContext('fields["batch-option-field"].hidden', context), true);
+  assert.equal(vm.runInContext('fields["batch-games-field"].hidden', context), true);
+});
+
+test("batch comparison and chart show meaningful rates and exact statistics", () => {
+  const ui = frontend();
+  assert.equal(ui.evaluate("batchRelativeRate(0.5, 2, 8)"), "200%");
+  assert.equal(ui.evaluate("batchRelativeRate(0, 2, 8)"), "0%");
+  assert.equal(ui.evaluate("batchRelativeRate(null, 2, 8)"), "—");
+  assert.equal(ui.evaluate("batchRelativeRate(0, 0, 8)"), "—");
+  ui.element("batch-metric").value = "actions";
+  ui.element("batch-display-mode").value = "count";
+  ui.evaluate(`
+    lastBatchChart = {
+      title: "Game actions", samples: 4, denominator: "completed games", details: "Excluded: timeout=1.",
+      numeric_summary: { minimum: 1, mean: 3, median: 3, p90: 5, maximum: 5 },
+      bins: [{ label: "0-9", count: 3, probability: .75 }, { label: "10-19", count: 1, probability: .25 }],
+    };
+    renderBatchChart();
+  `);
+  const rows = ui.element("batch-chart-bars").children;
+  assert.equal(rows[0].children[1].children[0].style.width, "100%");
+  assert.ok(Math.abs(parseFloat(rows[1].children[1].children[0].style.width) - 100 / 3) < 1e-10);
+  assert.equal(rows[0].children[2].textContent, "3 · 75.0%");
+  assert.equal(rows[0].children[2].children[0].textContent, "75.0% cumulative");
+  assert.equal(rows[1].children[2].children[0].textContent, "100.0% cumulative");
+  assert.equal(ui.element("batch-chart-stats").children.length, 5);
+  ui.evaluate("lastBatchChart = { samples: 0, title: 'Empty', denominator: 'games', details: '', bins: [] }; renderBatchChart()");
+  assert.match(ui.element("batch-chart-bars").children[0].textContent, /No samples/);
+});
+
+test("batch filter requests ignore out-of-order results", async () => {
+  const ui = frontend();
+  ui.element("batch-bin-width").value = "10";
+  ui.element("batch-metric").value = "outcomes";
+  ui.element("batch-policy-filter").value = "random";
+  ui.element("batch-seat-filter").value = "0";
+  ui.evaluate(`
+    activeBatchId = "batch"; batchFinished = true;
+    globalThis.pending = [];
+    requestJson = (url) => new Promise((resolve) => pending.push({ url, resolve }));
+    globalThis.first = loadBatchChart();
+    $("batch-policy-filter").value = "deductive";
+    globalThis.second = loadBatchChart();
+  `);
+  const urls = ui.evaluate("pending.map((request) => request.url)");
+  assert.match(urls[0], /policy=random/);
+  assert.match(urls[0], /seat=0/);
+  assert.match(urls[1], /policy=deductive/);
+  ui.evaluate(`pending[1].resolve({ title: "new", samples: 0, denominator: "games", details: "", bins: [] })`);
+  await ui.evaluate("second");
+  ui.evaluate(`pending[0].resolve({ title: "old", samples: 0, denominator: "games", details: "", bins: [] })`);
+  await ui.evaluate("first");
+  assert.equal(ui.element("batch-distribution-title").textContent, "new");
+});
+
+test("run list sorts, filters and ignores stale pages", async () => {
+  const ui = frontend();
+  ui.element("batch-policy-filter").value = "random";
+  ui.element("batch-seat-filter").value = "1";
+  ui.element("batch-runs-sort").value = "steps";
+  ui.element("batch-runs-order").value = "desc";
+  ui.evaluate(`
+    activeBatchId = "batch"; batchFinished = true;
+    globalThis.pending = [];
+    requestJson = (url) => new Promise((resolve) => pending.push({ url, resolve }));
+    globalThis.first = loadBatchRuns();
+    batchRunsOffset = 25;
+    globalThis.second = loadBatchRuns();
+  `);
+  const urls = ui.evaluate("pending.map((request) => request.url)");
+  assert.match(urls[0], /sort=steps/);
+  assert.match(urls[0], /order=desc/);
+  assert.match(urls[0], /policy=random/);
+  assert.match(urls[0], /seat=1/);
+  assert.match(urls[1], /offset=25/);
+  ui.evaluate("pending[1].resolve({ total: 0, offset: 25, runs: [] })");
+  await ui.evaluate("second");
+  ui.evaluate("pending[0].resolve({ total: 4, offset: 0, runs: [] })");
+  await ui.evaluate("first");
+  assert.equal(ui.element("batch-runs-status").textContent, "No runs match these filters.");
+});
+
 test("seeded bot seat shuffling preserves styles, human seat, and replay reproducibility", () => {
   const start = setupSource.indexOf("  function resolveBotSeats(");
   const end = setupSource.indexOf("  function renderReview(", start);

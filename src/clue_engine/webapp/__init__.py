@@ -27,7 +27,7 @@ from ..board_state import RoomPosition, create_board
 from ..board_turn import BoardTurn, Move, Roll, UsePassage
 from ..cards import CARDS, CARDS_BY_ID
 from ..desktop_preferences import DesktopPreferences
-from ..distributions import BOARD_METRICS, Distributions
+from ..distributions import BOARD_METRICS, Distribution, DistributionBin, Distributions
 from ..engine import Engine, IllegalActionError, replay_history
 from ..game_settings import BoardRules, BotStrategy, GameRules
 from ..knowledge import Knowledge, Mark, knowledge_for
@@ -54,7 +54,7 @@ from ..presentation import (
     notebook_activity,
     notebook_actor,
 )
-from ..replay import Replay, decode_replay, encode_replay
+from ..replay import Replay, decode_replay, encode_replay, replay_from_batch_trace
 from ..session import (
     DebugInfo,
     GameSession,
@@ -105,6 +105,40 @@ class WebBatch:
     summary: BatchSummary | None = None
     error: str | None = None
     distributions: Distributions = field(default_factory=Distributions)
+    observations: list[GameResult] = field(default_factory=list)
+    trace_directory: tempfile.TemporaryDirectory[str] | None = None
+
+
+def _seat_outcomes(
+    results: list[GameResult], policy: str | None, seat: int | None,
+) -> Distribution:
+    counts = dict.fromkeys(("won", "not_won", "timeout", "error", "cancelled"), 0)
+    for result in results:
+        for index, name in enumerate(result.policies):
+            if (policy is not None and policy != name) or (seat is not None and seat != index):
+                continue
+            outcome = (
+                "won" if result.winner == index
+                else "not_won" if result.outcome in {"won", "all_eliminated"}
+                else result.outcome
+            )
+            counts[outcome] += 1
+    samples = sum(counts.values())
+    return Distribution(
+        "Bot seat outcomes", "matching seat exposures", samples,
+        "Each matching seat is counted once per game; unfinished games are shown separately.",
+        tuple(
+            DistributionBin(name, count, count / samples if samples else 0.0)
+            for name, count in counts.items()
+        ),
+    )
+
+
+def _matches_cohort(result: GameResult, policy: str | None, seat: int | None) -> bool:
+    return any(
+        (policy is None or policy == name) and (seat is None or seat == index)
+        for index, name in enumerate(result.policies)
+    )
 
 
 def _automatic_clauses(view: PlayerView, knowledge: Knowledge) -> list[dict[str, Any]]:
@@ -722,6 +756,9 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 batch.finished_games += 1
                 batch.last_access = time.monotonic()
                 batch.distributions.add_game(result)
+                batch.observations.append(
+                    replace(result, seed=0, final_knowledge=[], error=None)
+                )
 
         def update_progress(summary: BatchSummary) -> None:
             with batches_lock:
@@ -730,14 +767,16 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 batch.last_access = time.monotonic()
 
         try:
-            with tempfile.TemporaryDirectory(prefix="clue-engine-batch-") as directory:
-                summary = run_batch(
-                    config,
-                    Path(directory) / "trace.jsonl",
-                    progress=update_progress,
-                    cancelled=cancelled,
-                    on_game=record_game,
-                )
+            directory = tempfile.TemporaryDirectory(prefix="clue-engine-batch-")
+            with batches_lock:
+                batch.trace_directory = directory
+            summary = run_batch(
+                config,
+                Path(directory.name) / "trace.jsonl",
+                progress=update_progress,
+                cancelled=cancelled,
+                on_game=record_game,
+            )
             with batches_lock:
                 batch.summary = summary
                 batch.status = "cancelled" if summary["cancelled"] else "completed"
@@ -767,8 +806,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 if current.status not in {"queued", "running"}
                 and now - current.last_access > _SESSION_TTL_SECONDS
             ]
-            for key in expired:
-                batches.pop(key, None)
+            expired_batches = [batches.pop(key) for key in expired]
             if sum(current.status in {"queued", "running"} for current in batches.values()) >= _MAX_ACTIVE_BATCH_RUNS:
                 return jsonify(error="A batch simulation is already running."), 409
             owner = browser_session.get("batch_owner")
@@ -778,6 +816,9 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             batch_id = secrets.token_urlsafe(24)
             batch = WebBatch(owner, config.game_type, config.games)
             batches[batch_id] = batch
+        for expired_batch in expired_batches:
+            if expired_batch.trace_directory is not None:
+                expired_batch.trace_directory.cleanup()
 
         worker = threading.Thread(
             target=run_batch_in_background, args=(batch_id, config, batch), daemon=True,
@@ -827,13 +868,105 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         metric = request.args.get("metric", "actions")
         try:
             width = int(request.args.get("width", "10"))
+            policy = request.args.get("policy") or None
+            raw_seat = request.args.get("seat")
+            seat = int(raw_seat) if raw_seat is not None else None
+            if seat is not None and seat < 0:
+                raise ValueError("Seat must be non-negative.")
+            if policy is not None and not policy.strip():
+                raise ValueError("Policy must not be empty.")
+            if width < 1:
+                raise ValueError("Bin width must be at least 1.")
             if metric in BOARD_METRICS and batch.game_type != "board":
                 raise ValueError("Board event distributions require a board simulation.")
             with batches_lock:
-                chart = batch.distributions.chart(metric, width=width)
+                if metric == "deduction":
+                    chart = batch.distributions.chart(
+                        metric, width=width, policy=policy, seat=seat,
+                    )
+                elif metric != "seat_outcomes" and policy is None and seat is None:
+                    chart = batch.distributions.chart(metric, width=width)
+                else:
+                    observations = list(batch.observations)
+            if metric == "seat_outcomes":
+                chart = _seat_outcomes(observations, policy, seat)
+            elif metric != "deduction" and (policy is not None or seat is not None):
+                selected = Distributions()
+                for result in observations:
+                    if _matches_cohort(result, policy, seat):
+                        selected.add_game(result)
+                chart = selected.chart(metric, width=width)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(asdict(chart))
+
+    @app.get("/api/batch/<batch_id>/runs")
+    def get_batch_runs(batch_id: str):
+        batch = batch_for_request(batch_id)
+        if batch is None:
+            return jsonify(error="Batch simulation not found."), 404
+        try:
+            policy = request.args.get("policy") or None
+            raw_seat = request.args.get("seat")
+            seat = int(raw_seat) if raw_seat is not None else None
+            offset = int(request.args.get("offset", "0"))
+            limit = int(request.args.get("limit", "25"))
+            sort = request.args.get("sort", "game")
+            order = request.args.get("order", "asc")
+            if seat is not None and seat < 0:
+                raise ValueError("Seat must be non-negative.")
+            if policy is not None and not policy.strip():
+                raise ValueError("Policy must not be empty.")
+            if offset < 0 or not 1 <= limit <= 100:
+                raise ValueError("Invalid run page.")
+            if sort not in {
+                "game", "outcome", "steps", "winner", "turns", "learned", "first_solution",
+                "suggestions", "passes", "refutations", *BOARD_METRICS,
+            } or order not in {"asc", "desc"}:
+                raise ValueError("Invalid run sort.")
+            if sort in BOARD_METRICS and batch.game_type != "board":
+                raise ValueError("Board event sorting requires a board simulation.")
+            with batches_lock:
+                results = [
+                    result for result in batch.observations
+                    if _matches_cohort(result, policy, seat)
+                ]
+            def sort_key(result: GameResult) -> tuple[Any, int]:
+                if sort == "turns":
+                    value = sum(result.turns)
+                elif sort == "learned":
+                    value = sum(step is not None for step in result.first_solution_step)
+                elif sort == "winner":
+                    value = result.winner if result.winner is not None else -1
+                elif sort == "first_solution":
+                    value = min(
+                        (step for step in result.first_solution_step if step is not None),
+                        default=-1,
+                    )
+                else:
+                    value = getattr(result, sort)
+                return value, result.game
+
+            results.sort(key=sort_key, reverse=order == "desc")
+            rows = [
+                {
+                    "game": item.game, "outcome": item.outcome, "winner": item.winner,
+                    "steps": item.steps, "turns": item.turns, "policies": item.policies,
+                    "learned": sum(step is not None for step in item.first_solution_step),
+                    "first_solution": min(
+                        (step for step in item.first_solution_step if step is not None),
+                        default=None,
+                    ),
+                    "first_solution_steps": item.first_solution_step,
+                    "suggestions": item.suggestions, "passes": item.passes,
+                    "refutations": item.refutations,
+                    **{metric: getattr(item, metric) for metric in BOARD_METRICS},
+                }
+                for item in results[offset:offset + limit]
+            ]
+            return jsonify(total=len(results), offset=offset, limit=limit, runs=rows)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
 
     if desktop_preferences is not None:
         @app.post("/api/desktop/theme")
@@ -1035,6 +1168,49 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             game.game.snapshot().human_player, game.notebook_mode, tuple(game.notebook_history),
         )
 
+    def install_replay(replay: Replay) -> bool:
+        engine = replay_history(replay.initial, ())
+        policies = tuple(
+            make_policy("random", random.Random(seat)) for seat in range(engine.num_players)
+        )
+        session_game = GameSession(engine, policies, human_player=replay.human)
+        game = WebGame(
+            game=session_game, mode="spectate", auto_progress=False, paused=True,
+            confirm_turns=False, selected_player=0, abandoned=True, imported_replay=replay,
+        )
+        game_id = secrets.token_urlsafe(24)
+        with games_lock:
+            old_id = browser_session.get("game_id")
+            if isinstance(old_id, str):
+                games.pop(old_id, None)
+            if len(games) >= _MAX_ACTIVE_SESSIONS:
+                return False
+            games[game_id] = game
+        browser_session["game_id"] = game_id
+        return True
+
+    @app.post("/api/batch/<batch_id>/runs/<int:game_number>/replay")
+    def open_batch_replay(batch_id: str, game_number: int):
+        batch = batch_for_request(batch_id)
+        if batch is None:
+            return jsonify(error="Batch simulation not found."), 404
+        with batches_lock:
+            if batch.status in {"queued", "running"}:
+                return jsonify(error="Wait for the batch to finish before opening a replay."), 409
+            if not any(result.game == game_number for result in batch.observations):
+                return jsonify(error="Batch run not found."), 404
+            directory = batch.trace_directory
+        if directory is None:
+            return jsonify(error="Batch replay trace is unavailable."), 409
+        try:
+            replay = replay_from_batch_trace(Path(directory.name) / "trace.jsonl", game_number)
+            if not install_replay(replay):
+                return jsonify(error="The local server has too many active games."), 503
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            app.logger.exception("Could not load batch replay %s/%s", batch_id, game_number)
+            return jsonify(error=f"Could not load batch replay: {exc}"), 409
+        return jsonify(positions=len(replay.history) + 1)
+
     @app.post("/api/replay/end")
     def end_and_reveal():
         game = _game_from_request(games, games_lock)
@@ -1093,26 +1269,10 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                         normalized["id"] = clause_id
                         clause.clear()
                         clause.update(normalized)
-            engine = replay_history(replay.initial, ())
+            if not install_replay(replay):
+                return jsonify(error="The local server has too many active games."), 503
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
-        policies = tuple(
-            make_policy("random", random.Random(seat)) for seat in range(engine.num_players)
-        )
-        session_game = GameSession(engine, policies, human_player=replay.human)
-        game = WebGame(
-            game=session_game, mode="spectate", auto_progress=False, paused=True,
-            confirm_turns=False, selected_player=0, abandoned=True, imported_replay=replay,
-        )
-        game_id = secrets.token_urlsafe(24)
-        with games_lock:
-            old_id = browser_session.get("game_id")
-            if isinstance(old_id, str):
-                games.pop(old_id, None)
-            if len(games) >= _MAX_ACTIVE_SESSIONS:
-                return jsonify(error="The local server has too many active games."), 503
-            games[game_id] = game
-        browser_session["game_id"] = game_id
         return jsonify(positions=len(replay.history) + len(replay.notes) + 1)
 
     @app.get("/api/replay/state")

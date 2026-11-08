@@ -595,10 +595,41 @@ named profile or a custom strategy object), plus `game_rules`, `board_rules`,
 ```
 
 The shared browser and desktop app also provide **Batch simulation** from the
-main menu. The setup wizard exposes game type, player count, per-seat named or
+main menu, or by selecting **Spectate bots** and **Run a batch of games** in
+the normal setup wizard. The wizard exposes game type, player count, per-seat named or
 custom bots, game and board rules, suspect assignments, bot shuffling, seed,
-action limit, and game count. The results view reports progress, policy
-comparisons, summary statistics, and selectable count/percentage histograms.
+action limit, and game count. Bot cards show toolkit scores by default; open
+strategy details to read descriptions or edit a custom bot. The results view
+reports progress, policy comparisons, and interactive distributions. The
+relative win rate is each profile's completed-seat win rate divided by observed
+wins per completed seat: 100% is the equal-share reference, not a causal
+strength estimate. Completed games without a winner lower that reference; it is
+unavailable when there are no observed wins or no completed seats.
+
+Filter browser/desktop distributions by profile, seat, or both. Game-level
+measures select games containing that profile in the selected seat, counting
+each game once even if the profile appears more than once. The Player 1 turn
+measure always refers to Player 1, not the filtered seat. Bot seat outcomes and
+first-solution distributions instead count matching seat appearances; the
+latter includes only appearances recorded as learned in the histogram and
+reports the number not learned, including incomplete games. Game-length and
+board-event measures exclude incomplete games; outcomes include them. Numeric
+statistics are calculated from the original observations, not histogram bins.
+Bars are scaled to the largest bin, and each bin shows its count and percentage;
+numeric bins also show the cumulative share.
+The individual-runs table can be filtered, paged, and sorted by outcome, action
+count, turns, winner, learned seats, earliest solution action, and event counts.
+Open a run in the replay
+viewer, then use **Back to batch results** to continue the analysis. Replays
+include completed and recorded incomplete games, and expose private hands and
+the solution. The app retains compact per-game observations in memory and
+private traces in a temporary directory while the batch is available. Inactive
+batches expire after one hour when a subsequent batch is started; temporary
+traces are also cleaned up on normal app exit. Very large batches therefore use more
+memory and temporary disk space. The results view can be revisited from a batch
+replay, but is not restored after a page reload or a return to the main menu.
+Export any replay you want to keep.
+
 The Tkinter desktop **Batch statistics** window can also load the same JSON
 setup. CLI `--seed` and `--max-steps` and the Tkinter seed/action-limit fields
 override values in the file. Human-only setup fields (mode, human seat,
