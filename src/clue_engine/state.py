@@ -69,7 +69,7 @@ def deal_board(
         board = replace(board, layout=randomize_board_layout(
             layout, layout_rng, rooms=board_rules.randomize_rooms,
             doors=board_rules.randomize_doors, passages=board_rules.randomize_passages,
-            passage_count=board_rules.passage_count,
+            passage_count=board_rules.passage_count, procedural=board_rules.procedural_map,
         ))
     state = deal(rng, num_players)
     state.current_player = board.first_player

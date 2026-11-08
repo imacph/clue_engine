@@ -1,4 +1,5 @@
 import gc
+import json
 import subprocess
 import sys
 import time
@@ -397,6 +398,40 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     assert existing._distribution_future is None
     assert existing.distribution_view.data is not None
     assert existing.distribution_view.data.outcomes["timeout"] == 2
+
+
+def test_batch_window_runs_board_setup_json(root, tmp_path, monkeypatch):
+    from clue_engine.gui import batch_window
+
+    monkeypatch.setattr(batch_window.messagebox, "askyesno", lambda *args, **kwargs: True)
+    setup_path = tmp_path / "board-setup.json"
+    setup_path.write_text(
+        '{"game_type":"board","players":3,"bots":["random",'
+        '{"candidate_rooms":true,"deal_analysis":true},"strategic"],'
+        '"game_rules":{"public_refutations":true},'
+        '"board_rules":{"randomize_passages":true,"passage_count":1},'
+        '"seat_suspects":[0,2,4]}',
+        encoding="utf-8",
+    )
+    window = BatchWindow(root)
+    window.games.set("1")
+    window.setup_json.set(str(setup_path))
+    window.limit.set("0")
+    window.trace.set(str(tmp_path / "board.jsonl"))
+    window.start()
+    deadline = time.monotonic() + 10
+    while window._future is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert window._future is None
+    assert "timeout=1" in window.output.get("1.0", "end")
+    game_start = next(
+        json.loads(line) for line in (tmp_path / "board.jsonl").read_text(encoding="utf-8").splitlines()
+        if '"type":"game_start"' in line
+    )
+    assert game_start["game_type"] == "board"
+    assert game_start["board_rules"]["randomize_passages"]
+    assert game_start["board_state"]["board"]["seat_suspects"] == [0, 2, 4]
 
 
 def test_distribution_chart_filters_bins_and_invalid_input(root):

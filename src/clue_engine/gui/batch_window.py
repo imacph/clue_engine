@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 from ..batch import (
     BatchConfig,
     BatchSummary,
+    batch_config_from_setup,
     format_summary,
     policies_for_players,
     read_game_trace,
@@ -35,6 +36,7 @@ class BatchWindow(tk.Toplevel):
         self.policies = tk.StringVar(master=self, value="deductive,random,random,random")
         self.seed = tk.StringVar(master=self, value="0")
         self.limit = tk.StringVar(master=self, value="10000")
+        self.setup_json = tk.StringVar(master=self)
         self.trace = tk.StringVar(master=self)
         self.rotate = tk.BooleanVar(master=self, value=True)
         self.game_number = tk.StringVar(master=self, value="0")
@@ -62,23 +64,28 @@ class BatchWindow(tk.Toplevel):
         setup.columnconfigure(1, weight=1)
         fields = (
             ("Games", self.games), ("Players", self.players),
-            ("Policies (random/deductive/probing/strategic)", self.policies),
-            ("Seed", self.seed), ("Action limit per game", self.limit), ("Private JSONL trace", self.trace),
+            ("Policies (random/deductive/probing/strategic/analytical)", self.policies),
+            ("Seed", self.seed), ("Action limit per game", self.limit),
+            ("Game setup JSON (optional)", self.setup_json), ("Private JSONL trace", self.trace),
         )
         for row, (label, variable) in enumerate(fields):
             ttk.Label(setup, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
             ttk.Entry(setup, textvariable=variable).grid(row=row, column=1, sticky="ew", pady=2)
-        ttk.Button(setup, text="Browse", command=self._browse).grid(row=5, column=2, padx=4)
-        ttk.Button(setup, text="Existing...", command=self._browse_existing).grid(row=5, column=3, padx=4)
+        ttk.Button(setup, text="Setup...", command=self._browse_setup).grid(row=5, column=2, padx=4)
+        ttk.Button(setup, text="Browse", command=self._browse).grid(row=6, column=2, padx=4)
+        ttk.Button(setup, text="Existing...", command=self._browse_existing).grid(row=6, column=3, padx=4)
+        ttk.Label(
+            setup, text="Setup JSON supplies game type, players, bots, and rule settings; seed and limit above override it.",
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=2)
         ttk.Checkbutton(setup, text="Rotate policies over seats", variable=self.rotate).grid(
-            row=6, column=0, columnspan=2, sticky="w"
+            row=8, column=0, columnspan=2, sticky="w"
         )
         ttk.Label(
             setup, text="WARNING: traces contain private hands, shown cards, and solutions.",
             foreground="red",
-        ).grid(row=7, column=0, columnspan=3, sticky="w", pady=4)
+        ).grid(row=9, column=0, columnspan=4, sticky="w", pady=4)
         buttons = ttk.Frame(setup)
-        buttons.grid(row=8, column=0, columnspan=3, sticky="w")
+        buttons.grid(row=10, column=0, columnspan=4, sticky="w")
         self.start_button = ttk.Button(buttons, text="Start batch", command=self.start)
         self.start_button.pack(side="left", padx=3)
         self.cancel_button = ttk.Button(buttons, text="Cancel", command=self.cancel, state="disabled")
@@ -118,6 +125,14 @@ class BatchWindow(tk.Toplevel):
         if path:
             self.trace.set(path)
 
+    def _browse_setup(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self, title="Open game setup JSON",
+            filetypes=(("JSON", "*.json"), ("All files", "*.*")),
+        )
+        if path:
+            self.setup_json.set(path)
+
     def _show(self, text: str) -> None:
         self.output.configure(state="normal")
         self.output.delete("1.0", "end")
@@ -129,21 +144,31 @@ class BatchWindow(tk.Toplevel):
                 or self._distribution_future is not None or self._render_id is not None):
             return
         try:
-            count, players = int(self.games.get()), int(self.players.get())
-            if players < 2:
-                raise ValueError("players must be at least 2")
-            names = policies_for_players(self.policies.get(), players)
-            config = BatchConfig(count, names, int(self.seed.get()), int(self.limit.get()), self.rotate.get())
-            config.validate()
+            count = int(self.games.get())
+            seed = int(self.seed.get())
+            limit = int(self.limit.get())
+            setup_path = self.setup_json.get().strip()
+            if setup_path:
+                setup = json.loads(Path(setup_path).read_text(encoding="utf-8"))
+                config = batch_config_from_setup(
+                    setup, games=count, seed=seed, max_steps=limit, rotate=self.rotate.get(),
+                )
+            else:
+                players = int(self.players.get())
+                if players < 2:
+                    raise ValueError("players must be at least 2")
+                names = policies_for_players(self.policies.get(), players)
+                config = BatchConfig(count, names, seed, limit, self.rotate.get())
+                config.validate()
             path_text = self.trace.get().strip()
             if not path_text:
                 raise ValueError("choose a new trace file")
             path = Path(path_text)
-        except ValueError as exc:
+        except (OSError, TypeError, ValueError) as exc:
             messagebox.showerror("Invalid batch settings", str(exc), parent=self)
             return
         warning = "The trace contains private hands, shown cards, and solutions. Save it locally?"
-        if config.rotate and config.games % players:
+        if config.rotate and config.games % len(config.policies):
             warning += "\n\nThe final rotation is incomplete; policy seat exposures may be unbalanced."
         if not messagebox.askyesno("Private trace", warning, parent=self):
             return

@@ -2,7 +2,9 @@
 
 import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
+from .batch import read_game_trace
 from .board_record import (
     _action,
     _array,
@@ -27,6 +29,37 @@ class Replay:
     human: int | None
     notebook_mode: str
     notes: tuple[dict, ...]
+
+
+def replay_from_batch_trace(path: Path, game: int) -> Replay:
+    """Reconstruct and verify the recorded actions of one private batch game."""
+    records = read_game_trace(path, game)
+    start = records[0]
+    if start.get("type") != "game_start" or records[-1].get("type") != "game_result":
+        raise ValueError("batch game trace is incomplete")
+    history = []
+    for record in records:
+        if record.get("type") != "action":
+            continue
+        action = _object(record["action"])
+        history.append({
+            "actor": record["actor"],
+            "action": {
+                "kind": action["kind"],
+                "data": {key: value for key, value in action.items() if key != "kind"},
+            },
+            "events": record["events"],
+        })
+    return decode_replay({
+        "version": 1, "private": True, "kind": "clue-replay",
+        "initial_state": {
+            "solution": start["solution"], "player_hands": start["hands"],
+            "current_player": start["current_player"], "board": start["board_state"],
+            "board_rules": start["board_rules"], "game_rules": start["game_rules"],
+            "public_cards": start["public_cards"],
+        },
+        "history": history, "human": None, "notebook_mode": "automatic", "notes": [],
+    })
 
 
 def encode_replay(replay: Replay) -> dict:

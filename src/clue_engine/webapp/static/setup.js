@@ -9,7 +9,7 @@ window.setupWizard = (() => {
     candidate_rooms: "Favor possible solution rooms (board only)",
     prefer_suggest: "Favor suggesting when possible (cards only)",
     deal_analysis: "Analyze possible deals for deeper deductions",
-    risk_accusation: "Allow calculated accusations (may eliminate the bot)",
+    risk_accusation: "Allow calculated accusations at 75% (may eliminate the bot)",
   };
   const presets = {
     random: {},
@@ -23,12 +23,18 @@ window.setupWizard = (() => {
       repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
       deal_analysis: true,
     },
+    analytical: {
+      candidate_suggestions: true, rank_suggestions: true,
+      repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
+      deal_analysis: true, risk_accusation: true,
+    },
   };
   const presetDescriptions = {
     random: "Random decisions; shared deduction and movement.",
     deductive: "Favors possible solution cards and useful rooms.",
     probing: "Adds controlled probes and repeats previously shown cards.",
     strategic: "Ranks suggestions and analyzes possible deals when practical; never guesses.",
+    analytical: "Adds deeper deal counting and opponent modeling; risks accusations at 50% estimated confidence.",
   };
   const weights = {
     candidate_suggestions: 20, probe_suggestions: 15, rank_suggestions: 15,
@@ -40,6 +46,7 @@ window.setupWizard = (() => {
     early_end: "rule-early-end", revisit_hallways: "rule-revisit",
     optional_suggestion: "rule-optional-suggestion", accuse_in_room: "rule-accuse-room",
     stay_to_suggest: "rule-stay-suggest", randomize_rooms: "rule-randomize-rooms",
+    procedural_map: "rule-procedural-map",
     randomize_doors: "rule-randomize-doors", randomize_passages: "rule-randomize-passages",
   };
   const gameRuleIds = {
@@ -49,7 +56,7 @@ window.setupWizard = (() => {
   const standardRules = {
     move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true,
     early_end: true, revisit_hallways: false, optional_suggestion: false, accuse_in_room: false,
-    stay_to_suggest: false, randomize_rooms: false, randomize_doors: false,
+    stay_to_suggest: false, randomize_rooms: false, procedural_map: false, randomize_doors: false,
     randomize_passages: false, passage_count: 2,
   };
   const storageKey = "clue-engine-setup-profiles";
@@ -61,6 +68,7 @@ window.setupWizard = (() => {
   let metadata = null;
   let highlightedSeat = 0;
   let lastSetup = null;
+  let batchMode = false;
   let profiles = Object.create(null);
   let profilesReady = false;
 
@@ -101,7 +109,9 @@ window.setupWizard = (() => {
 
   function validBasics() {
     updateGameType();
-    for (const id of ["players", "seed", "max-steps"]) {
+    const required = ["players", "seed", "max-steps"];
+    if (batchMode) required.push("batch-games");
+    for (const id of required) {
       if (!$(id).validity.valid || $(id).value === "") {
         showStep(0, false);
         const details = $(id).closest("details");
@@ -157,7 +167,8 @@ window.setupWizard = (() => {
       const row = document.createElement("div");
       row.className = "setup-seat";
       const label = document.createElement("label");
-      label.textContent = `Player ${i + 1}${i === human ? " (you)" : " (bot)"}`;
+      label.textContent = `Player ${i + 1}${i === human
+        ? ($("shuffle-seat").checked ? " (configured as you)" : " (you)") : " (bot)"}`;
       if (isBoard()) {
         const select = document.createElement("select");
         select.dataset.characterSeat = String(i);
@@ -226,6 +237,9 @@ window.setupWizard = (() => {
     if (!Number.isInteger(count) || count < 2 || (isBoard() && count > 6)) return;
     const human = $("mode").value === "play" ? Number($("seat").value) : null;
     const list = $("bot-list");
+    const expanded = new Set(
+      [...list.querySelectorAll("details[open]")].map((item) => item.dataset.botDetails),
+    );
     list.replaceChildren();
     list.dataset.botCount = String(count - (human === null ? 0 : 1));
     for (let i = 0; i < count; i++) {
@@ -244,11 +258,18 @@ window.setupWizard = (() => {
       const summary = document.createElement("p");
       summary.className = "hint bot-score";
       summary.dataset.botScore = String(i);
-      summary.textContent = `Toolkit: ${score(value)}/100`;
+      summary.textContent = `Toolkit: ${score(value)}/100`
+        + (value === "analytical" ? " · may accuse at 50%" : "");
       const description = document.createElement("p");
       description.className = "hint";
       description.textContent = typeof value === "string" ? presetDescriptions[value]
-        : "Custom choices use probes first, then candidate filtering, followed by optional ranking.";
+        : "Custom choices use probes first, then candidate filtering, followed by optional ranking; they do not include analytical opponent modeling.";
+      const details = document.createElement("details");
+      details.dataset.botDetails = String(i);
+      details.open = expanded.has(String(i));
+      const detailsTitle = document.createElement("summary");
+      detailsTitle.textContent = typeof value === "string" ? "Strategy details" : "Edit strategy";
+      details.append(detailsTitle, description);
       const copyLabel = document.createElement("label");
       copyLabel.className = "bot-copy";
       copyLabel.textContent = "Copy from";
@@ -261,7 +282,7 @@ window.setupWizard = (() => {
         if (j !== i && j !== human) copySelect.append(option(j, `Player ${j + 1}`));
       }
       copyLabel.append(copySelect);
-      row.append(label, summary, description, copyLabel);
+      row.append(label, summary, copyLabel, details);
       if (typeof value !== "string") {
         const options = document.createElement("fieldset");
         const legend = document.createElement("legend");
@@ -281,7 +302,7 @@ window.setupWizard = (() => {
           item.append(input, textNode);
           options.append(item);
         }
-        row.append(options);
+        details.append(options);
       }
       list.append(row);
     }
@@ -304,6 +325,7 @@ window.setupWizard = (() => {
     $("board-rules-fields").disabled = !isBoard();
     $("card-rules-note").hidden = isBoard();
     $("rule-summoned").disabled = !isBoard() || !$("rule-move-suspect").checked;
+    $("rule-procedural-map").disabled = !isBoard() || !$("rule-randomize-rooms").checked;
     $("rule-passage-count").disabled = !isBoard() || !$("rule-randomize-passages").checked;
     const value = rules();
     const matches = (preset) => Object.keys(standardRules).every((key) => value[key] === preset[key]);
@@ -319,16 +341,19 @@ window.setupWizard = (() => {
     syncSeats();
     const count = Number($("players").value);
     const value = {
-      mode: $("mode").value, game_type: isBoard() ? "board" : "card_only",
-      notebook_mode: $("mode").value === "spectate" ? "automatic" : $("notebook-mode").value,
-      players: count, seat: Number($("seat").value), seed: Number($("seed").value),
+      mode: batchMode ? "spectate" : $("mode").value,
+      game_type: isBoard() ? "board" : "card_only",
+      notebook_mode: batchMode || $("mode").value === "spectate" ? "automatic" : $("notebook-mode").value,
+      players: count, seat: batchMode ? 0 : Number($("seat").value), seed: Number($("seed").value),
       bots: copy(bots.slice(0, count)), progress: $("progress").value,
       shuffle_bots: $("shuffle-bots").checked,
-      max_steps: Number($("max-steps").value), debug: $("debug").checked,
+      shuffle_seat: !batchMode && $("mode").value === "play" && $("shuffle-seat").checked,
+      max_steps: Number($("max-steps").value), debug: !batchMode && $("debug").checked,
       game_rules: Object.fromEntries(
         Object.entries(gameRuleIds).map(([key, id]) => [key, $(id).checked])
       ),
     };
+    if (batchMode) value.progress = "auto";
     if (isBoard()) {
       value.seat_suspects = characters.slice(0, count);
       value.board_rules = rules();
@@ -338,6 +363,15 @@ window.setupWizard = (() => {
 
   function resolveBotSeats(data) {
     const result = copy(data);
+    if (result.shuffle_seat && result.mode === "play") {
+      const previous = result.seat;
+      let mixed = (result.seed ^ 0x85ebca6b) >>> 0;
+      mixed = Math.imul(mixed ^ (mixed >>> 16), 0x7feb352d);
+      mixed = Math.imul(mixed ^ (mixed >>> 15), 0x846ca68b);
+      mixed = (mixed ^ (mixed >>> 16)) >>> 0;
+      result.seat = Math.floor(mixed / 4294967296 * result.players);
+      [result.bots[previous], result.bots[result.seat]] = [result.bots[result.seat], result.bots[previous]];
+    }
     if (result.shuffle_bots) {
       const seats = Array.from({ length: result.players }, (_, i) => i)
         .filter((i) => result.mode !== "play" || i !== result.seat);
@@ -349,6 +383,7 @@ window.setupWizard = (() => {
       }
     }
     delete result.shuffle_bots;
+    delete result.shuffle_seat;
     return result;
   }
 
@@ -363,17 +398,23 @@ window.setupWizard = (() => {
       review.append(paragraph);
     };
     add("Game", `${data.game_type === "board" ? "Board" : "Cards only"} · ${data.mode} · ${data.players} players`);
-    add("Notebook", data.notebook_mode === "manual" ? "Manual" : "Automatic");
+    if (batchMode) add("Games", String(Number($("batch-games").value)));
+    else add("Notebook", data.notebook_mode === "manual" ? "Manual" : "Automatic");
     if (includeSeed) add("Seed", String(data.seed));
-    if (data.shuffle_bots) {
+    if (data.shuffle_seat && data.mode === "play") add("Your seat", "Randomly assigned at startup");
+    if (data.shuffle_bots || (data.shuffle_seat && data.mode === "play")) {
       const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
         .map((bot) => typeof bot === "string" ? bot : "custom");
-      add("Bot styles", `${styles.join(", ")} · randomly assigned to bot seats`);
+      add("Bot styles", `${styles.join(", ")}${data.shuffle_bots ? " · randomly assigned to bot seats" : ""}`);
+    }
+    if (data.bots.some((bot, i) => bot === "analytical" && (data.mode !== "play" || i !== data.seat))) {
+      add("Analytical risk", "May accuse at 50% estimated confidence; a wrong accusation eliminates the bot");
     }
     for (let i = 0; i < data.players; i++) {
-      const human = data.mode === "play" && i === data.seat;
+      const randomHuman = data.mode === "play" && data.shuffle_seat;
+      const human = data.mode === "play" && i === data.seat && !randomHuman;
       const character = data.seat_suspects ? ` · ${cardName(data.seat_suspects[i])}` : "";
-      const bot = human ? "You" : data.shuffle_bots ? "Bot (random style)"
+      const bot = randomHuman ? "You or bot" : human ? "You" : data.shuffle_bots ? "Bot (random style)"
         : `Bot: ${typeof data.bots[i] === "string" ? data.bots[i] : "custom"} (${score(data.bots[i])}/100)`;
       add(`Player ${i + 1}`, `${bot}${character}${data.seat_suspects && data.seat_suspects[i] === 0 ? " · starts" : ""}`);
     }
@@ -388,9 +429,33 @@ window.setupWizard = (() => {
     const gameChanges = Object.entries(data.game_rules).filter(([, value]) => value)
       .map(([key]) => key.replaceAll("_", " "));
     if (gameChanges.length) add("Game rules", gameChanges.join(", "));
-    const progression = { auto: "Automatic", turn: "Turn-by-turn", step: "Step-by-step" };
-    add("Progression", `${progression[data.progress]} · action limit ${data.max_steps}`);
+    if (!batchMode) {
+      const progression = { auto: "Automatic", turn: "Turn-by-turn", step: "Step-by-step" };
+      add("Progression", `${progression[data.progress]} · action limit ${data.max_steps}`);
+    } else {
+      add("Action limit", String(data.max_steps));
+    }
     if (data.debug) add("Warning", "Omniscient debug reveals hidden information.");
+  }
+
+  function renderBatchMode() {
+    const spectating = $("mode").value === "spectate";
+    if (!spectating) {
+      batchMode = false;
+      $("batch-enabled").checked = false;
+    }
+    $("batch-option-field").hidden = !spectating;
+    $("setup-heading").textContent = batchMode ? "Batch simulation setup" : "New game";
+    $("setup-review-title").textContent = batchMode ? "Review batch setup" : "Review your game";
+    $("batch-games-field").hidden = !batchMode;
+    $("setup-quick-play").hidden = batchMode;
+    $("save-quickplay-default").hidden = batchMode;
+    $("setup-start").textContent = batchMode ? "Run batch" : "Start game";
+    $("notebook-mode-field").hidden = spectating;
+    $("notebook-mode-hint").hidden = spectating;
+    $("progress-field").hidden = batchMode;
+    $("debug-field").hidden = batchMode;
+    $("spectator-warning").hidden = batchMode || $("mode").value !== "spectate";
   }
 
   function showStep(next, focus = true) {
@@ -415,20 +480,27 @@ window.setupWizard = (() => {
   function loadSetup(data, useSeed) {
     validateProfile(data, useSeed);
     document.querySelector(`input[name="game-type"][value="${data.game_type}"]`).checked = true;
-    $("mode").value = data.mode;
+    $("mode").value = batchMode ? "spectate" : data.mode;
     $("notebook-mode").value = data.notebook_mode === undefined ? "manual" : data.notebook_mode;
     $("players").value = String(data.players);
     $("progress").value = data.progress;
     $("max-steps").value = String(data.max_steps);
     $("debug").checked = data.debug;
     $("shuffle-bots").checked = data.shuffle_bots === true;
+    $("shuffle-seat").checked = data.shuffle_seat === true;
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
     bots = copy(data.bots);
+    if (batchMode) {
+      for (let i = 0; i < bots.length; i++) {
+        if (bots[i] == null) bots[i] = $("all-bots").value || "random";
+      }
+    }
     for (const [key, id] of Object.entries(gameRuleIds)) {
       $(id).checked = data.game_rules?.[key] === true;
     }
     if (data.board_rules) setRules(data.board_rules);
     updateMode(false);
+    renderBatchMode();
     updateGameType();
     syncSeats();
     $("seat").value = String(data.seat);
@@ -441,7 +513,7 @@ window.setupWizard = (() => {
   function validateProfile(data, withSeed = false) {
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid setup profile.");
     const allowed = ["mode", "game_type", "notebook_mode", "players", "seat", "bots", "seat_suspects",
-      "board_rules", "game_rules", "progress", "max_steps", "debug", "shuffle_bots", ...(withSeed ? ["seed"] : [])];
+      "board_rules", "game_rules", "progress", "max_steps", "debug", "shuffle_bots", "shuffle_seat", ...(withSeed ? ["seed"] : [])];
     if (Object.keys(data).some((key) => !allowed.includes(key))
       || !["play", "spectate"].includes(data.mode)
       || !["board", "card_only"].includes(data.game_type)
@@ -454,6 +526,7 @@ window.setupWizard = (() => {
       || !Number.isSafeInteger(data.max_steps) || data.max_steps < 0
       || typeof data.debug !== "boolean"
       || (data.shuffle_bots !== undefined && typeof data.shuffle_bots !== "boolean")
+      || (data.shuffle_seat !== undefined && typeof data.shuffle_seat !== "boolean")
       || (withSeed && (!Number.isInteger(data.seed) || data.seed < 0 || data.seed > 4294967295))) {
       throw new Error("Invalid setup profile.");
     }
@@ -473,7 +546,8 @@ window.setupWizard = (() => {
         || Object.keys(data.board_rules).some((key) => key === "passage_count"
           ? !Number.isInteger(data.board_rules[key]) || data.board_rules[key] < 0 || data.board_rules[key] > 4
           : !Object.hasOwn(ruleIds, key) || typeof data.board_rules[key] !== "boolean")
-        || (!data.board_rules.move_suspect && data.board_rules.summoned_suggestion)) {
+        || (!data.board_rules.move_suspect && data.board_rules.summoned_suggestion)
+        || (data.board_rules.procedural_map && !data.board_rules.randomize_rooms)) {
         throw new Error("Invalid board settings in setup profile.");
       }
     } else if (data.seat_suspects !== undefined || data.board_rules !== undefined) {
@@ -528,8 +602,24 @@ window.setupWizard = (() => {
     renderProfiles();
   }
 
-  function beginFresh() {
+  function beginFresh(batch = false) {
+    batchMode = batch;
+    $("batch-enabled").checked = batch;
+    if (batchMode) {
+      $("mode").value = "spectate";
+      $("notebook-mode").value = "automatic";
+      $("progress").value = "auto";
+      $("debug").checked = false;
+      const count = Number($("players").value);
+      while (bots.length < count) bots.push("random");
+      for (let i = 0; i < count; i++) {
+        if (bots[i] == null) bots[i] = $("all-bots").value || "random";
+      }
+    }
     try {
+      updateMode(false);
+      renderBatchMode();
+      syncSeats();
       rollSeed();
       showStep(0, false);
       $("replay-setup").disabled = lastSetup === null;
@@ -586,6 +676,9 @@ window.setupWizard = (() => {
   $("setup-next").addEventListener("click", () => {
     if (validBasics()) { showError(""); syncSeats(); showStep(step + 1); }
   });
+  $("batch-games").addEventListener("input", () => {
+    if (step === 4) renderReview();
+  });
   for (const button of document.querySelectorAll("[data-setup-step]")) {
     button.addEventListener("click", () => {
       if (validBasics()) { showError(""); syncSeats(); showStep(Number(button.dataset.setupStep)); }
@@ -594,6 +687,12 @@ window.setupWizard = (() => {
   for (const element of [$("players"), $("mode"), $("seat"), ...document.querySelectorAll('input[name="game-type"]')]) {
     element.addEventListener("change", syncSeats);
   }
+  $("mode").addEventListener("change", renderBatchMode);
+  $("batch-enabled").addEventListener("change", () => {
+    batchMode = $("mode").value === "spectate" && $("batch-enabled").checked;
+    renderBatchMode();
+  });
+  $("shuffle-seat").addEventListener("change", renderSeats);
   $("seat-list").addEventListener("change", (event) => {
     if (event.target.dataset.characterSeat !== undefined) {
       selectCharacter(Number(event.target.dataset.characterSeat), Number(event.target.value));
@@ -653,6 +752,7 @@ window.setupWizard = (() => {
   for (const id of Object.values(ruleIds)) {
     $(id).addEventListener("change", () => {
       if (!$("rule-move-suspect").checked) $("rule-summoned").checked = false;
+      if (!$("rule-randomize-rooms").checked) $("rule-procedural-map").checked = false;
       renderRules();
     });
   }
@@ -745,5 +845,9 @@ window.setupWizard = (() => {
   profilesLoad.catch((error) => showError(`Could not load setup profiles: ${error.message}`));
   syncSeats();
   beginFresh();
-  return { payload, resolveBotSeats, beginFresh, rememberStarted, loadQuickplay, renderReview };
+  return {
+    payload, resolveBotSeats, beginFresh, rememberStarted, loadQuickplay, renderReview,
+    isBatchMode: () => batchMode,
+    batchGames: () => Number($("batch-games").value),
+  };
 })();

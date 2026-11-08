@@ -23,7 +23,7 @@ class DistributionView(ttk.Frame):
         controls = ttk.Frame(self)
         controls.grid(row=0, column=0, sticky="ew")
         ttk.Label(controls, text="Metric").grid(row=0, column=0, padx=3)
-        metric = ttk.Combobox(controls, textvariable=self.metric, values=METRICS, state="readonly", width=11)
+        metric = ttk.Combobox(controls, textvariable=self.metric, values=METRICS, state="readonly", width=21)
         metric.grid(row=0, column=1, padx=3)
         ttk.Label(controls, text="Bin width").grid(row=0, column=2, padx=3)
         width_entry = ttk.Entry(controls, textvariable=self.width, width=5)

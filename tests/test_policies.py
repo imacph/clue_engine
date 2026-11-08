@@ -9,6 +9,7 @@ from clue_engine.knowledge import Mark, knowledge_for, known_solution
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.observations import Event, EventKind, PlayerView, view_for
 from clue_engine.policies import (
+    AnalyticalPolicy,
     DeductivePolicy,
     ProbingPolicy,
     RandomPolicy,
@@ -21,8 +22,9 @@ from clue_engine.state import GameState, deal
 
 NUM_PLAYERS = 4
 SOLUTION = Combination(suspect_id=0, weapon_id=6, room_id=12)
-POLICIES = [RandomPolicy, DeductivePolicy, ProbingPolicy, StrategicPolicy]
-ADVANCED_POLICIES = [ProbingPolicy, StrategicPolicy]
+SOUND_POLICIES = [RandomPolicy, DeductivePolicy, ProbingPolicy, StrategicPolicy]
+POLICIES = [*SOUND_POLICIES, AnalyticalPolicy]
+ADVANCED_POLICIES = [ProbingPolicy, StrategicPolicy, AnalyticalPolicy]
 
 
 def solved_view() -> PlayerView:
@@ -253,7 +255,7 @@ def accusation_indexes(engine: Engine) -> list[int]:
     return [i for i, event in enumerate(engine.log) if event.kind is EventKind.ACCUSE]
 
 
-@pytest.mark.parametrize("policy_cls", POLICIES)
+@pytest.mark.parametrize("policy_cls", SOUND_POLICIES)
 @pytest.mark.parametrize("seed", range(15))
 def test_games_are_won_by_a_correct_deduced_accusation(policy_cls, seed):
     engine = play_game(policy_cls, seed)
@@ -262,7 +264,7 @@ def test_games_are_won_by_a_correct_deduced_accusation(policy_cls, seed):
     assert engine.log[-1].combo == engine.state.solution
 
 
-@pytest.mark.parametrize("policy_cls", POLICIES)
+@pytest.mark.parametrize("policy_cls", SOUND_POLICIES)
 @pytest.mark.parametrize("seed", range(15))
 def test_every_accusation_was_implied_by_the_accusers_knowledge_at_the_time(policy_cls, seed):
     engine = play_game(policy_cls, seed)
@@ -285,7 +287,7 @@ def test_games_are_reproducible_from_a_seed(policy_cls):
     assert play_game(policy_cls, 3).log == play_game(policy_cls, 3).log
 
 
-@pytest.mark.parametrize("policy_cls", ADVANCED_POLICIES)
+@pytest.mark.parametrize("policy_cls", [ProbingPolicy, StrategicPolicy])
 @pytest.mark.parametrize("players", [2, 3, 6])
 def test_advanced_policies_finish_with_different_player_counts(policy_cls, players):
     engine = Engine(deal(random.Random(21), players))
@@ -303,6 +305,16 @@ def test_advanced_policies_finish_with_different_player_counts(policy_cls, playe
         assert set(solution_deal_counts(knowledge)) == {accusation.combo}
     else:
         assert known_solution(knowledge) == accusation.combo
+
+
+@pytest.mark.parametrize("players", [2, 3, 4, 6])
+@pytest.mark.parametrize("seed", range(5))
+def test_analytical_games_finish_with_legal_calculated_accusations(players, seed):
+    engine, bots = create_game(players, seed, "analytical")
+    play(engine, bots, max_steps=1_000)
+    assert engine.is_over
+    if engine.winner is not None:
+        assert engine.log[-1].combo == engine.state.solution
 
 
 def test_deductive_play_needs_fewer_suggestions_than_random_play():

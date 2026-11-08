@@ -15,6 +15,7 @@ class BoardRules:
     accuse_in_room: bool = False
     stay_to_suggest: bool = False
     randomize_rooms: bool = False
+    procedural_map: bool = False
     randomize_doors: bool = False
     randomize_passages: bool = False
     passage_count: int = 2
@@ -31,6 +32,8 @@ class BoardRules:
             raise ValueError("passage_count must be between 0 and 4")
         if not self.move_suspect and self.summoned_suggestion:
             raise ValueError("summoned suggestions require suspect relocation")
+        if self.procedural_map and not self.randomize_rooms:
+            raise ValueError("procedural maps require scrambled rooms")
 
 
 DEFAULT_BOARD_RULES = BoardRules()

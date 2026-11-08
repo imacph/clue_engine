@@ -285,6 +285,15 @@ class StrategicPolicy(ProbingPolicy):
     def _route_planning_enabled(self) -> bool:
         return True
 
+    def _count_deals(self, knowledge: Knowledge) -> dict[Combination, int] | None:
+        return solution_deal_counts(knowledge)
+
+    def _suggestion_evidence(
+        self, view: PlayerView, knowledge: Knowledge,
+        deals: tuple[tuple[Combination, tuple[int, ...]], ...] | None,
+    ) -> tuple[dict[int, int], tuple[float, ...] | None]:
+        return {}, None
+
     @staticmethod
     def _room_distances(
         view: PlayerView, start: Square, blocked: frozenset[Square], forbidden_room: int | None,
@@ -395,7 +404,7 @@ class StrategicPolicy(ProbingPolicy):
             deduce_deal_constraints(knowledge)
         if known_solution(knowledge) is not None:
             return None
-        counts = solution_deal_counts(knowledge)
+        counts = self._count_deals(knowledge)
         if counts is None:
             return None
         if not counts:
@@ -413,6 +422,11 @@ class StrategicPolicy(ProbingPolicy):
         accusation = self._analyze(knowledge, legal, enabled=True, risk=False)
         if accusation is not None:
             return accusation
+        return self._choose_with_knowledge(view, knowledge, legal)
+
+    def _choose_with_knowledge(
+        self, view: PlayerView, knowledge: Knowledge, legal: tuple[Action, ...],
+    ) -> Action:
         options = sound_actions(legal, known_solution(knowledge))
         if view.board is not None:
             return self._pick_board(view, knowledge, options)
@@ -448,6 +462,7 @@ class StrategicPolicy(ProbingPolicy):
         *, prefer_probe: bool,
     ) -> Action:
         deals = consistent_deals(knowledge, self._deal_counts) if self._deal_counts else None
+        hints, weights = self._suggestion_evidence(view, knowledge, deals)
         unresolved: dict[int, set[frozenset[int]]] = {}
         for clause in knowledge.clauses:
             if any(knowledge.mark_of(clause.holder, card) is Mark.HELD for card in clause.cards):
@@ -488,7 +503,10 @@ class StrategicPolicy(ProbingPolicy):
                         count for combo, count in self._deal_counts.items() if card in _cards(combo)
                     )
                     diversity += hits * (total - hits)
-            certainty = expected_solution_certainty(view, suggestion.combination, deals) if deals else 0
+            certainty = (
+                expected_solution_certainty(view, suggestion.combination, deals, weights=weights)
+                if deals else 0
+            )
             relocation = 0
             if view.board is not None and view.board_rules.move_suspect:
                 board = view.board.board
@@ -502,13 +520,75 @@ class StrategicPolicy(ProbingPolicy):
             return (
                 int(prefer_probe and _is_probe(view, knowledge, suggestion)), certainty,
                 int(opportunities > 0), diversity, clause_targets, envelope_unknown, opportunities,
-                unknown_marks,
+                unknown_marks, sum(hints.get(card, 0) for card in cards),
                 relocation,
             )
 
         ranked = [(score(suggestion), suggestion) for suggestion in suggestions]
         best = max(item[0] for item in ranked)
         return self.rng.choice(tuple(suggestion for value, suggestion in ranked if value == best))
+
+
+class AnalyticalPolicy(StrategicPolicy):
+    """Use bounded deal counting, opponent modeling, and calculated accusations."""
+
+    def _count_deals(self, knowledge: Knowledge) -> dict[Combination, int] | None:
+        return solution_deal_counts(knowledge, max_candidates=24, max_nodes=60000)
+
+    def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
+        knowledge = knowledge_for(view, num_players)
+        accusation = self._analyze(knowledge, legal, enabled=True, risk=False)
+        if accusation is not None:
+            return accusation
+        if self._deal_counts:
+            deals = consistent_deals(knowledge, self._deal_counts)
+            if deals:
+                _, weights = self._suggestion_evidence(view, knowledge, deals)
+                assert weights is not None
+                support: dict[Combination, float] = {}
+                for (solution, _), weight in zip(deals, weights, strict=True):
+                    support[solution] = support.get(solution, 0) + weight
+            else:
+                support = {solution: float(count) for solution, count in self._deal_counts.items()}
+            best = max(support.values())
+            if 2 * best >= sum(support.values()):
+                candidates = tuple(
+                    Accuse(solution) for solution, weight in support.items()
+                    if weight == best and Accuse(solution) in legal
+                )
+                if candidates:
+                    return self.rng.choice(candidates)
+        return self._choose_with_knowledge(view, knowledge, legal)
+
+    def _suggestion_evidence(
+        self, view: PlayerView, knowledge: Knowledge,
+        deals: tuple[tuple[Combination, tuple[int, ...]], ...] | None,
+    ) -> tuple[dict[int, int], tuple[float, ...] | None]:
+        suggested: set[tuple[int, int]] = set()
+        for event in view.events:
+            if event.kind is not EventKind.SUGGEST or event.actor == view.player or event.combo is None:
+                continue
+            cards = _cards(event.combo)
+            for card in cards[:2] if view.board is not None else cards:
+                suggested.add((event.actor, card))
+        hints: dict[int, int] = {}
+        for seat, card in suggested:
+            if (
+                knowledge.mark_of(seat, card) is not Mark.HELD
+                and knowledge.mark_of(knowledge.envelope, card) is Mark.UNKNOWN
+            ):
+                hints[card] = hints.get(card, 0) + 1
+        if not deals:
+            return hints, None
+        uncertain = tuple(
+            (seat, card) for seat, card in suggested
+            if knowledge.mark_of(seat, card) is Mark.UNKNOWN
+        )
+        weights = tuple(
+            max(0.25, 0.75 ** sum(bool(hands[seat] & (1 << card)) for seat, card in uncertain))
+            for _, hands in deals
+        )
+        return hints, weights
 
 
 class CustomPolicy(StrategicPolicy):
@@ -595,6 +675,7 @@ POLICY_TYPES: dict[str, type[RandomPolicy]] = {
     "deductive": DeductivePolicy,
     "probing": ProbingPolicy,
     "strategic": StrategicPolicy,
+    "analytical": AnalyticalPolicy,
 }
 POLICY_NAMES = tuple(POLICY_TYPES)
 

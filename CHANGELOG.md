@@ -1,5 +1,33 @@
 # Changelog
 
+## Desktop 0.4.1 / App 0.6.2 / API 0.6.3 - 2026-11-08
+
+### Added
+
+- Extend batch simulations to support board and card-only setups, per-seat
+  named or custom bots, game and board rules, seeded bot shuffling, and board
+  event statistics. Add batch setup, progress, policy comparisons, and
+  distributions to the shared browser/desktop app, add JSON setup input to the
+  CLI and Tkinter batch window, and preserve schema-1 trace analysis while
+  writing schema-2 traces.
+- Add an analytical bot profile with deeper bounded deal counting, tentative
+  opponent modeling, and calculated accusations at 50% estimated confidence.
+
+### Changed
+
+- Expand the batch setup and results to use the available window, keep bot
+  controls aligned with strategy details disclosed on demand, and compare
+  profile win rates with an observed equal-share reference.
+- Add profile and seat filters, seat outcomes, exact numeric summaries, and
+  readable count/percentage charts to browser and desktop batch analysis.
+- Offer batch play from the shared spectator setup, and allow individual batch
+  runs to be filtered, sorted, paged, and opened in the existing replay viewer.
+- Restyle batch results as a compact, tabbed game workspace and replace the
+  scrolling bin list with a fixed-height distribution graph and accessible
+  exact-bin data.
+- Add 4×, 8×, and 16× replay speeds, shortening replay animation and reading
+  pauses at those speeds.
+
 ## Desktop 0.4.1 / App 0.6.1 / API 0.6.2 - 2026-11-07
 
 ### Added

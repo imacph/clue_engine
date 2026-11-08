@@ -45,7 +45,7 @@ def write_board_record(
     board_rules = initial["board_rules"]
     new_rules = (
         "early_end", "revisit_hallways", "optional_suggestion", "accuse_in_room", "stay_to_suggest",
-        "randomize_rooms", "randomize_doors", "randomize_passages",
+        "randomize_rooms", "randomize_doors", "randomize_passages", "procedural_map",
     )
     extended = any(board_rules[key] for key in new_rules) or board_rules["passage_count"] != 2 or any(
         asdict(initial_state.game_rules).values()

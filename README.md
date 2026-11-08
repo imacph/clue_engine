@@ -14,8 +14,8 @@ No license granting redistribution rights is provided.
 ## Versions
 
 <!-- component-versions:start -->
-The game API and Python distribution are **0.6.2**, the shared browser/desktop
-frontend is **0.6.1**, and the Windows desktop wrapper is **0.4.1**.
+The game API and Python distribution are **0.6.3**, the shared browser/desktop
+frontend is **0.6.2**, and the Windows desktop wrapper is **0.4.1**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.
@@ -34,8 +34,9 @@ caller for reproducibility.
 
 The [board rules contract](docs/board-rules.md) describes the board rules and
 documented interpretations. Board games are available through the local web
-interface, packaged Windows desktop app, and Python API; the original Tkinter,
-console, and batch interfaces remain card-only. The [card-only baseline](docs/card-only-baseline.md) records
+interface, packaged Windows desktop app, and Python API; the Tkinter game and
+console play interfaces remain card-only. Batch simulations also accept board
+setups as described below. The [card-only baseline](docs/card-only-baseline.md) records
 reproducible pre-board measurements.
 
 ```python
@@ -451,6 +452,8 @@ notebook edits, jump between turns, or play continuously at a chosen speed.
 Playback stops at the end; manual navigation or changing the replay perspective
 pauses it. Select a player to see their notebook and automatic deductions
 based only on what that player had observed at that point.
+Playback speeds range from 0.5× to 16×. At 4× and above, suggestion animations
+and reading pauses also shorten; a changed speed takes effect on the next step.
 For a human manual notebook, **Original notes** shows the marks and clauses
 actually recorded, including intermediate edits. **Reveal all** additionally
 shows the solution, all hands, and private events. Replay is read-only.
@@ -503,8 +506,9 @@ remains unchanged even if they continue to refute.
 
 Every player's hand size is public and appears beside their notebook column.
 All profiles use only their own player view, including public hand sizes.
-By default, bots accuse only when the solution is established and an
-accusation is legal. They use seeded randomness for choices and ties.
+Except for the analytical profile, named bots accuse only when the solution is
+established and an accusation is legal. They use seeded randomness for choices
+and ties.
 
 - `random`: chooses among legal card-only non-accusation actions at random.
 - `deductive`: randomly suggests cards still possible in the envelope.
@@ -520,6 +524,17 @@ accusation is legal. They use seeded randomness for choices and ties.
   the expected information in possible suggestion responses, assuming each
   matching reveal is equally likely. This is a strategy model, not a guarantee
   of how opponents will respond.
+- `analytical`: adds a larger bounded deal-counting budget and uses opponents'
+  suggested cards as tentative evidence when ranking suggestions. It assumes
+  opponents are somewhat less likely to suggest their own cards, but allows for
+  controlled probes and other strategies. Repeated suggestions by the same
+  opponent do not multiply this signal, and fixed board rooms are excluded.
+  When a small complete deal space is available, this evidence softly weights
+  deals for response planning; otherwise it is a tie-breaker. When a completed
+  analysis gives a solution at least 50% estimated support, it may accuse
+  without proof, using opponent-weighted deals when available and unweighted
+  deal counts otherwise. The estimate is model-dependent, and a wrong
+  accusation eliminates the bot. Assumptions are never added to notebook facts.
 
 The shared deduction engine uses hand sizes as well as observed cards and
 clauses. Strategic deal analysis can combine overlapping clauses with hand
@@ -547,37 +562,114 @@ equally likely and does not model how opponents choose actions; it is not a
 guaranteed probability and a wrong accusation eliminates the bot. Custom bots
 use response analysis when suggestion ranking is enabled together with deal
 analysis or calculated accusations, and enhanced routing when candidate-room
-preference is enabled. Guessing is off in every named preset. The toolkit score is
+preference is enabled. Among named presets, only analytical makes calculated
+accusations. The toolkit score is
 a weighted summary of applicable
 enabled choices, not a measured difficulty or win probability; it excludes
 the risky-accusation setting.
 
 ## Batch statistics and private traces
 
-Run reproducible **card-only** simulations from the command line:
+Run reproducible card-only simulations with the existing command-line options:
 
 ```text
 python -m clue_engine.batch_cli --games 100 --players 4 --policies random,deductive,probing,strategic --seed 42 --trace batch-42.jsonl
 ```
 
 Provide one policy name to use it for every player, or a comma-separated policy
-for every seat. Available profiles are `random`, `deductive`, `probing`, and
-`strategic`. The default limit is 10,000 actions per game; change it with
+for every seat. Available profiles are `random`, `deductive`, `probing`,
+`strategic`, and `analytical`. The default limit is 10,000 actions per game; change it with
 `--max-steps`. A game that
 reaches the limit is reported as a timeout, not a completed game. The trace
 file must be new: existing files are never overwritten. Errors and timeouts
 give the CLI a nonzero exit status. Ctrl+C requests cancellation between
 actions, saves the partial game and batch summary, and returns status 130.
 
-The desktop setup screen also has **Batch statistics**. Configure the batch
-and a new trace file there, start or cancel it, and inspect its progress and
-summary while it runs. The trace controls can also open an existing JSONL file
-and display one zero-based game number at a time. Trace loading and batch work
-run off the Tk thread. Closing the window requests cancellation.
+To run any supported browser/API game setup, provide a JSON setup object:
+
+```text
+python -m clue_engine.batch_cli --setup board-setup.json --games 100 --trace board-100.jsonl
+```
+
+The file accepts `game_type`, `players`, and one `bots` entry per seat (a
+named profile or a custom strategy object), plus `game_rules`, `board_rules`,
+`seat_suspects`, `shuffle_bots`, `seed`, and `max_steps`. For example:
+
+```json
+{
+  "game_type": "board",
+  "players": 4,
+  "bots": ["deductive", {"candidate_rooms": true, "deal_analysis": true}, "probing", "random"],
+  "game_rules": {"all_refute": true},
+  "board_rules": {"randomize_rooms": true, "procedural_map": true},
+  "seat_suspects": [0, 1, 2, 3],
+  "shuffle_bots": false,
+  "seed": 42,
+  "max_steps": 10000
+}
+```
+
+The shared browser and desktop app also provide **Batch simulation** from the
+main menu, or by selecting **Spectate bots** and **Run a batch of games** in
+the normal setup wizard. The wizard exposes game type, player count, per-seat named or
+custom bots, game and board rules, suspect assignments, bot shuffling, seed,
+action limit, and game count. Bot cards show toolkit scores by default; open
+strategy details to read descriptions or edit a custom bot. The results view
+reports progress, policy comparisons, and interactive distributions. The
+relative win rate is each profile's completed-seat win rate divided by observed
+wins per completed seat: 100% is the equal-share reference, not a causal
+strength estimate. Completed games without a winner lower that reference; it is
+unavailable when there are no observed wins or no completed seats.
+
+Filter browser/desktop distributions by profile, seat, or both. Game-level
+measures select games containing that profile in the selected seat, counting
+each game once even if the profile appears more than once. The Player 1 turn
+measure always refers to Player 1, not the filtered seat. Bot seat outcomes and
+first-solution distributions instead count matching seat appearances; the
+latter includes only appearances recorded as learned in the histogram and
+reports the number not learned, including incomplete games. Game-length and
+board-event measures exclude incomplete games; outcomes include them. Numeric
+statistics are calculated from the original observations, not histogram bins.
+The fixed-height distribution graph plots numeric bins on a continuous axis,
+including gaps. Hover or focus a bar for its count, percentage, and cumulative
+share. When bins are too numerous to display individually, adjacent bins are
+combined for the graph; **View exact bin data** retains and pages through the
+original bins.
+Use the workspace tabs to switch between the distribution, summary, and runs.
+The individual-runs table can be filtered, paged, and sorted by outcome, action
+count, turns, winner, learned seats, earliest solution action, and event counts.
+Open a run in the replay
+viewer, then use **Back to batch results** to continue the analysis. Replays
+include completed and recorded incomplete games, and expose private hands and
+the solution. The app retains compact per-game observations in memory and
+private traces in a temporary directory while the batch is available. Inactive
+batches expire after one hour when a subsequent batch is started; temporary
+traces are also cleaned up on normal app exit. Very large batches therefore use more
+memory and temporary disk space. The results view can be revisited from a batch
+replay, but is not restored after a page reload or a return to the main menu.
+Export any replay you want to keep.
+
+The Tkinter desktop **Batch statistics** window can also load the same JSON
+setup. CLI `--seed` and `--max-steps` and the Tkinter seed/action-limit fields
+override values in the file. Human-only setup fields (mode, human seat,
+notebook, progression, and debug) do not affect a batch; every seat must have
+a bot configuration. Board games support 3–6 players; card-only games support
+two or more, subject to the face-up-card rule requiring at least one card per
+player. Unsupported fields, invalid rule combinations, and incomplete bot
+lists are rejected before creating a trace. Each batch uses one selected setup
+across its games; use separate traces for setup comparisons rather than
+exhaustively enumerating the configuration space.
+
+The Tkinter desktop **Batch statistics** window also lets you configure a
+batch and new trace file, start or cancel it, and inspect progress and summary
+while it runs. Its trace controls can open an existing JSONL file and display
+one zero-based game at a time. Trace loading and batch work run off the Tk
+thread. Closing the window requests cancellation.
 
 After a batch finishes or is cancelled, the **Distributions** tab displays a
-histogram. Select actions, Player 0's completed turns, outcomes, or the action
-at which a player first learned the solution. Choose counts or percentages,
+histogram. Select actions, Player 0's completed turns, outcomes, the action at
+which a player first learned the solution, or board-specific rolls, moves,
+room entries, passages, and suspect/weapon relocations. Choose counts or percentages,
 set a positive bin width, and use **Refresh chart** (or press Enter in a
 setting). Deduction charts can be filtered by policy, seat, or both. To analyze
 an existing trace, choose it with **Existing...**, then select **Load trace
@@ -591,8 +683,9 @@ python -m clue_engine.batch_cli --games 100 --players 4 --trace batch-turns.json
 python -m clue_engine.distributions_cli --trace batch-42.jsonl --metric deduction --filter-policy strategic --filter-seat 2 --bin-width 10 --display percent
 ```
 
-Metrics are `actions`, `turns`, `outcomes`, and `deduction`; display modes are
-`count` and `percent`. Policy and seat filters apply only to deduction. Numeric
+Metrics are `actions`, `turns`, `outcomes`, `deduction`, `rolls`, `moves`,
+`room_entries`, `passages`, `suspect_relocations`, and `weapon_relocations`;
+display modes are `count` and `percent`. Policy and seat filters apply only to deduction. Numeric
 bins are inclusive at both displayed endpoints and empty bins are omitted.
 Chart percentages are empirical frequencies, not guaranteed probabilities.
 Action and turn charts use completed games only and report excluded timeouts,
@@ -629,7 +722,8 @@ separately. Only wins and all-eliminated games count as completed. Policy
 win rates divide wins by completed seat exposures, including multiple seats
 using the same policy; policy-by-seat rates use the corresponding seat
 exposures. Mean actions, mean completed turns per seat, suggestions, passes,
-and refutations use completed games only. The action median averages the two
+and refutations use completed games only. Board runs also report mean rolls,
+moves, room entries, passages, and token relocations. The action median averages the two
 middle values for an even sample; p90 uses the nearest-rank definition.
 Deduction totals use all started seat exposures, including partial games.
 Their mean first-solution step is averaged only over players who learned the
@@ -637,11 +731,14 @@ solution: step 0 means the initial hand was sufficient, and subsequent steps
 count actions, not events. Snapshot candidate counts and solution knowledge
 are calculated independently from each player's filtered view.
 
-The newline-delimited JSON trace begins with `batch_start`, followed by each
+Board event distributions include completed games with zero occurrences of
+the selected event and are unavailable for card-only runs. The newline-delimited
+JSON trace uses schema version 2 and begins with `batch_start`, followed by each
 `game_start` (deal and policy seeds), `initial_knowledge`, alternating `action`
 and `knowledge` records, and `game_result`. An action contains all events it
 produced; for example, one reveal may produce both refutation and private-show
-events. Expected failures may add `action_error` or `knowledge_error` records.
+events. Board traces additionally record the initial board state and movement
+event details. Schema-1 card-only traces remain readable. Expected failures may add `action_error` or `knowledge_error` records.
 The final `batch_result` contains the same aggregate data as the displayed
 summary, including policy-by-seat breakdowns. Unexpected errors are surfaced
 and may leave a partial trace without a final result; successfully applied

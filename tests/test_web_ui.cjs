@@ -107,6 +107,7 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       return elements.get(id);
     },
     createElement(tag) { const result = element(); result.tagName = tag.toUpperCase(); return result; },
+    createElementNS(namespace, tag) { const result = element(); result.tagName = tag.toUpperCase(); return result; },
     querySelector() { return { content: "" }; },
   };
   document.getElementById("board-locations-panel").parentElement = element();
@@ -829,7 +830,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
       mode: { value: "play" }, "notebook-mode": { value: "manual" },
       players: { value: "6" }, seat: { value: "0" }, seed: { value: "42" },
       progress: { value: "turn" }, "max-steps": { value: "10000" }, debug: { checked: false },
-      "shuffle-bots": { checked: false },
+      "shuffle-bots": { checked: false }, "shuffle-seat": { checked: false },
       "rule-reverse-refutation": { checked: false },
       "rule-public-refutations": { checked: false },
       "rule-all-refute": { checked: false },
@@ -839,6 +840,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   vm.runInContext(`
     const $ = (id) => fields[id];
     let bots = [], characters = [0, 1, 2, 3, 4, 5], valid = true, syncCount = 0;
+    let batchMode = false;
     let lastError = "";
     const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
     const validBasics = () => valid;
@@ -857,11 +859,219 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   assert.deepEqual(Array.from(result.bots), Array(6).fill("random"));
   assert.deepEqual(Array.from(result.seat_suspects), [0, 1, 2, 3, 4, 5]);
   assert.equal(vm.runInContext("syncCount", context), 1);
+  vm.runInContext(`
+    batchMode = true;
+    fields["shuffle-bots"].checked = true;
+    fields.debug.checked = true;
+    fields.progress.value = "turn";
+  `, context);
+  const batch = vm.runInContext("payload()", context);
+  assert.equal(batch.mode, "spectate");
+  assert.equal(batch.progress, "auto");
+  assert.equal(batch.debug, false);
+  assert.equal(batch.shuffle_bots, true);
+  assert.equal(batch.bots.length, 6);
   vm.runInContext("valid = false", context);
   assert.throws(() => vm.runInContext("payload()", context), /Correct the game settings/);
-  assert.equal(vm.runInContext("syncCount", context), 1);
+  assert.equal(vm.runInContext("syncCount", context), 2);
   vm.runInContext("lastError = missingBoardSetup", context);
   assert.throws(() => vm.runInContext("payload()", context), /Board starting positions are unavailable/);
+});
+
+test("bot cards keep common controls in place and disclose custom options", () => {
+  const start = setupSource.indexOf("  function renderBots() {");
+  const end = setupSource.indexOf("  function rules()", start);
+  const context = vm.createContext({});
+  vm.runInContext(`
+    const make = (tag) => ({
+      tag, children: [], dataset: {}, open: false,
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return this.children.flatMap((row) =>
+        row.children.filter((child) => child.tag === "details" && child.open)); },
+    });
+    const list = make("div");
+    const fields = { players: { value: "2" }, mode: { value: "spectate" }, "bot-list": list };
+    const $ = (id) => fields[id];
+    const document = { createElement: make };
+    const option = (value, label) => ({ value, label });
+    const isBoard = () => false;
+    const presets = { random: {}, deductive: {} };
+    const presetDescriptions = { random: "Random", deductive: "Deductive" };
+    const strategyLabels = { candidate_suggestions: "Candidate cards" };
+    const score = () => 50;
+    const bots = ["random", { candidate_suggestions: true }];
+    ${setupSource.slice(start, end)}
+    renderBots();
+  `, context);
+  const cards = vm.runInContext("list.children", context);
+  assert.deepEqual(Array.from(cards, (card) => Array.from(card.children, (child) => child.tag)),
+    [["label", "p", "label", "details"], ["label", "p", "label", "details"]]);
+  assert.equal(cards[0].children[3].open, false);
+  assert.equal(cards[1].children[3].children[0].textContent, "Edit strategy");
+  assert.equal(cards[1].children[3].children[2].tag, "fieldset");
+  cards[1].children[3].open = true;
+  vm.runInContext("renderBots()", context);
+  assert.equal(vm.runInContext("list.children[1].children[3].open", context), true);
+});
+
+test("batch mode is an option within spectator setup only", () => {
+  const start = setupSource.indexOf("  function renderBatchMode() {");
+  const end = setupSource.indexOf("  function showStep(", start);
+  const context = vm.createContext({});
+  vm.runInContext(`
+    const fields = Object.fromEntries([
+      "mode", "batch-enabled", "batch-option-field", "setup-heading", "setup-review-title",
+      "batch-games-field", "setup-quick-play", "save-quickplay-default", "setup-start",
+      "notebook-mode-field", "notebook-mode-hint", "progress-field", "debug-field", "spectator-warning",
+    ].map(id => [id, {}]));
+    const $ = (id) => fields[id];
+    let batchMode = true;
+    fields.mode.value = "spectate";
+    fields["batch-enabled"].checked = true;
+    ${setupSource.slice(start, end)}
+    renderBatchMode();
+  `, context);
+  assert.equal(vm.runInContext('fields["batch-option-field"].hidden', context), false);
+  assert.equal(vm.runInContext('fields["batch-games-field"].hidden', context), false);
+  vm.runInContext('fields.mode.value = "play"; renderBatchMode()', context);
+  assert.equal(vm.runInContext("batchMode", context), false);
+  assert.equal(vm.runInContext('fields["batch-enabled"].checked', context), false);
+  assert.equal(vm.runInContext('fields["batch-option-field"].hidden', context), true);
+  assert.equal(vm.runInContext('fields["batch-games-field"].hidden', context), true);
+});
+
+test("batch comparison and chart show meaningful rates and exact statistics", () => {
+  const ui = frontend();
+  assert.equal(ui.evaluate("batchRelativeRate(0.5, 2, 8)"), "200%");
+  assert.equal(ui.evaluate("batchRelativeRate(0, 2, 8)"), "0%");
+  assert.equal(ui.evaluate("batchRelativeRate(null, 2, 8)"), "—");
+  assert.equal(ui.evaluate("batchRelativeRate(0, 0, 8)"), "—");
+  ui.element("batch-metric").value = "actions";
+  ui.element("batch-display-mode").value = "count";
+  ui.element("batch-chart-values").open = true;
+  ui.evaluate(`
+    lastBatchChart = {
+      title: "Game actions", samples: 4, denominator: "completed games", details: "Excluded: timeout=1.",
+      numeric_summary: { minimum: 1, mean: 3, median: 3, p90: 5, maximum: 5 },
+      bins: [{ label: "0-9", count: 3, probability: .75 }, { label: "10-19", count: 1, probability: .25 }],
+    };
+    renderBatchChart();
+  `);
+  const bars = ui.element("batch-chart-graph").children.filter((child) => child.class === "batch-chart-bin");
+  assert.equal(bars.length, 2);
+  assert.match(bars[0]["aria-label"], /0-9: 3 of 4 \(75.0%\).*75.0% cumulative/);
+  assert.match(bars[1]["aria-label"], /10-19: 1 of 4 \(25.0%\).*100.0% cumulative/);
+  assert.ok(Number(bars[0].children[1].height) > Number(bars[1].children[1].height));
+  const tableRows = ui.element("batch-chart-table").children[0].children[1].children;
+  assert.deepEqual(tableRows.map((row) => row.children.map((cell) => cell.textContent)), [
+    ["0-9", "3", "75.0%", "75.0%"], ["10-19", "1", "25.0%", "100.0%"],
+  ]);
+  assert.equal(ui.element("batch-chart-stats").children.length, 5);
+  ui.evaluate("lastBatchChart = { samples: 0, title: 'Empty', denominator: 'games', details: '', bins: [] }; renderBatchChart()");
+  assert.equal(ui.element("batch-chart-empty").hidden, false);
+  assert.equal(ui.element("batch-chart-graph").children.length, 0);
+});
+
+test("distribution graph preserves gaps and groups dense bins without losing counts", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    const sparse = batchGraphBuckets({
+      numeric_summary: {}, bins: [{ label: "0", count: 2 }, { label: "500", count: 3 }],
+    }, 500);
+    const dense = batchGraphBuckets({
+      numeric_summary: {}, bins: Array.from({ length: 1000 }, (_, i) => ({ label: String(i), count: 1 })),
+    }, 500);
+    return {
+      sparse: sparse.bars, denseCount: dense.bars.length, group: dense.binsPerBar,
+      samples: dense.bars.reduce((sum, bar) => sum + bar.count, 0),
+    };
+  })()`);
+  assert.ok(result.sparse[1].start - result.sparse[0].end > 400);
+  assert.ok(result.denseCount <= 80);
+  assert.ok(result.group > 1);
+  assert.equal(result.samples, 1000);
+});
+
+test("exact distribution data is paginated with cumulative counts across pages", () => {
+  const ui = frontend();
+  ui.element("batch-chart-values").open = true;
+  ui.evaluate(`
+    lastBatchChart = {
+      samples: 120, numeric_summary: {},
+      bins: Array.from({ length: 120 }, (_, i) => ({ label: String(i), count: 1, probability: 1 / 120 })),
+    };
+    batchBinOffset = 50;
+    renderBatchBinTable();
+  `);
+  const rows = ui.element("batch-chart-table").children[0].children[1].children;
+  assert.equal(rows.length, 50);
+  assert.equal(rows[0].children[0].textContent, "50");
+  assert.equal(rows[0].children[3].textContent, "42.5%");
+  assert.equal(ui.element("batch-bin-status").textContent, "Showing 51–100 of 120 bins.");
+  assert.equal(ui.element("batch-bin-previous").disabled, false);
+  assert.equal(ui.element("batch-bin-next").disabled, false);
+});
+
+test("batch workspace tabs switch visible panels without losing the selection", () => {
+  const ui = frontend();
+  ui.evaluate('switchBatchTab("runs")');
+  assert.equal(ui.element("batch-panel-runs").hidden, false);
+  assert.equal(ui.element("batch-panel-distribution").hidden, true);
+  assert.equal(ui.element("batch-tab-runs")["aria-selected"], "true");
+  assert.equal(ui.element("batch-tab-summary").tabIndex, -1);
+});
+
+test("batch filter requests ignore out-of-order results", async () => {
+  const ui = frontend();
+  ui.element("batch-bin-width").value = "10";
+  ui.element("batch-metric").value = "outcomes";
+  ui.element("batch-policy-filter").value = "random";
+  ui.element("batch-seat-filter").value = "0";
+  ui.evaluate(`
+    activeBatchId = "batch"; batchFinished = true;
+    globalThis.pending = [];
+    requestJson = (url) => new Promise((resolve) => pending.push({ url, resolve }));
+    globalThis.first = loadBatchChart();
+    $("batch-policy-filter").value = "deductive";
+    globalThis.second = loadBatchChart();
+  `);
+  const urls = ui.evaluate("pending.map((request) => request.url)");
+  assert.match(urls[0], /policy=random/);
+  assert.match(urls[0], /seat=0/);
+  assert.match(urls[1], /policy=deductive/);
+  ui.evaluate(`pending[1].resolve({ title: "new", samples: 0, denominator: "games", details: "", bins: [] })`);
+  await ui.evaluate("second");
+  ui.evaluate(`pending[0].resolve({ title: "old", samples: 0, denominator: "games", details: "", bins: [] })`);
+  await ui.evaluate("first");
+  assert.equal(ui.element("batch-distribution-title").textContent, "new");
+});
+
+test("run list sorts, filters and ignores stale pages", async () => {
+  const ui = frontend();
+  ui.element("batch-policy-filter").value = "random";
+  ui.element("batch-seat-filter").value = "1";
+  ui.element("batch-runs-sort").value = "steps";
+  ui.element("batch-runs-order").value = "desc";
+  ui.evaluate(`
+    activeBatchId = "batch"; batchFinished = true;
+    globalThis.pending = [];
+    requestJson = (url) => new Promise((resolve) => pending.push({ url, resolve }));
+    globalThis.first = loadBatchRuns();
+    batchRunsOffset = 25;
+    globalThis.second = loadBatchRuns();
+  `);
+  const urls = ui.evaluate("pending.map((request) => request.url)");
+  assert.match(urls[0], /sort=steps/);
+  assert.match(urls[0], /order=desc/);
+  assert.match(urls[0], /policy=random/);
+  assert.match(urls[0], /seat=1/);
+  assert.match(urls[1], /offset=25/);
+  ui.evaluate("pending[1].resolve({ total: 0, offset: 25, runs: [] })");
+  await ui.evaluate("second");
+  ui.evaluate("pending[0].resolve({ total: 4, offset: 0, runs: [] })");
+  await ui.evaluate("first");
+  assert.equal(ui.element("batch-runs-status").textContent, "No runs match these filters.");
 });
 
 test("seeded bot seat shuffling preserves styles, human seat, and replay reproducibility", () => {
@@ -890,6 +1100,38 @@ test("seeded bot seat shuffling preserves styles, human seat, and replay reprodu
   assert.deepEqual(Array.from(spectate.bots).map(JSON.stringify).sort(), input.bots.map(JSON.stringify).sort());
 });
 
+test("random human seat preserves characters and every bot with or without bot shuffling", () => {
+  const start = setupSource.indexOf("  function resolveBotSeats(");
+  const end = setupSource.indexOf("  function renderReview(", start);
+  const context = vm.createContext({});
+  vm.runInContext(`const copy = (value) => JSON.parse(JSON.stringify(value)); ${setupSource.slice(start, end)}`, context);
+  const input = {
+    mode: "play", players: 4, seat: 0, seed: 42, shuffle_seat: true, shuffle_bots: false,
+    seat_suspects: [2, 0, 3, 1],
+    bots: ["human-placeholder", "deductive", "probing", { deal_analysis: true }],
+  };
+  const expectedBots = input.bots.slice(1).map(JSON.stringify).sort();
+  for (const shuffle of [false, true]) {
+    const counts = Array(4).fill(0);
+    for (let seed = 0; seed < 200; seed++) {
+      const source = { ...input, seed, shuffle_bots: shuffle };
+      const result = context.resolveBotSeats(source);
+      assert.deepEqual(JSON.parse(JSON.stringify(result)), JSON.parse(JSON.stringify(context.resolveBotSeats(source))));
+      counts[result.seat]++;
+      assert.deepEqual(Array.from(result.seat_suspects), input.seat_suspects);
+      assert.equal(result.bots[result.seat], "human-placeholder");
+      assert.deepEqual(Array.from(result.bots).filter((_, i) => i !== result.seat).map(JSON.stringify).sort(), expectedBots);
+      assert.equal(result.shuffle_seat, undefined);
+      assert.deepEqual(JSON.parse(JSON.stringify(context.resolveBotSeats(result))), JSON.parse(JSON.stringify(result)));
+    }
+    assert.ok(counts.every((count) => count >= 25 && count <= 75), counts.join(", "));
+  }
+  const spectate = context.resolveBotSeats({ ...input, mode: "spectate" });
+  assert.equal(spectate.seat, input.seat);
+  assert.deepEqual(JSON.parse(JSON.stringify(spectate.bots)), input.bots);
+  assert.equal(input.seat, 0);
+});
+
 test("factory quickplay uses four board players and the three requested bot styles", () => {
   const start = setupSource.indexOf("  function defaultQuickplay()");
   const end = setupSource.indexOf("  async function loadQuickplay()", start);
@@ -904,11 +1146,26 @@ test("factory quickplay uses four board players and the three requested bot styl
   assert.deepEqual(Array.from(config.bots).slice(1).sort(), ["deductive", "probing", "strategic"]);
 });
 
+test("setup exposes the analytical preset with its additional reasoning described", () => {
+  const start = setupSource.indexOf("  const presets = {");
+  const end = setupSource.indexOf("  const weights = {", start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  const preset = vm.runInContext(`${setupSource.slice(start, end)}
+    ({ settings: presets.analytical, description: presetDescriptions.analytical })`, context);
+  assert.equal(preset.settings.deal_analysis, true);
+  assert.equal(preset.settings.rank_suggestions, true);
+  assert.equal(preset.settings.risk_accusation, true);
+  assert.match(preset.description, /opponent modeling/);
+  assert.match(preset.description, /50% estimated confidence/);
+});
+
 test("quickplay review describes shuffled styles without claiming assigned bot seats", () => {
   const start = setupSource.indexOf("  function renderReview(");
   const end = setupSource.indexOf("  function showStep(", start);
   const context = vm.createContext({});
   const result = vm.runInContext(`(() => {
+    let batchMode = false;
     const data = { game_type: "card_only", mode: "play", players: 3, seat: 0,
       notebook_mode: "manual", bots: ["random", "probing", "strategic"],
       shuffle_bots: true, seed: 12, progress: "turn", max_steps: 100, debug: false, game_rules: {} };
@@ -927,9 +1184,31 @@ test("quickplay review describes shuffled styles without claiming assigned bot s
   assert.ok(!result.some((row) => row.startsWith("Seed:")));
 });
 
+test("review warns when an analytical bot can make risky accusations", () => {
+  const start = setupSource.indexOf("  function renderReview(");
+  const end = setupSource.indexOf("  function showStep(", start);
+  const context = vm.createContext({});
+  const result = vm.runInContext(`(() => {
+    let batchMode = false;
+    const data = { game_type: "card_only", mode: "spectate", players: 2, seat: 0,
+      notebook_mode: "automatic", bots: ["analytical", "random"], seed: 12,
+      progress: "turn", max_steps: 100, debug: false, game_rules: {} };
+    const payload = () => data, score = () => 50, standardRules = {};
+    const document = { createElement: () => ({ textContent: "", children: [],
+      append(...items) { this.children.push(...items); } }),
+      createTextNode: (text) => ({ textContent: text }) };
+    ${setupSource.slice(start, end)}
+    const review = { children: [], replaceChildren() { this.children = []; },
+      append(child) { this.children.push(child); } };
+    renderReview(review, false);
+    return review.children.map((row) => row.children.map((item) => item.textContent).join(""));
+  })()`, context);
+  assert.ok(result.some((row) => /Analytical risk: .*50%.*eliminates/.test(row)));
+});
+
 test("setup profiles validate and persist in browser and desktop storage", async () => {
   const start = setupSource.indexOf("  function validateProfile(");
-  const end = setupSource.indexOf("  function beginFresh()", start);
+  const end = setupSource.indexOf("  function beginFresh(", start);
   assert.ok(start !== -1 && end !== -1);
   const context = vm.createContext({});
   const result = await vm.runInContext(`(async () => {
@@ -1214,6 +1493,116 @@ test("replay replaces the card browser without adding a workspace tab", () => {
   assert.equal(ui.element("replay-timeline").hidden, true);
   assert.equal(ui.element("replay-knowledge").hidden, true);
   assert.equal(ui.element("hand-cards").hidden, false);
+});
+
+test("replay speed selector exposes faster modes without changing the default", () => {
+  const selector = template.match(/<select id="replay-speed"[^>]*>([\s\S]*?)<\/select>/);
+  assert.ok(selector);
+  assert.deepEqual(
+    [...selector[1].matchAll(/<option value="([^"]+)"( selected)?>([^<]+)<\/option>/g)]
+      .map(([, value, selected, label]) => [value, Boolean(selected), label]),
+    [["2000", false, "0.5×"], ["1000", true, "1×"], ["500", false, "2×"],
+      ["250", false, "4×"], ["125", false, "8×"], ["62.5", false, "16×"]],
+  );
+});
+
+for (const [speed, scale] of [[250, 0.5], [125, 0.25], [62.5, 0.125]]) {
+  test(`replay at ${1000 / speed}x scales activity pauses and animations`, async () => {
+    const ui = frontend();
+    ui.element("replay-speed").value = String(speed);
+    const result = ui.evaluate(`(() => {
+      replayPlaying = true;
+      currentState = { is_replay: true, selected_player: 0, steps: 1,
+        activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+        events: [{ kind: "suggest", number: 1 }] };
+      cardAnimationKind(currentState);
+      const suggestion = cardActivityReadUntil - performance.now();
+      currentState.steps++;
+      currentState.events.unshift({ kind: "pass", actor: 1, number: 2 });
+      cardAnimationKind(currentState);
+      const pass = cardActivityReadUntil - performance.now();
+      currentState.steps++;
+      currentState.activity = { kind: "reveal", actor: 1, card_id: 7 };
+      currentState.events.unshift({ kind: "show", number: 3 });
+      cardAnimationKind(currentState);
+      const reveal = cardActivityReadUntil - performance.now();
+      const container = document.createElement("div");
+      renderMiniCards(container, [7], {}, 7, true);
+      const revealAnimation = container.children[0].style.animationDuration;
+      const records = [];
+      $("board-dynamic").querySelector = () => ({
+        getClientRects: () => [1],
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }),
+      });
+      const card = { getClientRects: () => [1],
+        getBoundingClientRect: () => ({ left: 20, top: 20, width: 10, height: 10 }),
+        animate: (_, options) => records.push(options),
+        cloneNode: () => ({ style: {}, classList: { add() {} }, setAttribute() {}, remove() {},
+          animate(_, options) {
+            records.push(options);
+            return { finished: new Promise((resolve) => { globalThis.finishFlights.push(resolve); }), cancel() {} };
+          } }),
+      };
+      globalThis.finishFlights = [];
+      currentState.board = { suspects: [{ id: 2, seat: 1 }] };
+      currentState.activity = { actor: 1 };
+      animateSuggestionFromBoard(currentState, { children: [card, card] });
+      return { suggestion, pass, reveal, revealAnimation, duration: records[0].duration,
+        secondDelay: records[2].delay };
+    })()`);
+    assert.equal(result.suggestion, 800 * scale);
+    assert.equal(result.pass, 1200 * scale);
+    assert.equal(result.reveal, 800 * scale);
+    assert.equal(result.revealAnimation, `${650 * scale}ms`);
+    assert.equal(result.duration, 850 * scale);
+    assert.equal(result.secondDelay, 100 * scale);
+    ui.evaluate("finishFlights[0]()");
+    await Promise.resolve();
+    assert.equal(ui.evaluate("suggestionFlights.length"), 1);
+    ui.evaluate("cardActivityReadUntil = 0; finishFlights[1]()");
+    await Promise.resolve();
+    assert.equal(ui.evaluate("cardActivityReadUntil - performance.now()"), 800 * scale);
+    ui.evaluate("clearSuggestionFlights(); replayPlaying = false");
+    assert.equal(ui.evaluate("replayActivityScale(currentState)"), 1);
+    ui.evaluate("replayPlaying = true; currentState.is_replay = false");
+    assert.equal(ui.evaluate("replayActivityScale(currentState)"), 1);
+  });
+}
+
+test("faster replay schedules steps serially and waits for scaled reading time", async () => {
+  const ui = frontend();
+  ui.element("replay-speed").value = "125";
+  ui.evaluate(`let now = 10000; performance.now = () => now;
+    replayMode = true; currentState = { is_replay: true, position: 0, positions: 4, steps: 1,
+      selected_player: 0, activity: { kind: "suggest", actor: 0, cards: [0, 7, 12] },
+      events: [{ kind: "suggest", number: 1 }, { kind: "pass", actor: 1, number: 2 }] };
+    loadReplay = async () => { currentState.position = Number($("replay-position").value); return true; };
+    toggleReplayPlayback();
+    currentState.events.reverse(); cardAnimationKind(currentState)`);
+  let [id, timer] = [...ui.timers.entries()][0];
+  assert.equal(timer.delay, 125);
+  ui.timers.delete(id);
+  ui.evaluate("now += 125");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 0);
+  [id, timer] = [...ui.timers.entries()][0];
+  assert.equal(timer.delay, 175);
+  ui.timers.delete(id);
+  ui.evaluate("now += 175");
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 1);
+  assert.equal(ui.timers.size, 1);
+  ui.element("replay-speed").value = "62.5";
+  [id, timer] = [...ui.timers.entries()][0];
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 2);
+  [id, timer] = [...ui.timers.entries()][0];
+  assert.equal(timer.delay, 62.5);
+  ui.timers.delete(id);
+  await timer.callback();
+  assert.equal(ui.evaluate("currentState.position"), 3);
+  assert.equal(ui.timers.size, 0);
 });
 
 test("replay playback runs serially, respects speed, pauses, and stops at the end", async () => {

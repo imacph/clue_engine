@@ -26,6 +26,19 @@ let advancing = false;
 let submitting = false;
 let starting = false;
 let mainMenuBusy = false;
+let batchPollTimer = null;
+let batchPolling = false;
+let activeBatchId = null;
+let batchFinished = false;
+let lastBatchChart = null;
+let batchChartVersion = 0;
+let batchBinOffset = 0;
+let batchRunsVersion = 0;
+let batchRunsOffset = 0;
+let batchRunsTotal = 0;
+let batchReplay = false;
+let batchReplayOpening = false;
+let batchPolicyLabels = new Map();
 let refreshing = false;
 let requestVersion = 0;
 let lastError = "";
@@ -130,14 +143,606 @@ async function requestJson(path, { method = "GET", body } = {}) {
   return response.json();
 }
 
+function formatBatchNumber(value) {
+  return typeof value === "number"
+    ? value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    : "—";
+}
+
+function appendBatchStat(container, label, value) {
+  const item = document.createElement("div");
+  item.className = "batch-stat";
+  const name = document.createElement("strong");
+  name.textContent = label;
+  const result = document.createElement("span");
+  result.textContent = value;
+  item.append(name, result);
+  container.append(item);
+}
+
+function batchRelativeRate(rate, totalWins, completedSeats) {
+  if (rate === null || !completedSeats || !totalWins) return "—";
+  return `${(rate / (totalWins / completedSeats) * 100).toFixed(0)}%`;
+}
+
+function batchPolicyLabel(name, entries) {
+  if (!name.startsWith("custom:")) return name;
+  const customNames = entries.map(([policy]) => policy).filter((policy) => policy.startsWith("custom:"));
+  return `Custom profile ${customNames.indexOf(name) + 1}`;
+}
+
+function renderBatchSummary(data) {
+  const summary = data.summary;
+  $("batch-summary").replaceChildren();
+  $("batch-policy-summary").replaceChildren();
+  if (!summary) return;
+
+  const summaryGrid = document.createElement("div");
+  summaryGrid.className = "batch-summary-grid";
+  appendBatchStat(
+    summaryGrid, "Simulations finished",
+    `${data.finished_games} / ${data.requested_games}`,
+  );
+  appendBatchStat(summaryGrid, "Games completed", String(summary.completed_games));
+  appendBatchStat(
+    summaryGrid, "Outcomes",
+    Object.entries(summary.outcomes).map(([outcome, count]) => `${outcome}: ${count}`).join(" · "),
+  );
+  appendBatchStat(summaryGrid, "Mean actions", formatBatchNumber(summary.mean_actions));
+  appendBatchStat(summaryGrid, "Median actions", formatBatchNumber(summary.median_actions));
+  appendBatchStat(summaryGrid, "90th percentile actions", formatBatchNumber(summary.p90_actions));
+  appendBatchStat(
+    summaryGrid, "Mean turns by seat",
+    summary.mean_turns_by_seat
+      ? summary.mean_turns_by_seat.map((value, seat) => `P${seat + 1}: ${formatBatchNumber(value)}`).join(" · ")
+      : "—",
+  );
+  appendBatchStat(
+    summaryGrid, "Wins by seat",
+    summary.wins_by_seat.map((value, seat) => `P${seat + 1}: ${value}`).join(" · "),
+  );
+  for (const [label, key] of [
+    ["Mean suggestions", "mean_suggestions"],
+    ["Mean passes", "mean_passes"],
+    ["Mean refutations", "mean_refutations"],
+  ]) {
+    appendBatchStat(summaryGrid, label, formatBatchNumber(summary[key]));
+  }
+  if (data.game_type === "board") {
+    for (const [label, key] of [
+      ["Mean dice rolls", "mean_rolls"],
+      ["Mean movement actions", "mean_moves"],
+      ["Mean room entries", "mean_room_entries"],
+      ["Mean secret passages", "mean_passages"],
+      ["Mean suspect relocations", "mean_suspect_relocations"],
+      ["Mean weapon relocations", "mean_weapon_relocations"],
+    ]) {
+      appendBatchStat(summaryGrid, label, formatBatchNumber(summary[key]));
+    }
+  }
+  $("batch-summary").append(summaryGrid);
+
+  const entries = Object.entries(summary.policy_stats);
+  batchPolicyLabels = new Map(entries.map(([name]) => [name, batchPolicyLabel(name, entries)]));
+  const policyFilter = $("batch-policy-filter");
+  const selectedPolicy = policyFilter.value;
+  policyFilter.replaceChildren(option("", "All profiles"), ...entries.map(
+    ([name]) => option(name, batchPolicyLabel(name, entries)),
+  ));
+  policyFilter.value = entries.some(([name]) => name === selectedPolicy) ? selectedPolicy : "";
+  const seatFilter = $("batch-seat-filter");
+  const selectedSeat = seatFilter.value;
+  seatFilter.replaceChildren(option("", "All seats"), ...summary.wins_by_seat.map(
+    (_, seat) => option(seat, `Player ${seat + 1}`),
+  ));
+  seatFilter.value = selectedSeat;
+  if (entries.length === 0) return;
+  const totalWins = entries.reduce((sum, [, stats]) => sum + stats.wins, 0);
+  const completedSeats = entries.reduce((sum, [, stats]) => sum + stats.completed_seats, 0);
+  const table = document.createElement("table");
+  table.className = "batch-policy-table";
+  table.setAttribute("aria-label", "Bot policy statistics");
+  const head = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const title of ["Bot", "Wins", "Completed seats", "Win rate", "Relative to equal share", "Learned solution"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = title;
+    headerRow.append(cell);
+  }
+  head.append(headerRow);
+  const body = document.createElement("tbody");
+  for (const [name, stats] of entries) {
+    const row = document.createElement("tr");
+    const values = [
+      name,
+      String(stats.wins),
+      String(stats.completed_seats),
+      stats.win_rate_per_completed_seat === null
+        ? "—" : `${(stats.win_rate_per_completed_seat * 100).toFixed(1)}%`,
+      batchRelativeRate(stats.win_rate_per_completed_seat, totalWins, completedSeats),
+      `${stats.learned_solution} / ${stats.seat_games}`,
+    ];
+    for (const [index, value] of values.entries()) {
+      const cell = document.createElement("td");
+      if (index === 0 && name.startsWith("custom:")) {
+        const details = document.createElement("details");
+        const title = document.createElement("summary");
+        title.textContent = batchPolicyLabel(name, entries);
+        const description = document.createElement("span");
+        description.textContent = name.slice(7).replaceAll("_", " ").replaceAll(",", ", ");
+        details.append(title, description);
+        cell.append(details);
+      } else {
+        cell.textContent = value;
+      }
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  $("batch-policy-summary").append(table);
+}
+
+const batchTabs = ["distribution", "summary", "runs"];
+
+function switchBatchTab(name) {
+  for (const tab of batchTabs) {
+    const active = tab === name;
+    $(`batch-tab-${tab}`).setAttribute("aria-selected", String(active));
+    $(`batch-tab-${tab}`).tabIndex = active ? 0 : -1;
+    $(`batch-panel-${tab}`).hidden = !active;
+  }
+  if (name === "distribution" && lastBatchChart) drawBatchGraph(lastBatchChart);
+}
+
+function batchGraphBuckets(chart, plotWidth) {
+  if (!chart.numeric_summary) {
+    return {
+      numeric: false, binsPerBar: 1,
+      bars: chart.bins.map((bin, index) => ({
+        label: bin.label.replaceAll("_", " "), count: bin.count, start: index, end: index + 1,
+      })),
+      start: 0, end: chart.bins.length,
+    };
+  }
+  const ranges = chart.bins.map((bin) => {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(bin.label);
+    if (!match) throw new Error(`Invalid numeric distribution bin: ${bin.label}`);
+    return { start: Number(match[1]), end: Number(match[2] ?? match[1]), count: bin.count };
+  });
+  const start = ranges[0].start;
+  const last = ranges[ranges.length - 1];
+  const width = ranges[0].end - start + 1;
+  const slots = Math.round((last.start - start) / width) + 1;
+  const maxBars = Math.max(1, Math.min(80, Math.floor(plotWidth / 6)));
+  const binsPerBar = Math.max(1, Math.ceil(slots / maxBars));
+  const groupWidth = binsPerBar * width;
+  const grouped = new Map();
+  for (const bin of ranges) {
+    const index = Math.floor((bin.start - start) / groupWidth);
+    grouped.set(index, (grouped.get(index) || 0) + bin.count);
+  }
+  const bars = [...grouped].map(([index, count]) => {
+    const first = start + index * groupWidth;
+    const lastValue = Math.min(last.end, first + groupWidth - 1);
+    return {
+      label: first === lastValue ? String(first) : `${first}-${lastValue}`,
+      count, start: first, end: lastValue + 1,
+    };
+  });
+  return { numeric: true, binsPerBar, bars, start, end: last.end + 1 };
+}
+
+function drawBatchGraph(chart) {
+  const graph = $("batch-chart-graph");
+  graph.replaceChildren();
+  $("batch-chart-grouping").textContent = "";
+  if (!chart || !chart.samples) return;
+  const width = Math.max(240, graph.clientWidth || 900);
+  const height = Math.max(190, graph.clientHeight || 240);
+  graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const left = 60, right = 18, top = 24, bottom = height - 38;
+  const plotWidth = width - left - right;
+  const plotHeight = bottom - top;
+  const buckets = batchGraphBuckets(chart, plotWidth);
+  const maximum = buckets.bars.reduce((value, bar) => Math.max(value, bar.count), 0);
+  const mode = $("batch-display-mode").value;
+  graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
+    mode === "percent" ? "Share (%)" : "Count"));
+  const ticks = new Set([0, ...[1, 2, 3, 4].map((step) => Math.round(maximum * step / 4))]);
+  for (const count of ticks) {
+    const y = bottom - count / maximum * plotHeight;
+    graph.append(svgElement("line", { x1: left, y1: y, x2: width - right, y2: y, class: "batch-chart-grid" }));
+    const label = mode === "percent" ? `${formatBatchNumber(count / chart.samples * 100)}%` : String(count);
+    graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" }, label));
+  }
+  const domain = buckets.end - buckets.start;
+  let cumulative = 0;
+  for (const bar of buckets.bars) {
+    cumulative += bar.count;
+    const x = left + (bar.start - buckets.start) / domain * plotWidth;
+    const barWidth = (bar.end - bar.start) / domain * plotWidth;
+    const barHeight = bar.count / maximum * plotHeight;
+    const share = (bar.count / chart.samples * 100).toFixed(1);
+    const description = `${bar.label}: ${formatBatchNumber(bar.count)} of ${formatBatchNumber(chart.samples)} `
+      + `(${share}%)${buckets.numeric ? ` · ${(cumulative / chart.samples * 100).toFixed(1)}% cumulative` : ""}`;
+    const group = svgElement("g", {
+      class: "batch-chart-bin", tabindex: 0, role: "img", "aria-label": description,
+    });
+    group.append(
+      svgElement("title", {}, description),
+      svgElement("rect", {
+        x: x + 1, y: bottom - barHeight, width: Math.max(0, barWidth - 2),
+        height: barHeight, class: "batch-chart-bar",
+      }),
+      svgElement("rect", { x, y: top, width: barWidth, height: plotHeight, class: "batch-chart-hit" }),
+    );
+    const inspect = () => { $("batch-chart-inspection").textContent = description; };
+    group.addEventListener("mouseenter", inspect);
+    group.addEventListener("focus", inspect);
+    graph.append(group);
+    if (!buckets.numeric) {
+      const center = x + barWidth / 2;
+      const label = svgElement("text", {
+        x: center, y: bottom + 15, "text-anchor": "middle", class: "batch-chart-axis",
+      });
+      bar.label.split(" ").forEach((word, index) => {
+        const attrs = { x: center, dy: index ? 12 : 0 };
+        if (word.length * 6 > barWidth - 4) {
+          attrs.textLength = Math.max(1, barWidth - 4);
+          attrs.lengthAdjust = "spacingAndGlyphs";
+        }
+        label.append(svgElement("tspan", attrs, word));
+      });
+      graph.append(label);
+    }
+  }
+  if (buckets.numeric) {
+    const intervals = width < 500 ? 2 : 4;
+    for (let index = 0; index <= intervals; index++) {
+      const fraction = index / intervals;
+      const value = Math.round(buckets.start + fraction * domain);
+      graph.append(svgElement("text", {
+        x: left + fraction * plotWidth, y: bottom + 17,
+        "text-anchor": index === 0 ? "start" : index === intervals ? "end" : "middle",
+        class: "batch-chart-axis",
+      }, formatBatchNumber(value)));
+    }
+    if (buckets.binsPerBar > 1) {
+      $("batch-chart-grouping").textContent =
+        `Graph combines up to ${formatBatchNumber(buckets.binsPerBar)} adjacent bins per bar; exact bins are available below.`;
+    }
+  }
+}
+
+function renderBatchBinTable() {
+  const container = $("batch-chart-table");
+  container.replaceChildren();
+  const chart = lastBatchChart;
+  if (!chart || !chart.samples || !$("batch-chart-values").open) return;
+  const end = Math.min(batchBinOffset + 50, chart.bins.length);
+  $("batch-bin-status").textContent =
+    `Showing ${batchBinOffset + 1}–${end} of ${chart.bins.length} bins.`;
+  $("batch-bin-previous").disabled = batchBinOffset === 0;
+  $("batch-bin-next").disabled = end >= chart.bins.length;
+  const table = document.createElement("table");
+  table.className = "batch-policy-table";
+  table.setAttribute("aria-label", "Exact distribution bins");
+  const head = document.createElement("thead");
+  const header = document.createElement("tr");
+  for (const label of ["Bin", "Count", "Share", ...(chart.numeric_summary ? ["Cumulative"] : [])]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    header.append(cell);
+  }
+  head.append(header);
+  const body = document.createElement("tbody");
+  let cumulative = chart.bins.slice(0, batchBinOffset).reduce((sum, bin) => sum + bin.count, 0);
+  for (const bin of chart.bins.slice(batchBinOffset, end)) {
+    cumulative += bin.count;
+    const row = document.createElement("tr");
+    const values = [bin.label.replaceAll("_", " "), formatBatchNumber(bin.count), `${(bin.probability * 100).toFixed(1)}%`];
+    if (chart.numeric_summary) values.push(`${(cumulative / chart.samples * 100).toFixed(1)}%`);
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  container.append(table);
+}
+
+function renderBatchChart() {
+  const chart = lastBatchChart;
+  const stats = $("batch-chart-stats");
+  stats.replaceChildren();
+  $("batch-chart-graph").replaceChildren();
+  $("batch-chart-table").replaceChildren();
+  $("batch-chart-empty").hidden = !chart || Boolean(chart.samples);
+  $("batch-chart-values").hidden = !chart || !chart.samples;
+  $("batch-chart-grouping").textContent = "";
+  $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
+  if (!chart) return;
+  $("batch-distribution-title").textContent =
+    $("batch-metric").value === "deduction" ? "First solution action" : displayPlayerText(chart.title);
+  $("batch-chart-details").textContent =
+    `${chart.samples} samples · ${chart.denominator}. ${chart.details}`;
+  if (chart.numeric_summary) {
+    for (const [label, key] of [
+      ["Minimum", "minimum"], ["Mean", "mean"], ["Median", "median"],
+      ["90th percentile", "p90"], ["Maximum", "maximum"],
+    ]) appendBatchStat(stats, label, formatBatchNumber(chart.numeric_summary[key]));
+  }
+  drawBatchGraph(chart);
+  renderBatchBinTable();
+}
+
+async function loadBatchChart() {
+  if (!activeBatchId || !batchFinished) return;
+  const version = ++batchChartVersion;
+  const batchId = activeBatchId;
+  batchBinOffset = 0;
+  lastBatchChart = null;
+  renderBatchChart();
+  $("batch-chart-details").textContent = "Loading distribution…";
+  const width = Number($("batch-bin-width").value);
+  if (!Number.isSafeInteger(width) || width < 1) {
+    $("batch-chart-details").textContent = "Histogram bin width must be a positive whole number.";
+    throw new Error("Histogram bin width must be a positive whole number.");
+  }
+  const query = new URLSearchParams({
+    metric: $("batch-metric").value,
+    width: String(width),
+  });
+  if ($("batch-policy-filter").value) query.set("policy", $("batch-policy-filter").value);
+  if ($("batch-seat-filter").value !== "") query.set("seat", $("batch-seat-filter").value);
+  let chart;
+  try {
+    chart = await requestJson(`/api/batch/${encodeURIComponent(batchId)}/distribution?${query}`);
+  } catch (error) {
+    if (version !== batchChartVersion || batchId !== activeBatchId) return;
+    $("batch-chart-details").textContent = `Could not load distribution: ${error.message}`;
+    throw error;
+  }
+  if (version !== batchChartVersion || batchId !== activeBatchId) return;
+  lastBatchChart = chart;
+  renderBatchChart();
+}
+
+async function loadBatchRuns() {
+  if (!activeBatchId || !batchFinished) return;
+  const version = ++batchRunsVersion;
+  const batchId = activeBatchId;
+  $("batch-runs-status").textContent = "Loading runs…";
+  $("batch-runs-table").replaceChildren();
+  $("batch-runs-previous").disabled = true;
+  $("batch-runs-next").disabled = true;
+  const query = new URLSearchParams({
+    sort: $("batch-runs-sort").value, order: $("batch-runs-order").value,
+    offset: String(batchRunsOffset), limit: "25",
+  });
+  if ($("batch-policy-filter").value) query.set("policy", $("batch-policy-filter").value);
+  if ($("batch-seat-filter").value !== "") query.set("seat", $("batch-seat-filter").value);
+  let data;
+  try {
+    data = await requestJson(`/api/batch/${encodeURIComponent(batchId)}/runs?${query}`);
+  } catch (error) {
+    if (version !== batchRunsVersion || batchId !== activeBatchId) return;
+    $("batch-runs-status").textContent = `Could not load runs: ${error.message}`;
+    throw error;
+  }
+  if (version !== batchRunsVersion || batchId !== activeBatchId) return;
+  batchRunsTotal = data.total;
+  $("batch-runs-status").textContent = data.total
+    ? `Showing ${data.offset + 1}–${data.offset + data.runs.length} of ${data.total} matching runs.`
+    : "No runs match these filters.";
+  $("batch-runs-previous").disabled = data.offset === 0;
+  $("batch-runs-next").disabled = data.offset + data.runs.length >= data.total;
+  if (!data.runs.length) return;
+  const table = document.createElement("table");
+  table.className = "batch-policy-table";
+  table.setAttribute("aria-label", "Individual batch runs");
+  const head = document.createElement("thead");
+  const header = document.createElement("tr");
+  const sort = $("batch-runs-sort");
+  const extra = !["game", "outcome", "winner", "steps", "turns", "learned", "first_solution"].includes(sort.value);
+  for (const label of [
+    "Run", "Outcome", "Winner", "Actions", "Turns", "Learned", "First solution",
+    ...(extra ? [sort.selectedOptions[0].textContent] : []), "Profiles", "Replay",
+  ]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    header.append(cell);
+  }
+  head.append(header);
+  const body = document.createElement("tbody");
+  for (const run of data.runs) {
+    const row = document.createElement("tr");
+    const values = [
+      String(run.game + 1), run.outcome.replaceAll("_", " "),
+      run.winner === null ? "—" : `Player ${run.winner + 1}`,
+      String(run.steps), String(run.turns.reduce((sum, turns) => sum + turns, 0)),
+      `${run.learned} / ${run.policies.length}`,
+      run.first_solution === null ? "—" : String(run.first_solution),
+      ...(extra ? [String(run[sort.value])] : []),
+    ];
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    const profiles = document.createElement("td");
+    const details = document.createElement("details");
+    const title = document.createElement("summary");
+    title.textContent = "View profiles";
+    details.append(title);
+    run.policies.forEach((name, seat) => {
+      const item = document.createElement("div");
+      const learned = run.first_solution_steps[seat];
+      item.textContent = `Player ${seat + 1}: ${batchPolicyLabels.get(name) || name} · `
+        + (learned === null ? "not recorded as learned" : `learned at action ${learned}`);
+      details.append(item);
+    });
+    profiles.append(details);
+    row.append(profiles);
+    const replayCell = document.createElement("td");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button-secondary";
+    button.textContent = "Open replay";
+    button.setAttribute("aria-label", `Open replay for run ${run.game + 1}`);
+    button.addEventListener("click", () => openBatchReplay(run.game));
+    replayCell.append(button);
+    row.append(replayCell);
+    body.append(row);
+  }
+  table.append(head, body);
+  $("batch-runs-table").append(table);
+}
+
+async function openBatchReplay(game) {
+  if (!activeBatchId || batchReplayOpening) return;
+  batchReplayOpening = true;
+  try {
+    await requestJson(`/api/batch/${encodeURIComponent(activeBatchId)}/runs/${game}/replay`, {
+      method: "POST", body: {},
+    });
+    const state = await requestJson("/api/state");
+    batchReplay = true;
+    sessionStorage.setItem(activeGameKey, "1");
+    activateGame(state);
+    await openReplay();
+  } catch (error) {
+    showError(`Could not open batch replay: ${error.message}`);
+  } finally {
+    batchReplayOpening = false;
+  }
+}
+
+function updateBatchScreen(data) {
+  const running = data.status === "queued" || data.status === "running";
+  const progress = data.requested_games > 0
+    ? Math.min(100, data.finished_games / data.requested_games * 100) : 0;
+  $("batch-progress").value = progress;
+  if (running) {
+    $("batch-run-status").textContent =
+      `Running ${data.finished_games} of ${data.requested_games} games…`;
+  } else if (data.status === "completed") {
+    $("batch-run-status").textContent =
+      `Finished ${data.finished_games} of ${data.requested_games} games.`;
+  } else if (data.status === "cancelled") {
+    $("batch-run-status").textContent =
+      `Cancelled after ${data.finished_games} of ${data.requested_games} games.`;
+  } else {
+    $("batch-run-status").textContent = data.error || "The batch simulation failed.";
+  }
+  $("batch-cancel").hidden = !running;
+  $("batch-cancel").disabled = data.cancel_requested;
+  $("batch-new-run").hidden = running;
+  $("batch-main-menu").hidden = running;
+  $("batch-metric").disabled = running;
+  $("batch-bin-width").disabled = running;
+  $("batch-policy-filter").disabled = running;
+  $("batch-seat-filter").disabled = running;
+  batchFinished = !running;
+  if (data.summary) renderBatchSummary(data);
+  if (data.game_type === "board") {
+    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = false;
+  } else {
+    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = true;
+    if ($("batch-metric").selectedOptions[0]?.hasAttribute("data-board-only")) {
+      $("batch-metric").value = "outcomes";
+    }
+    if ($("batch-runs-sort").selectedOptions[0]?.hasAttribute("data-board-only")) {
+      $("batch-runs-sort").value = "game";
+    }
+  }
+}
+
+async function pollBatch() {
+  if (!activeBatchId || batchPolling) return;
+  batchPolling = true;
+  try {
+    const data = await requestJson(`/api/batch/${encodeURIComponent(activeBatchId)}`);
+    updateBatchScreen(data);
+    if (data.status === "completed" || data.status === "cancelled" || data.status === "error") {
+      clearInterval(batchPollTimer);
+      batchPollTimer = null;
+      await Promise.all([loadBatchChart(), loadBatchRuns()]);
+    }
+  } catch (error) {
+    clearInterval(batchPollTimer);
+    batchPollTimer = null;
+    showError(`Could not update batch results: ${error.message}`);
+  } finally {
+    batchPolling = false;
+  }
+}
+
+async function submitBatch(setup) {
+  const startedBatch = await requestJson("/api/batch", {
+    method: "POST",
+    body: { setup, games: window.setupWizard.batchGames() },
+  });
+  activeBatchId = startedBatch.batch_id;
+  batchChartVersion++;
+  batchRunsVersion++;
+  batchRunsOffset = 0;
+  batchBinOffset = 0;
+  batchFinished = false;
+  lastBatchChart = null;
+  window.setupWizard.rememberStarted(setup);
+  $("main-menu").hidden = true;
+  $("setup-screen").hidden = true;
+  $("game-screen").hidden = true;
+  $("batch-screen").hidden = false;
+  document.body.classList.add("batch-active");
+  switchBatchTab("distribution");
+  $("batch-title").focus();
+  $("batch-run-status").textContent = "Starting batch…";
+  $("batch-progress").value = 0;
+  $("batch-summary").replaceChildren();
+  $("batch-policy-summary").replaceChildren();
+  $("batch-chart-graph").replaceChildren();
+  $("batch-chart-table").replaceChildren();
+  $("batch-chart-empty").hidden = true;
+  $("batch-chart-values").hidden = true;
+  $("batch-chart-values").open = false;
+  $("batch-chart-grouping").textContent = "";
+  $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
+  $("batch-chart-stats").replaceChildren();
+  $("batch-policy-filter").replaceChildren(option("", "All profiles"));
+  $("batch-seat-filter").replaceChildren(option("", "All seats"));
+  $("batch-chart-details").textContent = "Distributions will be available when the batch finishes.";
+  $("batch-runs-table").replaceChildren();
+  $("batch-runs-status").textContent = "Runs will be available when the batch finishes.";
+  $("batch-new-run").hidden = true;
+  $("batch-main-menu").hidden = true;
+  clearInterval(batchPollTimer);
+  batchPollTimer = setInterval(pollBatch, 500);
+  await pollBatch();
+}
+
 async function startGame(event) {
   event?.preventDefault();
   if (starting) return;
   starting = true;
   try {
-    const debug = $("debug").checked;
+    const batchMode = window.setupWizard.isBatchMode();
+    const debug = !batchMode && $("debug").checked;
     if (debug && !await confirmAction("Debug mode reveals every hand, the solution, and private events. Continue?")) {
       $("debug").checked = false;
+      return;
+    }
+    showError("");
+    const setup = window.setupWizard.payload();
+    if (batchMode) {
+      await submitBatch(setup);
       return;
     }
     notebookGeneration++;
@@ -164,13 +769,13 @@ async function startGame(event) {
     lastSuggestionRoom = null;
     hadReveal = false;
     hadBoardResponse = false;
-    const setup = window.setupWizard.resolveBotSeats(window.setupWizard.payload());
+    const gameSetup = window.setupWizard.resolveBotSeats(setup);
     const state = await requestJson("/api/game", {
       method: "POST",
-      body: setup,
+      body: gameSetup,
     });
     if (version !== requestVersion) return;
-    window.setupWizard.rememberStarted(setup);
+    window.setupWizard.rememberStarted(gameSetup);
     sessionStorage.setItem(activeGameKey, "1");
     activateGame(state);
   } catch (error) {
@@ -184,13 +789,16 @@ function activateGame(state) {
   lastError = "";
   clauseDraft = null;
   document.body.classList.add("game-active");
+  document.body.classList.remove("batch-active");
   document.body.classList.toggle("board-game", Boolean(state.board));
   document.body.classList.toggle("manual-notebook-active", state.notebook_mode === "manual");
   $("game-toolbar").append($("header-tools"));
   configureBoardWorkspace(Boolean(state.board));
   $("main-menu").hidden = true;
   $("setup-screen").hidden = true;
+  $("batch-screen").hidden = true;
   $("game-screen").hidden = false;
+  $("batch-replay-return").hidden = !batchReplay;
   $("error-message").hidden = true;
   currentState = state;
   buildPlayerFilters(state);
@@ -654,17 +1262,24 @@ function renderBoard(state) {
   for (const room of board.layout.rooms) {
     const bounds = roomBounds(room);
     const center = (bounds.minX + bounds.maxX + 1) / 2;
+    const rectangular = room.squares.length
+      === (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1);
+    const stem = rectangular ? [] : room.squares.filter((square) => square.y === bounds.maxY);
+    const pawnCenter = rectangular ? center
+      : (Math.min(...stem.map((square) => square.x)) + Math.max(...stem.map((square) => square.x)) + 1) / 2;
     const pawns = board.suspects.filter((pawn) =>
       pawn.location.kind === "room" && pawn.location.room_id === room.id);
-    const baseY = bounds.minY + Math.max(1.7, (bounds.maxY - bounds.minY + 1) / 2 + .35);
+    const baseY = rectangular ? bounds.minY + Math.max(1.7, (bounds.maxY - bounds.minY + 1) / 2 + .35)
+      : bounds.maxY - .5;
     pawns.forEach((pawn, index) => appendPawn(
-      dynamic, pawn, state, center + (index % 3 - 1) * .75, baseY + Math.floor(index / 3) * .72,
+      dynamic, pawn, state, pawnCenter + (index % 3 - 1) * .75, baseY + Math.floor(index / 3) * .72,
       turnFocus !== null && pawn.seat === turnFocus, .34,
     ));
     const weapons = board.weapons.filter((weapon) => weapon.room_id === room.id);
     if (weapons.length) {
       dynamic.append(svgElement("text", {
-        x: center, y: bounds.maxY + .78, class: "board-room-contents", "aria-hidden": "true",
+        x: center, y: rectangular ? bounds.maxY + .78 : bounds.minY + 2.7,
+        class: "board-room-contents", "aria-hidden": "true",
       }, `◆ ${weapons.length} weapon${weapons.length === 1 ? "" : "s"}`));
     }
   }
@@ -1010,6 +1625,12 @@ function renderActivityPasses(state) {
   $("activity-passes").title = summary;
 }
 
+function replayActivityScale(state) {
+  return state?.is_replay && replayPlaying
+    ? Math.min(1, Number($("replay-speed").value) / 500)
+    : 1;
+}
+
 function cardAnimationKind(state) {
   const activity = cardActivity(state);
   const eventKind = activity?.kind === "reveal" ? "show" : activity?.kind;
@@ -1026,7 +1647,7 @@ function cardAnimationKind(state) {
   if (previous && (previous.key === key || previous.perspective !== perspective
     || state.steps <= previous.step)) return null;
   cardActivityReadUntil = performance.now()
-    + (activity.kind === "pass" ? cardPassReadTime : cardActivityReadTime);
+    + (activity.kind === "pass" ? cardPassReadTime : cardActivityReadTime) * replayActivityScale(state);
   if (activity.kind === "pass" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
   return activity.kind;
 }
@@ -1037,6 +1658,7 @@ function animateSuggestionFromBoard(state, container) {
   const pawn = $("board-dynamic").querySelector(`[data-pawn-id="${actor.id}"]`);
   if (!pawn || !pawn.getClientRects().length) return;
   const origin = pawn.getBoundingClientRect();
+  const scale = replayActivityScale(state);
   for (const [index, card] of [...container.children].entries()) {
     if (!card.getClientRects().length) continue;
     const target = card.getBoundingClientRect();
@@ -1051,8 +1673,8 @@ function animateSuggestionFromBoard(state, container) {
     document.body.append(clone);
     const dx = origin.left + origin.width / 2 - (target.left + target.width / 2);
     const dy = origin.top + origin.height / 2 - (target.top + target.height / 2);
-    const duration = 850;
-    const delay = index * 100;
+    const duration = 850 * scale;
+    const delay = index * 100 * scale;
     const animation = clone.animate([
       { transform: `translate(${dx}px, ${dy}px) scale(.25)`, opacity: .35 },
       { transform: "translate(0, 0) scale(1)", opacity: 1 },
@@ -1067,7 +1689,7 @@ function animateSuggestionFromBoard(state, container) {
       const active = suggestionFlights.includes(flight);
       suggestionFlights = suggestionFlights.filter((item) => item !== flight);
       if (active && !suggestionFlights.length) {
-        cardActivityReadUntil = performance.now() + cardActivityReadTime;
+        cardActivityReadUntil = performance.now() + cardActivityReadTime * scale;
       }
     }, () => {
       clone.remove();
@@ -1197,7 +1819,11 @@ function renderMiniCards(container, cardIds, notes, shownCardId = null, animateR
     const face = createCardFace(card, { mini: true, notes });
     if (id === shownCardId) {
       face.classList.add("shown-card");
-      if (animateReveal) face.classList.add("reveal-enter");
+      if (animateReveal) {
+        face.classList.add("reveal-enter");
+        const scale = replayActivityScale(currentState);
+        if (scale < 1) face.style.animationDuration = `${650 * scale}ms`;
+      }
     }
     container.append(face);
   }
@@ -2070,6 +2696,8 @@ function useTurnButton() {
 }
 
 function newGame() {
+  batchReplay = false;
+  $("batch-replay-return").hidden = true;
   stopReplayPlayback();
   replayMode = false;
   setReplayPresentation(false);
@@ -2114,15 +2742,23 @@ function newGame() {
 }
 
 function showMainMenu() {
+  batchChartVersion++;
+  batchRunsVersion++;
+  document.body.classList.remove("batch-active");
   $("setup-screen").hidden = true;
+  $("batch-screen").hidden = true;
   $("main-menu").hidden = false;
   $("main-menu-title").focus();
 }
 
-function showSetup() {
+function showSetup(batch = false) {
+  batchChartVersion++;
+  batchRunsVersion++;
+  document.body.classList.remove("batch-active");
   $("main-menu").hidden = true;
+  $("batch-screen").hidden = true;
   $("setup-screen").hidden = false;
-  window.setupWizard.beginFresh();
+  window.setupWizard.beginFresh(batch);
   $("setup-game-title").focus();
 }
 
@@ -2505,7 +3141,8 @@ function scheduleReplayPlayback(generation, delay = Number($("replay-speed").val
     if (!replayPlaying || generation !== replayPlaybackGeneration || !currentState?.is_replay) return;
     if (cardActivityPending()) {
       const remaining = Math.max(0, cardActivityReadUntil - performance.now());
-      scheduleReplayPlayback(generation, suggestionFlights.length ? 100 : Math.max(1, remaining));
+      const flightPoll = Math.min(100, Number($("replay-speed").value) / 5);
+      scheduleReplayPlayback(generation, suggestionFlights.length ? flightPoll : Math.max(1, remaining));
       return;
     }
     $("replay-position").value = String(currentState.position + 1);
@@ -2639,6 +3276,7 @@ function updateMode(restoreNotebook = true) {
     notebook.disabled = false;
   }
   $("seat-field").hidden = spectating;
+  $("shuffle-seat-field").hidden = spectating;
   $("notebook-mode-field").hidden = spectating;
   $("notebook-mode-hint").hidden = spectating;
   $("spectator-warning").hidden = !spectating;
@@ -2766,12 +3404,15 @@ $("confirm-dialog").addEventListener("keydown", (event) => {
   }
 });
 $("setup-form").addEventListener("submit", startGame);
-$("main-setup").addEventListener("click", showSetup);
+$("main-setup").addEventListener("click", () => showSetup());
+$("main-batch").addEventListener("click", () => showSetup(true));
 $("setup-menu").addEventListener("click", showMainMenu);
 $("main-quick-play").addEventListener("click", async () => {
   if (mainMenuBusy) return;
   mainMenuBusy = true;
-  for (const id of ["main-quick-play", "main-setup", "replay-import-button"]) $(id).disabled = true;
+  for (const id of ["main-quick-play", "main-setup", "main-batch", "replay-import-button"]) {
+    $(id).disabled = true;
+  }
   try {
     await window.setupWizard.loadQuickplay();
     window.setupWizard.renderReview($("quickplay-summary"), false);
@@ -2781,9 +3422,96 @@ $("main-quick-play").addEventListener("click", async () => {
     showError(`Could not load quickplay defaults: ${error.message}`);
   } finally {
     mainMenuBusy = false;
-    for (const id of ["main-quick-play", "main-setup", "replay-import-button"]) $(id).disabled = false;
+    for (const id of ["main-quick-play", "main-setup", "main-batch", "replay-import-button"]) {
+      $(id).disabled = false;
+    }
   }
 });
+$("batch-cancel").addEventListener("click", async () => {
+  if (!activeBatchId) return;
+  $("batch-cancel").disabled = true;
+  try {
+    await requestJson(`/api/batch/${encodeURIComponent(activeBatchId)}/cancel`, {
+      method: "POST", body: {},
+    });
+    await pollBatch();
+  } catch (error) {
+    showError(`Could not cancel batch: ${error.message}`);
+    $("batch-cancel").disabled = false;
+  }
+});
+$("batch-new-run").addEventListener("click", () => showSetup(true));
+$("batch-main-menu").addEventListener("click", () => {
+  activeBatchId = null;
+  showMainMenu();
+});
+$("batch-metric").addEventListener("change", () => {
+  loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+});
+$("batch-bin-width").addEventListener("change", () => {
+  loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+});
+for (const id of ["batch-policy-filter", "batch-seat-filter"]) {
+  $(id).addEventListener("change", () => {
+    loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+    batchRunsOffset = 0;
+    loadBatchRuns().catch((error) => showError(`Could not load runs: ${error.message}`));
+  });
+}
+for (const id of ["batch-runs-sort", "batch-runs-order"]) {
+  $(id).addEventListener("change", () => {
+    batchRunsOffset = 0;
+    loadBatchRuns().catch((error) => showError(`Could not load runs: ${error.message}`));
+  });
+}
+$("batch-runs-previous").addEventListener("click", () => {
+  batchRunsOffset = Math.max(0, batchRunsOffset - 25);
+  loadBatchRuns().catch((error) => showError(`Could not load runs: ${error.message}`));
+});
+$("batch-runs-next").addEventListener("click", () => {
+  if (batchRunsOffset + 25 >= batchRunsTotal) return;
+  batchRunsOffset += 25;
+  loadBatchRuns().catch((error) => showError(`Could not load runs: ${error.message}`));
+});
+$("batch-replay-return").addEventListener("click", () => {
+  newGame();
+  $("main-menu").hidden = true;
+  $("batch-screen").hidden = false;
+  document.body.classList.add("batch-active");
+  $("batch-title").focus();
+});
+$("batch-display-mode").addEventListener("change", renderBatchChart);
+for (const name of batchTabs) {
+  const tab = $(`batch-tab-${name}`);
+  tab.addEventListener("click", () => switchBatchTab(name));
+  tab.addEventListener("keydown", (event) => {
+    let index = batchTabs.indexOf(name);
+    if (event.key === "ArrowRight") index = (index + 1) % batchTabs.length;
+    else if (event.key === "ArrowLeft") index = (index + batchTabs.length - 1) % batchTabs.length;
+    else if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = batchTabs.length - 1;
+    else return;
+    event.preventDefault();
+    switchBatchTab(batchTabs[index]);
+    $(`batch-tab-${batchTabs[index]}`).focus();
+  });
+}
+$("batch-chart-values").addEventListener("toggle", renderBatchBinTable);
+$("batch-bin-previous").addEventListener("click", () => {
+  batchBinOffset = Math.max(0, batchBinOffset - 50);
+  renderBatchBinTable();
+});
+$("batch-bin-next").addEventListener("click", () => {
+  if (!lastBatchChart || batchBinOffset + 50 >= lastBatchChart.bins.length) return;
+  batchBinOffset += 50;
+  renderBatchBinTable();
+});
+if (window.ResizeObserver) {
+  const batchChartObserver = new ResizeObserver(() => {
+    if (lastBatchChart && !$("batch-panel-distribution").hidden) drawBatchGraph(lastBatchChart);
+  });
+  batchChartObserver.observe($("batch-chart-graph"));
+}
 $("quickplay-cancel").addEventListener("click", () => $("quickplay-dialog").close());
 $("main-edit-default").addEventListener("click", () => {
   $("quickplay-dialog").close();
