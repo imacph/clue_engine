@@ -1,11 +1,14 @@
 import random
+from dataclasses import replace
 
 import pytest
 
-from clue_engine.board_turn import Move, Roll
+from clue_engine.board_state import RoomPosition
+from clue_engine.board_turn import Move, Roll, UsePassage, legal_board_actions
 from clue_engine.knowledge import knowledge_for
 from clue_engine.learning_policy import LearningPolicy, LinearModel, suggestion_features
-from clue_engine.models import Accuse, Reveal
+from clue_engine.models import Accuse, Combination, Reveal
+from clue_engine.observations import Event, EventKind, view_for
 from clue_engine.session import create_board_game, create_game
 
 
@@ -87,3 +90,57 @@ def test_room_features_do_not_depend_on_hidden_solution():
     assert first
     assert all(len(features) == 8 for _, features in first)
     assert all(isinstance(room, int) for room, _ in first)
+
+
+def test_private_reveals_to_other_players_cannot_affect_decisions():
+    engine, _ = create_board_game(4, 19, "random")
+    player = engine.to_move
+    view = engine.view(player)
+    combo = Combination(0, 6, 12)
+    shared = (Event(EventKind.SUGGEST, 1, combo=combo), Event(EventKind.REFUTE, 2))
+    views = tuple(
+        view_for(
+            shared + (Event(EventKind.SHOW, 2, card_id=card, private_to=1),),
+            player, view.own_hand, board=view.board,
+        )
+        for card in (0, 6)
+    )
+    assert views[0] == views[1]
+    policies = [LearningPolicy(random.Random(7), LinearModel.zeros()) for _ in views]
+    assert policies[0].choose(views[0], 4, engine.legal_actions()) == policies[1].choose(
+        views[1], 4, engine.legal_actions()
+    )
+
+
+def test_room_goal_survives_an_ended_turn_when_still_viable():
+    engine, _ = create_board_game(4, 21, "random")
+    player = engine.to_move
+    view = engine.view(player)
+    policy = LearningPolicy(random.Random(8), LinearModel.zeros())
+    policy.choose(view, 4, engine.legal_actions())
+    goal = policy._goal
+    assert goal is not None
+    later = replace(view, events=(*view.events, Event(EventKind.END_TURN, player)))
+    policy.choose(later, 4, engine.legal_actions())
+    assert policy._goal == goal
+
+
+def test_selected_passage_is_used_when_legal():
+    engine, _ = create_board_game(4, 22, "random")
+    player = engine.to_move
+    view = engine.view(player)
+    turn = view.board
+    source, destination = turn.board.layout.passages[0]
+    suspect = turn.board.seat_suspects[player]
+    board = replace(
+        turn.board,
+        suspects=tuple(
+            replace(token, location=RoomPosition(source)) if token.suspect_id == suspect else token
+            for token in turn.board.suspects
+        ),
+    )
+    view = replace(view, board=replace(turn, board=board))
+    legal = legal_board_actions(view.board, player, view.board_rules)
+    policy = LearningPolicy(random.Random(8), LinearModel.zeros())
+    policy._goal = destination
+    assert policy.choose(view, 4, legal) == UsePassage()

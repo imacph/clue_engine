@@ -74,11 +74,13 @@ def _game(
 def train(
     *, games: int, seed: int, opponents: tuple[str, ...] = DEFAULT_OPPONENTS,
     max_steps: int = 10_000, learning_rate: float = 0.02,
+    initial_model: LinearModel | None = None,
 ) -> tuple[LinearModel, dict[str, object]]:
     _validate(games, max_steps, opponents)
     if not math.isfinite(learning_rate) or learning_rate <= 0:
         raise ValueError("learning_rate must be positive and finite")
-    model = LinearModel.zeros()
+    model = initial_model if initial_model is not None else LinearModel.zeros()
+    initial = model
     wins = timeouts = 0
     for game in range(games):
         game_seed = seed + game
@@ -106,6 +108,8 @@ def train(
         "opponents": list(opponents),
         "max_steps": max_steps,
         "learning_rate": learning_rate,
+        "initial_room_weights": list(initial.room_weights),
+        "initial_suggestion_weights": list(initial.suggestion_weights),
         "wins": wins,
         "timeouts": timeouts,
     }
@@ -168,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         if command == "train":
             child.add_argument("--output", type=Path, required=True)
             child.add_argument("--learning-rate", type=float, default=0.02)
+            child.add_argument("--initial", type=Path)
         else:
             child.add_argument("--model", type=Path, required=True)
             child.add_argument("--baseline")
@@ -177,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         model, summary = train(
             games=args.games, seed=args.seed, opponents=opponents, max_steps=args.max_steps,
             learning_rate=args.learning_rate,
+            initial_model=load_model(args.initial) if args.initial else None,
         )
         save_model(args.output, model, summary)
     else:

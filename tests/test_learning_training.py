@@ -35,6 +35,13 @@ def test_training_reproducible_and_updates_weights():
     assert first != LinearModel.zeros()
 
 
+def test_training_can_continue_from_an_existing_model():
+    initial = LinearModel((1.0,) * 8, (2.0,) * 8)
+    _, summary = train(games=1, seed=3, opponents=("random",) * 3, initial_model=initial)
+    assert summary["initial_room_weights"] == list(initial.room_weights)
+    assert summary["initial_suggestion_weights"] == list(initial.suggestion_weights)
+
+
 def test_evaluation_balances_seats_and_is_reproducible():
     result = evaluate(LinearModel.zeros(), games=4, seed=23, opponents=("random",) * 3)
     assert result == evaluate(LinearModel.zeros(), games=4, seed=23, opponents=("random",) * 3)
