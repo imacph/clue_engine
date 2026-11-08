@@ -118,8 +118,9 @@ class LearningPolicy(StrategicPolicy):
         self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
     ) -> Action:
         self._goal = None
+        candidates = self._board_candidates(knowledge, suggestions)
         return self._select("suggestion", tuple(
-            (action, suggestion_features(view, knowledge, action)) for action in suggestions
+            (action, suggestion_features(view, knowledge, action)) for action in candidates
         ))
 
     def _routes(

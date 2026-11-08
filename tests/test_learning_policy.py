@@ -7,7 +7,7 @@ from clue_engine.board_state import RoomPosition
 from clue_engine.board_turn import Move, Roll, UsePassage, legal_board_actions
 from clue_engine.knowledge import knowledge_for
 from clue_engine.learning_policy import LearningPolicy, LinearModel, suggestion_features
-from clue_engine.models import Accuse, Combination, Reveal
+from clue_engine.models import Accuse, Combination, Reveal, Suggest
 from clue_engine.observations import Event, EventKind, view_for
 from clue_engine.session import create_board_game, create_game
 
@@ -38,6 +38,16 @@ def test_suggestions_use_only_legal_actions_and_player_visible_features():
     picked = policy._board_suggestion(view, knowledge, choices)
     assert picked in choices
     assert len(suggestion_features(view, knowledge, picked)) == 8
+
+
+def test_suggestion_selector_excludes_known_impossible_suspect_and_weapon():
+    engine, _ = create_board_game(4, 17, "random")
+    view = replace(engine.view(engine.to_move), own_hand=frozenset({0, 6}), hand_sizes=None)
+    knowledge = knowledge_for(view, 4)
+    impossible = Suggest(Combination(0, 6, 12))
+    possible = Suggest(Combination(1, 7, 12))
+    policy = LearningPolicy(random.Random(4), LinearModel.zeros())
+    assert policy._board_suggestion(view, knowledge, (impossible, possible)) == possible
 
 
 def test_room_goal_and_movement_are_legal_throughout_game():
