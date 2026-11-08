@@ -176,12 +176,15 @@ def evaluate(
 
 def benchmark(
     model: LinearModel, *, games: int, seed: int, max_steps: int = 10_000,
+    incumbent: LinearModel | None = None,
 ) -> dict[str, object]:
     """Compare every named policy on identical seeds, seats, and opponent pools."""
     if type(games) is not int or games < 4 or games % 4:
         raise ValueError("benchmark games must be a positive multiple of four")
     _validate(games, max_steps, DEFAULT_OPPONENTS)
-    profiles = ("learned", *POLICY_NAMES)
+    profiles = (
+        "learned", *(("incumbent",) if incumbent is not None else ()), *POLICY_NAMES,
+    )
     reports = []
     for pool_index, opponents in enumerate(TOURNAMENT_POOLS):
         outcomes: dict[str, list[int]] = {}
@@ -195,10 +198,13 @@ def benchmark(
                 game_seed = seed + pool_index * 100_000 + game
                 seat = game % 4
                 rng = random.Random(f"{game_seed}:learner:{seat}")
-                policy: Policy = (
-                    LearningPolicy(rng, model) if profile == "learned"
-                    else make_policy(profile, rng)
-                )
+                if profile == "learned":
+                    policy: Policy = LearningPolicy(rng, model)
+                elif profile == "incumbent":
+                    assert incumbent is not None
+                    policy = LearningPolicy(rng, incumbent)
+                else:
+                    policy = make_policy(profile, rng)
                 winner, _, timeout = _game(policy, seat, game_seed, opponents, max_steps)
                 won = int(not timeout and winner == seat)
                 profile_outcomes.append(won)
@@ -386,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     tuner.add_argument("--max-steps", type=int, default=10_000)
     tournament = commands.add_parser("benchmark")
     tournament.add_argument("--model", type=Path, required=True)
+    tournament.add_argument("--incumbent", type=Path)
     tournament.add_argument("--games", type=int, default=64)
     tournament.add_argument("--seed", type=int, required=True)
     tournament.add_argument("--max-steps", type=int, default=10_000)
@@ -414,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         summary = benchmark(
             load_model(args.model), games=args.games, seed=args.seed, max_steps=args.max_steps,
+            incumbent=load_model(args.incumbent) if args.incumbent else None,
         )
     print(json.dumps(summary, indent=2, allow_nan=False))
     return 0

@@ -625,7 +625,7 @@ players' hands. To fine-tune the packaged model, then evaluate the candidate:
 
 ```powershell
 python -m clue_engine.learning tune --initial src\clue_engine\learned_model.json --games-per-pool 16 --population 8 --generations 4 --seed 42000 --output model.json
-python -m clue_engine.learning benchmark --games 128 --seed 110000 --model model.json
+python -m clue_engine.learning benchmark --games 128 --seed 110000 --model model.json --incumbent src\clue_engine\learned_model.json
 ```
 
 `tune` uses a common-random-number cross-entropy search: every candidate is
@@ -640,7 +640,8 @@ Use fresh seeds for final model selection, not the tuning seeds. `benchmark`
 tests the learned model and all built-in profiles over identical seeds, balanced
 across seats and the two opponent pools. It reports Wilson intervals and
 paired win-rate differences versus the learned policy, with approximate
-95% intervals. `evaluate` remains available to assess one model against a
+95% intervals. Pass `--incumbent` to compare a candidate with a previous model
+on the same individual games. `evaluate` remains available to assess one model against a
 specific fixed opponent pool or compare an existing profile via `--baseline`.
 Timeouts are reported separately and never count as wins. Model files include
 the weights, schema, and training metadata and are never overwritten. The

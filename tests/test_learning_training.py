@@ -98,6 +98,21 @@ def test_benchmark_pairs_all_profiles_on_balanced_seats():
             assert -1 <= comparison["win_rate_delta"] <= 1
 
 
+def test_benchmark_pairs_candidate_with_incumbent_on_same_games():
+    model = LinearModel((1.0,) * 8, (2.0,) * 8)
+    report = benchmark(model, games=4, seed=39, incumbent=model)
+    for pool in report["pools"]:
+        assert pool["profiles"]["learned"] == pool["profiles"]["incumbent"]
+        comparison = pool["paired_vs_learned"]["incumbent"]
+        assert comparison == {
+            "learned_only_wins": 0,
+            "profile_only_wins": 0,
+            "ties": 4,
+            "win_rate_delta": 0.0,
+            "win_rate_delta_ci95": (0.0, 0.0),
+        }
+
+
 @pytest.mark.parametrize("kwargs", [
     {"games_per_pool": 3, "population": 4, "generations": 1},
     {"games_per_pool": 4, "population": 3, "generations": 1},
@@ -141,5 +156,5 @@ def test_benchmark_cli_dispatches_without_opponents_argument(tmp_path, monkeypat
     assert learning.main([
         "benchmark", "--model", str(model_path), "--games", "4", "--seed", "2",
     ]) == 0
-    assert calls == [{"games": 4, "seed": 2, "max_steps": 10_000}]
+    assert calls == [{"games": 4, "seed": 2, "max_steps": 10_000, "incumbent": None}]
     assert '"seed": 2' in capsys.readouterr().out
