@@ -40,13 +40,15 @@ window.setupWizard = (() => {
   };
   const learnedDefaults = {
     type: "learned", room_temperature: 0, suggestion_temperature: 0,
-    accusation_temperature: 0, accusation_threshold: 0.5,
+    accusation_temperature: 0, accusation_threshold: 0.5, opponent_model: false,
+    threat_sensitivity: 0,
   };
   const learnedControls = {
     room_temperature: ["Room exploration", 5, 0.1],
     suggestion_temperature: ["Suggestion exploration", 5, 0.1],
     accusation_temperature: ["Accusation exploration", 5, 0.1],
     accusation_threshold: ["Accusation confidence threshold (1 = sound only)", 1, 0.05],
+    threat_sensitivity: ["Opponent threat sensitivity", 1, 0.1],
   };
   function isLearned(value) {
     return value === "learned" || (value && typeof value === "object" && value.type === "learned");
@@ -338,6 +340,16 @@ window.setupWizard = (() => {
           item.append(output, input);
           details.append(item);
         }
+        const modelLabel = document.createElement("label");
+        modelLabel.className = "check-row";
+        const modelInput = document.createElement("input");
+        modelInput.type = "checkbox";
+        modelInput.checked = settings.opponent_model;
+        modelInput.dataset.learnedModel = String(i);
+        const modelText = document.createElement("span");
+        modelText.textContent = "Use trained opponent behavior model (experimental)";
+        modelLabel.append(modelInput, modelText);
+        details.append(modelLabel);
       } else if (typeof value !== "string") {
         const options = document.createElement("fieldset");
         const legend = document.createElement("legend");
@@ -595,8 +607,10 @@ window.setupWizard = (() => {
         }
       } else if (isLearned(bot)) {
         if (data.game_type !== "board" || Array.isArray(bot)
-          || Object.keys(bot).some((key) => key !== "type" && !Object.hasOwn(learnedControls, key))
-          || Object.entries(bot).some(([key, value]) => key !== "type"
+          || Object.keys(bot).some((key) => key !== "type" && key !== "opponent_model"
+            && !Object.hasOwn(learnedControls, key))
+          || (bot.opponent_model !== undefined && typeof bot.opponent_model !== "boolean")
+          || Object.entries(bot).some(([key, value]) => key !== "type" && key !== "opponent_model"
             && (typeof value !== "number" || !Number.isFinite(value) || value < 0
               || value > learnedControls[key][1]))) {
           throw new Error("Invalid learned bot settings.");
@@ -799,6 +813,9 @@ window.setupWizard = (() => {
     } else if (target.dataset.learnedSetting) {
       const i = Number(target.dataset.botIndex);
       bots[i] = { ...learnedSettings(bots[i]), [target.dataset.learnedSetting]: Number(target.value) };
+    } else if (target.dataset.learnedModel !== undefined) {
+      const i = Number(target.dataset.learnedModel);
+      bots[i] = { ...learnedSettings(bots[i]), opponent_model: target.checked };
     } else if (target.dataset.copySeat !== undefined && target.value !== "") {
       const i = Number(target.dataset.copySeat);
       if (typeof bots[i] !== "string" && !await confirmAction("Replace this bot's custom settings?", {

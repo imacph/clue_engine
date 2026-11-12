@@ -43,17 +43,30 @@ def test_model_round_trip_and_explicit_configuration(tmp_path, monkeypatch):
 
 
 def test_policy_factory_uses_opponent_override(tmp_path, monkeypatch):
+    from clue_engine.game_settings import LearnedStrategy
     from clue_engine.policies import make_policy
 
     model = OpponentModel((1.0, 0, 0, 0, 0), (0, 0))
     path = tmp_path / "opponent.json"
     save_model(path, model, {})
     monkeypatch.setenv("CLUE_OPPONENT_MODEL", str(path))
-    policy = make_policy("learned", random.Random(1))
+    policy = make_policy(LearnedStrategy(opponent_model=True), random.Random(1))
     assert isinstance(policy, LearningPolicy)
     assert policy.opponent_model == model
+    for settings in ("learned", LearnedStrategy(opponent_model=False)):
+        disabled = make_policy(settings, random.Random(1))
+        assert isinstance(disabled, LearningPolicy) and disabled.opponent_model is None
 
 
+def test_per_seat_opponent_model_selection_works_without_environment(monkeypatch):
+    from clue_engine.game_settings import LearnedStrategy
+    from clue_engine.policies import make_policy
+
+    monkeypatch.delenv("CLUE_OPPONENT_MODEL", raising=False)
+    enabled = make_policy(LearnedStrategy(opponent_model=True), random.Random(1))
+    disabled = make_policy(LearnedStrategy(opponent_model=False), random.Random(1))
+    assert isinstance(enabled, LearningPolicy) and enabled.opponent_model is not None
+    assert isinstance(disabled, LearningPolicy) and disabled.opponent_model is None
 
 def test_weights_respect_visible_evidence_without_eliminating_deals():
     first = Combination(0, 6, 12)

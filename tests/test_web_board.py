@@ -62,12 +62,19 @@ def test_configured_learned_policy_is_validated_for_web_games(client):
     bot = {
         "type": "learned", "room_temperature": 0.7, "suggestion_temperature": 1.2,
         "accusation_temperature": 0.3, "accusation_threshold": 0.75,
+        "opponent_model": True, "threat_sensitivity": 0.7,
     }
     setup = {"mode": "spectate", "players": 3, "bots": [bot, "random", "random"]}
     assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 201
     assert post(client, csrf, "/api/game", {**setup, "game_type": "card_only"}).status_code == 400
     bot["room_temperature"] = -1
     assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 400
+    bot["room_temperature"] = 0.7
+    for field, value in (("opponent_model", "true"), ("threat_sensitivity", 1.1)):
+        original = bot[field]
+        bot[field] = value
+        assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 400
+        bot[field] = original
 
 
 def test_missing_learned_model_is_reported_by_web_api(client, monkeypatch, tmp_path):

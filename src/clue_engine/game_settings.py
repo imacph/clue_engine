@@ -40,6 +40,13 @@ class BoardRules:
 DEFAULT_BOARD_RULES = BoardRules()
 
 
+def training_board_rules(mode: str, game: int) -> BoardRules:
+    if mode not in ("standard", "random", "mixed"):
+        raise ValueError("boards must be standard, random, or mixed")
+    randomized = mode == "random" or (mode == "mixed" and (game // 4) % 2 == 1)
+    return BoardRules(randomize_rooms=randomized)
+
+
 @dataclass(frozen=True, slots=True)
 class GameRules:
     reverse_refutation: bool = False
@@ -80,6 +87,8 @@ class LearnedStrategy:
     suggestion_temperature: float = 0.0
     accusation_temperature: float = 0.0
     accusation_threshold: float = 0.5
+    opponent_model: bool = False
+    threat_sensitivity: float = 0.0
 
     def __post_init__(self) -> None:
         if self.type != "learned":
@@ -88,7 +97,11 @@ class LearnedStrategy:
             if item.name == "type":
                 continue
             value = getattr(self, item.name)
-            maximum = 1.0 if item.name == "accusation_threshold" else 5.0
+            if item.name == "opponent_model":
+                if type(value) is not bool:
+                    raise TypeError("opponent_model must be true or false")
+                continue
+            maximum = 1.0 if item.name in ("accusation_threshold", "threat_sensitivity") else 5.0
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= maximum:
                 raise ValueError(f"{item.name} must be a finite number between 0 and {maximum:g}")
 

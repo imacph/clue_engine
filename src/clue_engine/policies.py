@@ -716,12 +716,20 @@ def make_policy(name: str | BotStrategy | LearnedStrategy, rng: random.Random) -
     if name == "learned" or isinstance(name, LearnedStrategy):
         from .learning import load_default_model
         from .learning_policy import LearningPolicy
-        from .opponent_model import load_configured_model
+        from .opponent_model import load_packaged_model
+        from .threat_model import load_packaged_model as load_threat_model
 
         return LearningPolicy(
             rng, load_default_model(),
             strategy=name if isinstance(name, LearnedStrategy) else LearnedStrategy(),
-            opponent_model=load_configured_model(),
+            opponent_model=(
+                load_packaged_model() if isinstance(name, LearnedStrategy) and name.opponent_model
+                else None
+            ),
+            threat_model=(
+                load_threat_model() if isinstance(name, LearnedStrategy) and name.threat_sensitivity > 0
+                else None
+            ),
         )
     validate_policy_names((name,))
     return POLICY_TYPES[name](rng)

@@ -8,7 +8,13 @@ import random
 from dataclasses import asdict
 from pathlib import Path
 
-from .game_settings import DEFAULT_LEARNED_STRATEGY, LearnedStrategy
+from .game_settings import (
+    DEFAULT_BOARD_RULES,
+    DEFAULT_LEARNED_STRATEGY,
+    BoardRules,
+    LearnedStrategy,
+    training_board_rules,
+)
 from .learning_policy import (
     ACCUSATION_FEATURE_COUNT,
     FEATURE_COUNT,
@@ -97,8 +103,9 @@ def _validate(games: int, max_steps: int, opponents: tuple[str, ...]) -> None:
 
 def _game(
     policy: Policy, seat: int, seed: int, opponents: tuple[str, ...], max_steps: int,
+    *, board_rules: BoardRules = DEFAULT_BOARD_RULES,
 ) -> tuple[int | None, int, bool]:
-    engine, _ = create_board_game(4, seed, "random")
+    engine, _ = create_board_game(4, seed, "random", board_rules=board_rules)
     rival_names = iter(opponents)
     policies = tuple(
         policy if position == seat else make_policy(
@@ -121,8 +128,10 @@ def train(
     initial_model: LinearModel | None = None,
     win_speed: float = DEFAULT_WIN_SPEED,
     opponent_model: OpponentModel | None = None,
+    boards: str = "standard",
 ) -> tuple[LinearModel, dict[str, object]]:
     _validate(games, max_steps, opponents)
+    training_board_rules(boards, 0)
     if not math.isfinite(learning_rate) or learning_rate <= 0:
         raise ValueError("learning_rate must be positive and finite")
     if not math.isfinite(win_speed) or win_speed < 0:
@@ -137,7 +146,8 @@ def train(
             random.Random(f"{game_seed}:learner:{seat}"), model, explore=True,
             opponent_model=opponent_model,
         )
-        winner, steps, timeout = _game(policy, seat, game_seed, opponents, max_steps)
+        game_options = {"board_rules": training_board_rules(boards, game)} if boards != "standard" else {}
+        winner, steps, timeout = _game(policy, seat, game_seed, opponents, max_steps, **game_options)
         if timeout:
             timeouts += 1
             continue
@@ -158,6 +168,7 @@ def train(
         "games": games,
         "seed": seed,
         "opponents": list(opponents),
+        "boards": boards,
         "max_steps": max_steps,
         "learning_rate": learning_rate,
         "initial_room_weights": list(initial.room_weights),
@@ -191,8 +202,10 @@ def evaluate(
     baseline: str | None = None,
     strategy: LearnedStrategy = DEFAULT_LEARNED_STRATEGY,
     opponent_model: OpponentModel | None = None,
+    boards: str = "standard",
 ) -> dict[str, object]:
     _validate(games, max_steps, opponents)
+    training_board_rules(boards, 0)
     if baseline is not None:
         validate_policy_names((baseline,))
         if strategy != DEFAULT_LEARNED_STRATEGY:
@@ -212,7 +225,8 @@ def evaluate(
             LearningPolicy(rng, model, strategy=strategy, opponent_model=opponent_model)
             if baseline is None else make_policy(baseline, rng)
         )
-        winner, steps, timeout = _game(policy, seat, game_seed, opponents, max_steps)
+        game_options = {"board_rules": training_board_rules(boards, game)} if boards != "standard" else {}
+        winner, steps, timeout = _game(policy, seat, game_seed, opponents, max_steps, **game_options)
         if isinstance(policy, LearningPolicy):
             opponent_model_choices += policy.opponent_model_choices
             opponent_model_weightings += policy.opponent_model_weightings
@@ -238,7 +252,7 @@ def evaluate(
             "win_rate_ci95": _wilson(seat["wins"], seat_completed),
         })
     return {
-        "games": games, "seed": seed, "opponents": list(opponents), "baseline": baseline,
+        "games": games, "seed": seed, "opponents": list(opponents), "baseline": baseline, "boards": boards,
         "strategy": asdict(strategy) if baseline is None else None,
         "opponent_model": asdict(opponent_model) if opponent_model is not None else None,
         "wins": wins, "losses": losses, "timeouts": timeouts, "seats": seat_results,
@@ -255,11 +269,13 @@ def benchmark(
     model: LinearModel, *, games: int, seed: int, max_steps: int = 10_000,
     incumbent: LinearModel | None = None,
     opponent_model: OpponentModel | None = None,
+    boards: str = "standard",
 ) -> dict[str, object]:
     """Compare every named policy on identical seeds, seats, and opponent pools."""
     if type(games) is not int or games < 4 or games % 4:
         raise ValueError("benchmark games must be a positive multiple of four")
     _validate(games, max_steps, DEFAULT_OPPONENTS)
+    training_board_rules(boards, 0)
     profiles = (
         "learned", *(("incumbent",) if incumbent is not None else ()), *POLICY_NAMES,
     )
@@ -289,7 +305,8 @@ def benchmark(
                     policy = LearningPolicy(rng, incumbent)
                 else:
                     policy = make_policy(profile, rng)
-                winner, steps, timeout = _game(policy, seat, game_seed, opponents, max_steps)
+                game_options = {"board_rules": training_board_rules(boards, game)} if boards != "standard" else {}
+                winner, steps, timeout = _game(policy, seat, game_seed, opponents, max_steps, **game_options)
                 if isinstance(policy, LearningPolicy):
                     profile_choices += policy.opponent_model_choices
                     profile_weightings += policy.opponent_model_weightings
@@ -356,7 +373,7 @@ def benchmark(
             "paired_vs_learned": paired,
         })
     return {
-        "seed": seed, "max_steps": max_steps, "pools": reports,
+        "seed": seed, "max_steps": max_steps, "boards": boards, "pools": reports,
         "opponent_model": asdict(opponent_model) if opponent_model is not None else None,
     }
 
@@ -364,14 +381,17 @@ def benchmark(
 def _tuning_score(
     model: LinearModel, *, games: int, seed: int, max_steps: int,
     opponent_model: OpponentModel | None = None,
+    boards: str = "standard",
+    pools: tuple[tuple[str, ...], ...] = TOURNAMENT_POOLS,
 ) -> tuple[float, list[dict[str, object]]]:
     reports = [
         evaluate(
             model, games=games, seed=seed + pool_index * 100_000,
             opponents=opponents, max_steps=max_steps,
             opponent_model=opponent_model,
+            boards=boards,
         )
-        for pool_index, opponents in enumerate(TOURNAMENT_POOLS)
+        for pool_index, opponents in enumerate(pools)
     ]
     return sum(report["speed_adjusted_win_score"] for report in reports) / len(reports), reports
 
@@ -380,6 +400,8 @@ def tune(
     *, initial_model: LinearModel, games_per_pool: int, seed: int,
     population: int = 8, generations: int = 4, max_steps: int = 10_000,
     opponent_model: OpponentModel | None = None,
+    boards: str = "standard",
+    pools: tuple[tuple[str, ...], ...] = TOURNAMENT_POOLS,
 ) -> tuple[LinearModel, dict[str, object]]:
     """Use common-random-number cross-entropy search over both policy heads."""
     if type(games_per_pool) is not int or games_per_pool < 4 or games_per_pool % 4:
@@ -389,6 +411,11 @@ def tune(
     if type(generations) is not int or generations < 1:
         raise ValueError("generations must be a positive integer")
     _validate(games_per_pool, max_steps, DEFAULT_OPPONENTS)
+    training_board_rules(boards, 0)
+    if not pools:
+        raise ValueError("at least one opponent pool is required")
+    for opponents in pools:
+        _validate(games_per_pool, max_steps, opponents)
 
     def flatten(model: LinearModel) -> tuple[float, ...]:
         return (*model.room_weights, *model.suggestion_weights, *model.accusation_weights)
@@ -429,6 +456,10 @@ def tune(
         for index, values in enumerate(candidates):
             candidate = expand(values)
             kwargs = {"opponent_model": opponent_model} if opponent_model is not None else {}
+            if boards != "standard":
+                kwargs["boards"] = boards
+            if pools != TOURNAMENT_POOLS:
+                kwargs["pools"] = pools
             score, pool_reports = _tuning_score(
                 candidate, games=games_per_pool, seed=generation_seed, max_steps=max_steps, **kwargs,
             )
@@ -480,9 +511,10 @@ def tune(
         "generations": generations,
         "games_per_pool": games_per_pool,
         "max_steps": max_steps,
+        "boards": boards,
         "win_speed": DEFAULT_WIN_SPEED,
         "opponent_model": asdict(opponent_model) if opponent_model is not None else None,
-        "opponent_pools": [list(pool) for pool in TOURNAMENT_POOLS],
+        "opponent_pools": [list(pool) for pool in pools],
         "initial_score": initial_score,
         "best_score": best_score,
         "generation_history": generation_reports,
@@ -497,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
         child.add_argument("--games", type=int, required=True)
         child.add_argument("--seed", type=int, required=True)
         child.add_argument("--max-steps", type=int, default=10_000)
+        child.add_argument("--boards", choices=("standard", "random", "mixed"), default="standard")
         child.add_argument("--opponents", default=",".join(DEFAULT_OPPONENTS))
         if command == "train":
             child.add_argument("--output", type=Path, required=True)
@@ -520,7 +553,9 @@ def main(argv: list[str] | None = None) -> int:
     tuner.add_argument("--population", type=int, default=8)
     tuner.add_argument("--generations", type=int, default=4)
     tuner.add_argument("--max-steps", type=int, default=10_000)
+    tuner.add_argument("--boards", choices=("standard", "random", "mixed"), default="standard")
     tuner.add_argument("--opponent-model", type=Path)
+    tuner.add_argument("--opponents", help="one fixed pool of three opponent names")
     tournament = commands.add_parser("benchmark")
     tournament.add_argument("--model", type=Path, required=True)
     tournament.add_argument("--incumbent", type=Path)
@@ -528,6 +563,7 @@ def main(argv: list[str] | None = None) -> int:
     tournament.add_argument("--games", type=int, default=64)
     tournament.add_argument("--seed", type=int, required=True)
     tournament.add_argument("--max-steps", type=int, default=10_000)
+    tournament.add_argument("--boards", choices=("standard", "random", "mixed"), default="standard")
     args = parser.parse_args(argv)
     if args.command == "train":
         opponents = tuple(name.strip() for name in args.opponents.split(","))
@@ -537,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
             win_speed=args.win_speed,
             initial_model=load_model(args.initial) if args.initial else None,
             opponent_model=load_opponent_model(args.opponent_model) if args.opponent_model else None,
+            boards=args.boards,
         )
         save_model(args.output, model, summary)
     elif args.command == "evaluate":
@@ -551,11 +588,16 @@ def main(argv: list[str] | None = None) -> int:
                 accusation_threshold=args.accusation_threshold,
             ),
             opponent_model=load_opponent_model(args.opponent_model) if args.opponent_model else None,
+            boards=args.boards,
         )
     elif args.command == "tune":
         kwargs = {}
         if args.opponent_model:
             kwargs["opponent_model"] = load_opponent_model(args.opponent_model)
+        if args.boards != "standard":
+            kwargs["boards"] = args.boards
+        if args.opponents:
+            kwargs["pools"] = (tuple(name.strip() for name in args.opponents.split(",")),)
         model, summary = tune(
             initial_model=load_model(args.initial), games_per_pool=args.games_per_pool,
             seed=args.seed, population=args.population, generations=args.generations,
@@ -566,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs = {}
         if args.opponent_model:
             kwargs["opponent_model"] = load_opponent_model(args.opponent_model)
+        if args.boards != "standard":
+            kwargs["boards"] = args.boards
         summary = benchmark(
             load_model(args.model), games=args.games, seed=args.seed, max_steps=args.max_steps,
             incumbent=load_model(args.incumbent) if args.incumbent else None, **kwargs,

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cards import CARDS
+from .game_settings import training_board_rules
 from .models import CardType, Combination, Reveal, Suggest
 from .observations import Event, EventKind, last_suggest_index
 
@@ -157,11 +158,19 @@ def load_configured_model() -> OpponentModel | None:
     return load_model(Path(path))
 
 
+def load_packaged_model() -> OpponentModel:
+    configured = load_configured_model()
+    return configured if configured is not None else load_model(
+        Path(__file__).with_name("opponent_model.json")
+    )
+
+
 Example = tuple[str, tuple[tuple[float, ...], ...], int]
 
 
 def collect_examples(
     *, games: int, seed: int, opponents: tuple[str, ...] = DEFAULT_OPPONENTS, max_steps: int = 10000,
+    boards: str = "mixed",
 ) -> tuple[list[Example], int]:
     from .policies import make_policy, validate_policy_names
     from .session import create_board_game
@@ -171,13 +180,14 @@ def collect_examples(
     if not opponents:
         raise ValueError("at least one opponent profile is required")
     validate_policy_names(opponents, additional=("learned",))
+    training_board_rules(boards, 0)
     examples: list[Example] = []
     timeouts = 0
     for game in range(games):
         game_seed = seed + game
         rng = random.Random(f"{game_seed}:opponent-pool")
         names = tuple(rng.choice(opponents) for _ in range(4))
-        engine, _ = create_board_game(4, game_seed, "random")
+        engine, _ = create_board_game(4, game_seed, "random", board_rules=training_board_rules(boards, game))
         policies = tuple(make_policy(name, random.Random(f"{game_seed}:opponent:{seat}"))
                          for seat, name in enumerate(names))
         for _ in range(max_steps):
@@ -253,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--opponents", default=",".join(DEFAULT_OPPONENTS))
     parser.add_argument("--max-steps", type=int, default=10000)
+    parser.add_argument("--boards", choices=("standard", "random", "mixed"), default="mixed")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
@@ -262,10 +273,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("evaluate requires --model and does not accept --output")
     opponents = tuple(name.strip() for name in args.opponents.split(","))
     examples, timeouts = collect_examples(
-        games=args.games, seed=args.seed, opponents=opponents, max_steps=args.max_steps,
+        games=args.games, seed=args.seed, opponents=opponents, max_steps=args.max_steps, boards=args.boards,
     )
     model = fit(examples) if args.command == "train" else load_model(args.model)
-    report = {"games": args.games, "seed": args.seed, "opponents": list(opponents),
+    report = {"games": args.games, "seed": args.seed, "opponents": list(opponents), "boards": args.boards,
               "timeouts": timeouts,
               "training_prediction" if args.command == "train" else "prediction": evaluate(model, examples)}
     if args.command == "train":

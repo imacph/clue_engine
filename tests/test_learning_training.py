@@ -103,6 +103,38 @@ def test_evaluation_balances_seats_and_is_reproducible():
         assert 0 <= seat["win_rate_ci95"][0] <= seat["win_rate_ci95"][1] <= 1
 
 
+def test_mixed_board_evaluation_balances_seats(monkeypatch):
+    seen = []
+
+    def fake_game(policy, seat, seed, opponents, max_steps, *, board_rules):
+        seen.append((seat, board_rules.randomize_rooms))
+        return seat, 10, False
+
+    monkeypatch.setattr(learning, "_game", fake_game)
+    evaluate(LinearModel.zeros(), games=8, seed=23, opponents=("random",) * 3, boards="mixed")
+    assert seen == [(seat, shuffled) for shuffled in (False, True) for seat in range(4)]
+
+
+def test_tune_cli_passes_board_and_opponent_options(tmp_path, monkeypatch):
+    initial = tmp_path / "initial.json"
+    output = tmp_path / "candidate.json"
+    save_model(initial, LinearModel.zeros(), {})
+    seen = {}
+
+    def fake_tune(**kwargs):
+        seen.update(kwargs)
+        return LinearModel.zeros(), {}
+
+    monkeypatch.setattr(learning, "tune", fake_tune)
+    assert learning.main([
+        "tune", "--initial", str(initial), "--output", str(output),
+        "--seed", "1", "--games-per-pool", "8", "--boards", "mixed",
+        "--opponents", "analytical,analytical,analytical",
+    ]) == 0
+    assert seen["boards"] == "mixed"
+    assert seen["pools"] == (("analytical",) * 3,)
+
+
 def test_tuning_is_reproducible_and_keeps_best_observed_candidate():
     initial = LinearModel((1.0,) * FEATURE_COUNT, (2.0,) * FEATURE_COUNT)
     arguments = {

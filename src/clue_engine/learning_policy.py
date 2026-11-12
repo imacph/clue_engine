@@ -14,6 +14,8 @@ from .models import Accuse, Action, Combination, Reveal, Suggest
 from .observations import EventKind, PlayerView
 from .opponent_model import OpponentModel, deal_weights
 from .policies import StrategicPolicy
+from .threat_model import ThreatModel
+from .threat_model import probability as threat_probability
 
 FEATURE_COUNT = 17
 ACCUSATION_FEATURE_COUNT = 2
@@ -104,17 +106,20 @@ class LearningPolicy(StrategicPolicy):
         self, rng: random.Random, model: LinearModel, *, explore: bool = False,
         strategy: LearnedStrategy = DEFAULT_LEARNED_STRATEGY,
         opponent_model: OpponentModel | None = None,
+        threat_model: ThreatModel | None = None,
     ) -> None:
         super().__init__(rng)
         self.model = model
         self.explore = explore
         self.strategy = strategy
         self.opponent_model = opponent_model
+        self.threat_model = threat_model
+        self._threat = 0.0
         self.opponent_model_choices = 0
         self.opponent_model_weightings = 0
         self.decisions: list[tuple[str, tuple[float, ...]]] = []
         self._goal: int | None = None
-        self._declined_accusation: tuple[tuple[Combination, float], ...] | None = None
+        self._declined_accusation: tuple[float, tuple[tuple[Combination, float], ...]] | None = None
 
     def _count_deals(self, knowledge: Knowledge) -> dict[Combination, int] | None:
         from .deal_analysis import solution_deal_counts
@@ -165,6 +170,8 @@ class LearningPolicy(StrategicPolicy):
             raise ValueError("learned policy supports board games only")
         if self.opponent_model is not None:
             self.opponent_model_choices += 1
+        if self.threat_model is not None and view.board.phase is BoardPhase.START:
+            self._threat = threat_probability(self.threat_model, view, num_players)
         knowledge = knowledge_for(view, num_players)
         accusation = self._analyze(knowledge, legal, enabled=True, risk=False)
         if accusation is not None:
@@ -181,9 +188,12 @@ class LearningPolicy(StrategicPolicy):
                         deals, deal_weights(self.opponent_model, view.player, view.events, deals), strict=True,
                     ):
                         support[solution] = support.get(solution, 0.0) + weight
-            signature = tuple(sorted(support.items(), key=lambda item: (
+            threshold = self.strategy.accusation_threshold * (
+                1.0 - self.strategy.threat_sensitivity * self._threat
+            )
+            signature = (threshold, tuple(sorted(support.items(), key=lambda item: (
                 item[0].suspect_id, item[0].weapon_id, item[0].room_id,
-            )))
+            ))))
             if signature != self._declined_accusation:
                 best, count = max(support.items(), key=lambda item: item[1])
                 confidence = count / sum(support.values())
@@ -192,7 +202,7 @@ class LearningPolicy(StrategicPolicy):
                     selected = self._select(
                         "accusation",
                         ((False, (0.0, 0.0)), (True, (1.0, confidence))),
-                        offsets=(0.0, 8.0 * (confidence - self.strategy.accusation_threshold)),
+                        offsets=(0.0, 8.0 * (confidence - threshold)),
                     )
                     if selected:
                         return candidate

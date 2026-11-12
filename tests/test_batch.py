@@ -76,21 +76,28 @@ def test_learned_policy_runs_in_board_batch_and_rejects_card_only(tmp_path):
     assert second.read_text(encoding="utf-8") == trace.read_text(encoding="utf-8")
 
 
-def test_configured_learned_batch_preserves_settings_and_distinguishes_profiles(tmp_path):
+def test_configured_learned_batch_preserves_settings_and_distinguishes_profiles(tmp_path, monkeypatch):
+    from clue_engine.opponent_model import OpponentModel, save_model
+
+    model_path = tmp_path / "opponent.json"
+    save_model(model_path, OpponentModel((0, 0, 0, 0, 0), (0, 0)), {})
+    monkeypatch.setenv("CLUE_OPPONENT_MODEL", str(model_path))
     setup = {
         "game_type": "board", "players": 3,
         "bots": [
-            {"type": "learned", "room_temperature": 0.4, "accusation_threshold": 0.8},
-            {"type": "learned", "room_temperature": 0.8, "accusation_threshold": 1},
+            {"type": "learned", "opponent_model": True, "threat_sensitivity": 0.7},
+            {"type": "learned", "opponent_model": False, "threat_sensitivity": 0.7},
             "random",
         ],
     }
     config = batch_config_from_setup(setup, games=1, seed=2, max_steps=1)
-    assert config.policies[0] == LearnedStrategy(room_temperature=0.4, accusation_threshold=0.8)
+    assert config.policies[0] == LearnedStrategy(opponent_model=True, threat_sensitivity=0.7)
     trace = tmp_path / "configured.jsonl"
     summary = run_batch(config, trace)
     start = next(item for item in records(trace) if item["type"] == "game_start")
-    assert start["policy_configs"][0]["room_temperature"] == 0.4
+    assert start["policy_configs"][0]["opponent_model"] is True
+    assert start["policy_configs"][1]["opponent_model"] is False
+    assert start["policy_configs"][0]["threat_sensitivity"] == 0.7
     assert start["policies"][0] != start["policies"][1]
     assert summary["outcomes"]["error"] == 0
     with pytest.raises(ValueError, match="board"):

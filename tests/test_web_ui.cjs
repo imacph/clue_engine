@@ -921,9 +921,10 @@ test("bot cards keep common controls in place and disclose custom options", () =
   assert.equal(vm.runInContext("list.children[1].children[3].open", context), true);
   vm.runInContext('bots[0] = {type:"learned", room_temperature:0.7}; renderBots()', context);
   const controls = vm.runInContext("list.children[0].children[3].children.slice(3)", context);
-  assert.equal(controls.length, 4);
+  assert.equal(controls.length, 6);
   assert.equal(controls[0].children[1].value, "0.7");
   assert.equal(controls[3].children[1].value, "0.5");
+  assert.equal(controls[5].children[0].checked, false);
 });
 
 test("batch mode is an option within spectator setup only", () => {
@@ -1248,7 +1249,7 @@ test("setup profiles validate and persist in browser and desktop storage", async
     const profile = { mode: "play", game_type: "card_only", players: 2, seat: 0,
       bots: ["random", "random"], progress: "turn", max_steps: 100, debug: false };
     const board = { ...profile, game_type: "board", players: 3, seat_suspects: [0, 1, 2],
-      bots: ["random", {type: "learned", room_temperature: 0.7}, "random"],
+      bots: ["random", {type: "learned", room_temperature: 0.7, opponent_model: true}, "random"],
       board_rules: {move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true} };
     validateProfile(board);
     let invalidLearned;
