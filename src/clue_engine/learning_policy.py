@@ -7,10 +7,12 @@ from typing import TypeVar
 
 from .board_state import RoomPosition
 from .board_turn import BoardPhase, Move, Roll, UsePassage, suspect_location
+from .deal_analysis import consistent_deals
 from .game_settings import DEFAULT_LEARNED_STRATEGY, LearnedStrategy
 from .knowledge import Knowledge, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, Combination, Reveal, Suggest
 from .observations import EventKind, PlayerView
+from .opponent_model import OpponentModel, deal_weights
 from .policies import StrategicPolicy
 
 FEATURE_COUNT = 17
@@ -101,14 +103,18 @@ class LearningPolicy(StrategicPolicy):
     def __init__(
         self, rng: random.Random, model: LinearModel, *, explore: bool = False,
         strategy: LearnedStrategy = DEFAULT_LEARNED_STRATEGY,
+        opponent_model: OpponentModel | None = None,
     ) -> None:
         super().__init__(rng)
         self.model = model
         self.explore = explore
         self.strategy = strategy
+        self.opponent_model = opponent_model
+        self.opponent_model_choices = 0
+        self.opponent_model_weightings = 0
         self.decisions: list[tuple[str, tuple[float, ...]]] = []
         self._goal: int | None = None
-        self._declined_accusation: tuple[tuple[Combination, int], ...] | None = None
+        self._declined_accusation: tuple[tuple[Combination, float], ...] | None = None
 
     def _count_deals(self, knowledge: Knowledge) -> dict[Combination, int] | None:
         from .deal_analysis import solution_deal_counts
@@ -157,18 +163,30 @@ class LearningPolicy(StrategicPolicy):
     def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
         if view.board is None:
             raise ValueError("learned policy supports board games only")
+        if self.opponent_model is not None:
+            self.opponent_model_choices += 1
         knowledge = knowledge_for(view, num_players)
         accusation = self._analyze(knowledge, legal, enabled=True, risk=False)
         if accusation is not None:
             return accusation
         if self._deal_counts and self.strategy.accusation_threshold < 1:
             counts = self._deal_counts
-            signature = tuple(sorted(counts.items(), key=lambda item: (
+            support = {combo: float(count) for combo, count in counts.items()}
+            if self.opponent_model is not None:
+                deals = consistent_deals(knowledge, counts)
+                if deals:
+                    self.opponent_model_weightings += 1
+                    support = {}
+                    for (solution, _), weight in zip(
+                        deals, deal_weights(self.opponent_model, view.player, view.events, deals), strict=True,
+                    ):
+                        support[solution] = support.get(solution, 0.0) + weight
+            signature = tuple(sorted(support.items(), key=lambda item: (
                 item[0].suspect_id, item[0].weapon_id, item[0].room_id,
             )))
             if signature != self._declined_accusation:
-                best, count = max(counts.items(), key=lambda item: item[1])
-                confidence = count / sum(counts.values())
+                best, count = max(support.items(), key=lambda item: item[1])
+                confidence = count / sum(support.values())
                 candidate = Accuse(best)
                 if candidate in legal:
                     selected = self._select(
@@ -180,6 +198,15 @@ class LearningPolicy(StrategicPolicy):
                         return candidate
                     self._declined_accusation = signature
         return self._choose_with_knowledge(view, knowledge, legal)
+
+    def _suggestion_evidence(
+        self, view: PlayerView, knowledge: Knowledge,
+        deals: tuple[tuple[Combination, tuple[int, ...]], ...] | None,
+    ) -> tuple[dict[int, int], tuple[float, ...] | None]:
+        if self.opponent_model is not None and deals:
+            self.opponent_model_weightings += 1
+            return {}, deal_weights(self.opponent_model, view.player, view.events, deals)
+        return super()._suggestion_evidence(view, knowledge, deals)
 
     def _board_suggestion(
         self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],

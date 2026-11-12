@@ -1113,8 +1113,10 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
         except OSError:
-            app.logger.exception("Failed to load the learned model")
-            return jsonify(error="Could not load the learned model. Check CLUE_LEARNED_MODEL."), 500
+            app.logger.exception("Failed to load a learned or opponent model")
+            return jsonify(error=(
+                "Could not load a model. Check CLUE_LEARNED_MODEL and CLUE_OPPONENT_MODEL."
+            )), 500
 
         session_game = GameSession(
             engine,
