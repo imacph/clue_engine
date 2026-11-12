@@ -4,7 +4,12 @@ from dataclasses import fields
 
 from .board_setup import BoardSetup
 from .board_state import create_board
-from .game_settings import BoardRules, BotStrategy, GameRules
+from .game_settings import (
+    BoardRules,
+    GameRules,
+    LearnedStrategy,
+    bot_strategy_from_dict,
+)
 from .policies import POLICY_NAMES
 
 
@@ -53,9 +58,11 @@ def validate_setup_profile(value: object) -> None:
                 raise ValueError("The learned policy supports board games only.")
             if bot in POLICY_NAMES or bot == "learned":
                 continue
-        if not isinstance(bot, dict) or set(bot) - {item.name for item in fields(BotStrategy)}:
-            raise ValueError("Invalid bot configuration in setup profile.")
-        BotStrategy(**bot)
+        if not isinstance(bot, dict):
+            raise ValueError("Invalid bot configuration in setup profile.")  # noqa: TRY004
+        strategy = bot_strategy_from_dict(bot)
+        if isinstance(strategy, LearnedStrategy) and game_type != "board":
+            raise ValueError("The learned policy supports board games only.")
     if game_type == "board":
         suspects = value["seat_suspects"]
         if not isinstance(suspects, list):

@@ -612,48 +612,93 @@ named profile or a custom strategy object), plus `game_rules`, `board_rules`,
 The experimental `learned` policy is available for normal board-game play and
 board batches, for example `"bots": ["learned", "deductive", "probing", "strategic"]`.
 Select **Learned** in the board-game setup wizard, or use the same policy name
-in a board batch configuration. It is rejected for card-only games. The policy
-uses the packaged model to choose suggestions and room goals from the player's
-visible hand, deductions, event history, and public board. Existing rules
-validate actions, route movement, handle reveals, and allow only sound
-accusations. Room goals persist across turns until reached or no longer
-reachable. This experimental model has not been established to outperform
-the existing bots.
+in a board batch configuration. It is rejected for card-only games. By default
+the policy uses the packaged model to choose suggestions and room goals from the player's
+visible hand, deductions, event history, and public board. It also chooses
+whether to accuse using bounded counts of deals consistent with that player's
+knowledge. A wrong accusation eliminates the bot. Room goals persist across
+turns until reached or no longer reachable. This experimental model has not
+been established to outperform the existing bots.
+
+Open **Configure learned bot** for independent room, suggestion, and accusation
+temperatures (0–5), plus an accusation confidence threshold (0–1). Temperature
+0 picks the highest-scoring choice; higher values sample more broadly. With the
+packaged model and zero accusation temperature, the default threshold of 0.5
+allows an accusation at 50% estimated confidence. Set it to 1 for sound-only
+accusations. Nonzero accusation temperature can choose either action above or
+below the threshold, and a trained accusation head can shift the effective
+threshold; 1 always disables risky accusations. To avoid repeated chances to
+gamble on unchanged evidence, a declined accusation is reconsidered only if
+the counted solution distribution changes. Estimates assume uniformly weighted
+consistent deals, are unavailable if the search exceeds its budget, and are not
+guarantees. Settings are per bot, can be copied, saved in setup profiles, and
+used in both interactive and batch board games. For example:
+
+```json
+{"type":"learned","room_temperature":0.5,"suggestion_temperature":1.0,
+ "accusation_temperature":0.0,"accusation_threshold":0.75}
+```
+
+Omitted fields use the defaults. The string `"learned"` is shorthand for all
+defaults; different settings have separate labels in batch results and traces.
 
 The model is tuned offline from player-visible features and terminal
 win/loss outcomes. Suggestion ranking includes the strategic bot's public
 information features, such as deal certainty, reachable responders, unresolved
 clauses, and deal diversity. Policy decisions never receive the solution or
-other players' hands. Schema-1 models remain loadable with zero weights for
-the additional features. To fine-tune the packaged model, then evaluate the candidate:
+other players' hands. Schema-1 and schema-2 models remain loadable with zero
+weights for newer features and the accusation head. To fine-tune the packaged
+model, then evaluate the candidate:
 
 ```powershell
 python -m clue_engine.learning tune --initial src\clue_engine\learned_model.json --games-per-pool 16 --population 8 --generations 4 --seed 42000 --output model.json
 python -m clue_engine.learning benchmark --games 128 --seed 110000 --model model.json --incumbent src\clue_engine\learned_model.json
+python -m clue_engine.learning evaluate --games 64 --seed 120000 --model model.json --room-temperature 0.5 --suggestion-temperature 1 --accusation-threshold 0.75
 ```
 
 `tune` uses a common-random-number cross-entropy search: every candidate is
 evaluated on the same deals and seats against both the standard
-`deductive,probing,strategic` pool and a pool containing `analytical`. It writes
-the best candidate observed during search, not necessarily the final population
-center. Increase `--games-per-pool`, `--population`, and `--generations` for
-more search budget. The older `train` command remains available for
-experimental REINFORCE training; `--initial` continues from a saved model.
+`deductive,probing,strategic` pool and a pool containing `analytical`. All
+generations use the same search seeds so their scores are comparable. It tunes
+all three heads and writes the best observed candidate, not necessarily the
+final population center. Increase `--games-per-pool`, `--population`, and
+`--generations` for more search budget.
+
+Both tuning and experimental REINFORCE training optimize wins with a speed
+preference: a completed win after `steps` actions earns `1 / (1 + 0.001 *
+steps)`, while a loss earns zero. Thus a faster win is worth more, but increasing
+the chance of winning can trade off against speed. `train --win-speed 0`
+optimizes undiscounted wins instead; other non-negative values adjust the speed
+preference. Training explores all three heads, including accuse versus continue,
+and skips timeouts. `--initial` continues from a saved model. Evaluation reports
+mean winning actions and the speed-adjusted score in addition to win rate.
 
 Use fresh seeds for final model selection, not the tuning seeds. `benchmark`
 tests the learned model and all built-in profiles over identical seeds, balanced
 across seats and the two opponent pools. It reports Wilson intervals and
 paired win-rate differences versus the learned policy, with approximate
-95% intervals. Pass `--incumbent` to compare a candidate with a previous model
+95% intervals. Paired comparisons exclude games where either profile timed out
+and report both completed and excluded pairs. Pass `--incumbent` to compare a candidate with a previous model
 on the same individual games. `evaluate` remains available to assess one model against a
 specific fixed opponent pool or compare an existing profile via `--baseline`.
-Timeouts are reported separately and never count as wins. Model files include
-the weights, schema, and training metadata and are never overwritten. The
-batch policy always uses the packaged model; saving a new model does not
-automatically replace it. Overlapping intervals or small seed sets do not
+Timeouts are reported separately and never count as wins; the speed-adjusted
+score divides by all requested games, treating timeouts as zero. Model files include
+the weights, schema, and training metadata and are never overwritten. To try a
+candidate in the browser, desktop app, or batch CLI without replacing the packaged
+model, set `CLUE_LEARNED_MODEL` to its local JSON path before launching the app:
+
+```powershell
+$env:CLUE_LEARNED_MODEL = (Resolve-Path .\model.json).Path
+```
+
+The override applies to every learned bot in that process; bot behavior settings
+remain independent. Unset the variable before launching to restore the packaged
+model. An invalid override is an error, not a fallback. Saving a candidate does
+not automatically select it. Overlapping intervals or small seed sets do not
 establish which policy is stronger.
 
-On a held-out 64-game-per-pool benchmark (seed 750000; 16 games per seat;
+Before the accusation and speed changes, a held-out 64-game-per-pool benchmark
+(seed 750000; 16 games per seat;
 no timeouts), the expanded-feature candidate won 22/64 (34.4%, 95% Wilson
 interval 23.9–46.6%) against deductive, probing, and strategic bots. The
 packaged incumbent won 19/64 (29.7%), strategic 20/64 (31.3%), and analytical
@@ -663,9 +708,17 @@ strategic 18/64 (28.1%), and analytical 16/64 (25.0%). Paired confidence
 intervals include zero for comparisons with the incumbent, strategic, and
 analytical in both pools. The candidate therefore has not shown a reliable
 improvement and was not promoted; the packaged model remains unchanged.
-Analytical can also make calculated risky accusations, while the learned
-policy makes only sound accusations, so these results compare full profiles
-with different accusation behavior.
+Those historical results used sound-only learned accusations and do not measure
+the current behavior. A later exploratory comparison on 24 fresh games per
+pool (seed 1910000; six per seat; no timeouts) found 8 versus 9 wins for the
+default 50% threshold versus sound-only in the standard pool, and 7 versus 6
+against the analytical pool. Analytical won 8 and 9 respectively. These small
+samples do not establish an improvement; run larger held-out comparisons before
+promoting a newly trained model. A small four-candidate, eight-game-per-pool
+search (seed 1930000), tested on another 24 games per pool (seed 1940000),
+produced 11 versus 8 and 10 versus 6 wins for candidate versus incumbent.
+Those exploratory results are also too small to justify replacing the packaged
+weights.
 
 The shared browser and desktop app also provide **Batch simulation** from the
 main menu, or by selecting **Spectate bots** and **Run a batch of games** in

@@ -12,7 +12,7 @@ from .deal_analysis import (
     deduce_deal_constraints,
     solution_deal_counts,
 )
-from .game_settings import BotStrategy
+from .game_settings import BotStrategy, LearnedStrategy
 from .knowledge import (
     InconsistentKnowledgeError,
     Knowledge,
@@ -710,12 +710,16 @@ def policies_for_players(
     return names
 
 
-def make_policy(name: str, rng: random.Random) -> Policy:
-    if name == "learned":
-        validate_policy_names((name,), additional=("learned",))
+def make_policy(name: str | BotStrategy | LearnedStrategy, rng: random.Random) -> Policy:
+    if isinstance(name, BotStrategy):
+        return CustomPolicy(rng, name)
+    if name == "learned" or isinstance(name, LearnedStrategy):
         from .learning import load_default_model
         from .learning_policy import LearningPolicy
 
-        return LearningPolicy(rng, load_default_model())
+        return LearningPolicy(
+            rng, load_default_model(),
+            strategy=name if isinstance(name, LearnedStrategy) else LearnedStrategy(),
+        )
     validate_policy_names((name,))
     return POLICY_TYPES[name](rng)

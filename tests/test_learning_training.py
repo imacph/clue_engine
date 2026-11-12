@@ -16,7 +16,7 @@ from clue_engine.learning_policy import FEATURE_COUNT, LinearModel
 
 def test_model_round_trip_and_refuse_overwrite(tmp_path):
     path = tmp_path / "model.json"
-    model = LinearModel.zeros()
+    model = LinearModel((0.0,) * FEATURE_COUNT, (0.0,) * FEATURE_COUNT, (1.0, -0.5))
     save_model(path, model, {"games": 1})
     assert load_model(path) == model
     with pytest.raises(FileExistsError):
@@ -34,6 +34,30 @@ def test_legacy_model_is_padded_with_zero_weights(tmp_path):
     model = load_model(path)
     assert model.room_weights == tuple(legacy_weights) + (0.0,) * (FEATURE_COUNT - 8)
     assert model.suggestion_weights == model.room_weights
+    assert model.accusation_weights == (0.0, 0.0)
+
+
+def test_schema_two_model_defaults_accusation_weights(tmp_path):
+    path = tmp_path / "schema-two.json"
+    path.write_text(json.dumps({
+        "schema": 2, "room_weights": [0] * FEATURE_COUNT,
+        "suggestion_weights": [0] * FEATURE_COUNT,
+    }), encoding="utf-8")
+    assert load_model(path).accusation_weights == (0.0, 0.0)
+
+
+def test_default_model_override_loads_explicit_file_and_reports_errors(tmp_path, monkeypatch):
+    path = tmp_path / "candidate.json"
+    model = LinearModel((1.0,) * FEATURE_COUNT, (0.0,) * FEATURE_COUNT, (0.1, 0.2))
+    save_model(path, model, {})
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(path))
+    assert learning.load_default_model() == model
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", "")
+    with pytest.raises(ValueError, match="CLUE_LEARNED_MODEL"):
+        learning.load_default_model()
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(tmp_path / "missing.json"))
+    with pytest.raises(FileNotFoundError):
+        learning.load_default_model()
 
 
 @pytest.mark.parametrize("data", [
@@ -42,6 +66,8 @@ def test_legacy_model_is_padded_with_zero_weights(tmp_path):
      "suggestion_weights": [0] * FEATURE_COUNT},
     {"schema": 2, "room_weights": [0] * 8, "suggestion_weights": [0] * 8},
     {"schema": 1, "room_weights": [float("inf")] * 8, "suggestion_weights": [0] * 8},
+    {"schema": 3, "room_weights": [0] * FEATURE_COUNT,
+     "suggestion_weights": [0] * FEATURE_COUNT, "accusation_weights": [True, 0]},
 ])
 def test_invalid_models_are_rejected(tmp_path, data):
     path = tmp_path / "bad.json"
@@ -122,9 +148,64 @@ def test_benchmark_pairs_candidate_with_incumbent_on_same_games():
             "learned_only_wins": 0,
             "profile_only_wins": 0,
             "ties": 4,
+            "completed_pairs": 4,
+            "excluded_pairs": 0,
             "win_rate_delta": 0.0,
             "win_rate_delta_ci95": (0.0, 0.0),
         }
+
+
+def test_benchmark_excludes_timed_out_pairs(monkeypatch):
+    def fake_game(policy, seat, seed, opponents, max_steps):
+        if isinstance(policy, learning.LearningPolicy) and seed % 4 == 0:
+            return None, max_steps, True
+        return seat, 10, False
+
+    monkeypatch.setattr(learning, "_game", fake_game)
+    report = benchmark(LinearModel.zeros(), games=4, seed=40)
+    comparison = report["pools"][0]["paired_vs_learned"]["random"]
+    assert comparison["completed_pairs"] == 3
+    assert comparison["excluded_pairs"] == 1
+    assert comparison["ties"] == 3
+    assert comparison["win_rate_delta"] == 0
+
+    def always_timeout(policy, seat, seed, opponents, max_steps):
+        return None, max_steps, True
+
+    monkeypatch.setattr(learning, "_game", always_timeout)
+    comparison = benchmark(LinearModel.zeros(), games=4, seed=40)["pools"][0]["paired_vs_learned"]["random"]
+    assert comparison["completed_pairs"] == 0
+    assert comparison["win_rate_delta"] is None
+    assert comparison["win_rate_delta_ci95"] is None
+
+
+def test_training_reward_favors_fast_wins():
+    assert 0 < learning._win_reward(200, 0.001) < learning._win_reward(20, 0.001) < 1
+    assert learning._win_reward(200, 0) == 1
+
+
+def test_training_updates_accusation_weights_with_terminal_outcome(monkeypatch):
+    def fake_game(policy, seat, seed, opponents, max_steps):
+        policy.decisions.append(("accusation", (1.0, 0.6)))
+        return seat, 10, False
+
+    monkeypatch.setattr(learning, "_game", fake_game)
+    model, summary = train(games=1, seed=3, opponents=("random",) * 3)
+    assert model.accusation_weights[0] > 0
+    assert model.accusation_weights[1] > 0
+    assert summary["wins"] == 1
+
+
+def test_tuning_uses_same_search_seeds_in_every_generation(monkeypatch):
+    seeds = []
+
+    def fake_score(model, *, games, seed, max_steps):
+        seeds.append(seed)
+        return 0.1, [{"opponents": [], "wins": 0, "games": games}]
+
+    monkeypatch.setattr(learning, "_tuning_score", fake_score)
+    tune(initial_model=LinearModel.zeros(), games_per_pool=4, seed=10, population=4, generations=2)
+    assert seeds == [10] * 8
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -172,3 +253,24 @@ def test_benchmark_cli_dispatches_without_opponents_argument(tmp_path, monkeypat
     ]) == 0
     assert calls == [{"games": 4, "seed": 2, "max_steps": 10_000, "incumbent": None}]
     assert '"seed": 2' in capsys.readouterr().out
+
+
+def test_evaluate_cli_passes_learned_controls(tmp_path, monkeypatch, capsys):
+    model_path = tmp_path / "model.json"
+    save_model(model_path, LinearModel.zeros(), {})
+    calls = []
+
+    def fake_evaluate(model, **kwargs):
+        calls.append(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(learning, "evaluate", fake_evaluate)
+    assert learning.main([
+        "evaluate", "--model", str(model_path), "--games", "4", "--seed", "2",
+        "--room-temperature", "0.5", "--suggestion-temperature", "1",
+        "--accusation-temperature", "0.2", "--accusation-threshold", "0.75",
+    ]) == 0
+    strategy = calls[0]["strategy"]
+    assert (strategy.room_temperature, strategy.suggestion_temperature,
+            strategy.accusation_temperature, strategy.accusation_threshold) == (0.5, 1, 0.2, 0.75)
+    assert '"ok": true' in capsys.readouterr().out

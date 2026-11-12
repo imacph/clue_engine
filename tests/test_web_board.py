@@ -57,6 +57,29 @@ def test_learned_policy_is_available_for_board_play_only(client):
     assert card_only.get_json()["error"] == "the learned policy supports board games only"
 
 
+def test_configured_learned_policy_is_validated_for_web_games(client):
+    csrf = token(client)
+    bot = {
+        "type": "learned", "room_temperature": 0.7, "suggestion_temperature": 1.2,
+        "accusation_temperature": 0.3, "accusation_threshold": 0.75,
+    }
+    setup = {"mode": "spectate", "players": 3, "bots": [bot, "random", "random"]}
+    assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 201
+    assert post(client, csrf, "/api/game", {**setup, "game_type": "card_only"}).status_code == 400
+    bot["room_temperature"] = -1
+    assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 400
+
+
+def test_missing_learned_model_is_reported_by_web_api(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(tmp_path / "missing.json"))
+    response = post(client, token(client), "/api/game", {
+        "game_type": "board", "mode": "spectate", "players": 3,
+        "bots": ["learned", "random", "random"],
+    })
+    assert response.status_code == 500
+    assert "CLUE_LEARNED_MODEL" in response.get_json()["error"]
+
+
 def test_setup_page_and_public_board_state(client):
     csrf = token(client)
     page = client.get("/").data

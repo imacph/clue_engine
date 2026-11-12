@@ -5,6 +5,7 @@ import pytest
 
 from clue_engine.board_state import RoomPosition
 from clue_engine.board_turn import Move, Roll, UsePassage, legal_board_actions
+from clue_engine.game_settings import LearnedStrategy
 from clue_engine.knowledge import knowledge_for
 from clue_engine.learning_policy import (
     FEATURE_COUNT,
@@ -23,6 +24,77 @@ def test_model_validates_dimensions_and_finite_values():
         LinearModel((0.0,), (0.0,))
     with pytest.raises(ValueError):
         LinearModel((float("nan"),) * FEATURE_COUNT, (0.0,) * FEATURE_COUNT)
+    with pytest.raises(ValueError):
+        LinearModel((0.0,) * FEATURE_COUNT, (0.0,) * FEATURE_COUNT, (float("inf"), 0.0))
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"room_temperature": -1}, {"suggestion_temperature": float("inf")},
+    {"accusation_temperature": True}, {"accusation_threshold": 1.01}, {"type": "random"},
+])
+def test_learned_strategy_rejects_invalid_settings(kwargs):
+    with pytest.raises(ValueError):
+        LearnedStrategy(**kwargs)
+
+
+def test_learned_accusation_uses_confidence_and_respects_sound_mode(monkeypatch):
+    engine, _ = create_board_game(4, 4, "random")
+    view = engine.view(engine.to_move)
+    first = Combination(0, 6, 12)
+    second = Combination(1, 7, 13)
+    legal = (Accuse(first), Accuse(second), Roll())
+
+    def analyze(policy, knowledge, actions, *, enabled, risk):
+        policy._deal_counts = {first: 3, second: 2}
+
+    monkeypatch.setattr(LearningPolicy, "_analyze", analyze)
+    monkeypatch.setattr(LearningPolicy, "_choose_with_knowledge", lambda *args: Roll())
+    aggressive = LearningPolicy(random.Random(2), LinearModel.zeros())
+    cautious = LearningPolicy(
+        random.Random(2), LinearModel.zeros(),
+        strategy=LearnedStrategy(accusation_threshold=0.7),
+    )
+    sound = LearningPolicy(
+        random.Random(2), LinearModel.zeros(),
+        strategy=LearnedStrategy(accusation_threshold=1),
+    )
+    assert aggressive.choose(view, 4, legal) == Accuse(first)
+    assert cautious.choose(view, 4, legal) == Roll()
+    assert sound.choose(view, 4, legal) == Roll()
+
+
+def test_exploratory_accusation_records_gradient_once_per_evidence(monkeypatch):
+    engine, _ = create_board_game(4, 4, "random")
+    view = engine.view(engine.to_move)
+    first = Combination(0, 6, 12)
+    second = Combination(1, 7, 13)
+    legal = (Accuse(first), Accuse(second), Roll())
+
+    def analyze(policy, knowledge, actions, *, enabled, risk):
+        policy._deal_counts = {first: 1, second: 1}
+
+    monkeypatch.setattr(LearningPolicy, "_analyze", analyze)
+    monkeypatch.setattr(LearningPolicy, "_choose_with_knowledge", lambda *args: Roll())
+    policy = LearningPolicy(random.Random(1), LinearModel.zeros(), explore=True)
+    assert policy.choose(view, 4, legal) == Roll()
+    assert policy.choose(view, 4, legal) == Roll()
+    assert len(policy.decisions) == 1
+    assert policy.decisions[0][0] == "accusation"
+    assert len(policy.decisions[0][1]) == 2
+
+
+def test_temperature_changes_action_sampling_without_recording_training_gradients():
+    features = (1.0,) + (0.0,) * (FEATURE_COUNT - 1)
+    zeros = (0.0,) * FEATURE_COUNT
+    model = LinearModel(features, zeros)
+    candidates = (("better", features), ("worse", zeros))
+    cold = LearningPolicy(random.Random(1), model)
+    warm = LearningPolicy(
+        random.Random(1), model, strategy=LearnedStrategy(room_temperature=5),
+    )
+    assert {cold._select("room", candidates) for _ in range(40)} == {"better"}
+    assert {warm._select("room", candidates) for _ in range(40)} == {"better", "worse"}
+    assert not warm.decisions
 
 
 def test_policy_rejects_card_only_games():
@@ -43,6 +115,22 @@ def test_board_factory_loads_packaged_model_and_card_factory_rejects_policy():
             "bots": ["learned", "random", "random"], "progress": "step",
             "max_steps": 100, "debug": False,
         })
+
+
+def test_setup_profile_accepts_configured_learned_bot_only_on_board():
+    profile = {
+        "mode": "spectate", "game_type": "board", "players": 3, "seat": 0,
+        "bots": [{"type": "learned", "room_temperature": 0.5,
+                  "accusation_threshold": 0.75}, "random", "random"],
+        "progress": "step", "max_steps": 100, "debug": False,
+        "seat_suspects": [0, 1, 2],
+        "board_rules": {"move_suspect": True, "move_weapon": True,
+                        "summoned_suggestion": True, "secret_passages": True},
+    }
+    validate_setup_profile(profile)
+    profile["bots"][0]["room_temperature"] = 6
+    with pytest.raises(ValueError):
+        validate_setup_profile(profile)
 
 
 def test_suggestions_use_only_legal_actions_and_player_visible_features():

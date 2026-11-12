@@ -21,13 +21,14 @@ from .game_settings import (
     BoardRules,
     BotStrategy,
     GameRules,
+    LearnedStrategy,
+    bot_strategy_from_dict,
 )
 from .knowledge import InconsistentKnowledgeError, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, EndTurn, Pass, Reveal, Suggest
 from .observations import Event, EventKind
 from .policies import (
     POLICY_NAMES,
-    CustomPolicy,
     Policy,
     make_policy,
     validate_policy_names,
@@ -35,7 +36,7 @@ from .policies import (
 from .policies import policies_for_players as _policies_for_players
 from .session import create_board_game, create_game
 
-PolicySpec: TypeAlias = str | BotStrategy
+PolicySpec: TypeAlias = str | BotStrategy | LearnedStrategy
 GAME_TYPES = ("card_only", "board")
 BATCH_POLICY_NAMES = (*POLICY_NAMES, "learned")
 
@@ -61,8 +62,8 @@ class BatchConfig:
         for policy in self.policies:
             if isinstance(policy, str):
                 validate_policy_names((policy,), additional=("learned",))
-            elif not isinstance(policy, BotStrategy):
-                raise TypeError("policies must be named policies or BotStrategy values")
+            elif not isinstance(policy, (BotStrategy, LearnedStrategy)):
+                raise TypeError("policies must be named policies or bot strategy values")
         if type(self.seed) is not int:
             raise TypeError("seed must be an integer")
         if type(self.max_steps) is not int or self.max_steps < 0:
@@ -71,7 +72,9 @@ class BatchConfig:
             raise TypeError("rotate and shuffle_bots must be true or false")
         if not isinstance(self.game_type, str) or self.game_type not in GAME_TYPES:
             raise ValueError(f"game_type must be one of {', '.join(GAME_TYPES)}")
-        if self.game_type != "board" and "learned" in self.policies:
+        if self.game_type != "board" and any(
+            policy == "learned" or isinstance(policy, LearnedStrategy) for policy in self.policies
+        ):
             raise ValueError("the learned policy supports board games only")
         if not isinstance(self.game_rules, GameRules):
             raise TypeError("game_rules must be GameRules")
@@ -121,7 +124,7 @@ def batch_config_from_setup(
             if isinstance(bot, str):
                 policies.append(bot)
             elif isinstance(bot, dict):
-                policies.append(BotStrategy(**bot))
+                policies.append(bot_strategy_from_dict(bot))
             else:
                 raise TypeError(
                     f"bot {index} must be a named policy or strategy object; "
@@ -257,11 +260,16 @@ class BatchSummary(TypedDict):
 def _policy_label(spec: PolicySpec) -> str:
     if isinstance(spec, str):
         return spec
+    if isinstance(spec, LearnedStrategy):
+        return "learned:" + ",".join(
+            f"{item.name}={getattr(spec, item.name):g}"
+            for item in fields(LearnedStrategy) if item.name != "type"
+        )
     enabled = [item.name for item in fields(BotStrategy) if getattr(spec, item.name)]
     return f"custom:{','.join(enabled) if enabled else 'none'}"
 
 
-def _policy_data(spec: PolicySpec) -> str | dict[str, bool]:
+def _policy_data(spec: PolicySpec) -> str | dict[str, object]:
     return spec if isinstance(spec, str) else asdict(spec)
 
 
@@ -288,8 +296,6 @@ def _make_game(
 
 
 def _make_batch_policy(spec: PolicySpec, rng: random.Random) -> Policy:
-    if isinstance(spec, BotStrategy):
-        return CustomPolicy(rng, spec)
     return make_policy(spec, rng)
 
 

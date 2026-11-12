@@ -7,12 +7,14 @@ from typing import TypeVar
 
 from .board_state import RoomPosition
 from .board_turn import BoardPhase, Move, Roll, UsePassage, suspect_location
-from .knowledge import Knowledge, Mark, known_solution
-from .models import Action, Reveal, Suggest
+from .game_settings import DEFAULT_LEARNED_STRATEGY, LearnedStrategy
+from .knowledge import Knowledge, Mark, knowledge_for, known_solution
+from .models import Accuse, Action, Combination, Reveal, Suggest
 from .observations import EventKind, PlayerView
 from .policies import StrategicPolicy
 
 FEATURE_COUNT = 17
+ACCUSATION_FEATURE_COUNT = 2
 T = TypeVar("T")
 
 
@@ -20,11 +22,16 @@ T = TypeVar("T")
 class LinearModel:
     room_weights: tuple[float, ...]
     suggestion_weights: tuple[float, ...]
+    accusation_weights: tuple[float, ...] = (0.0, 0.0)
 
     def __post_init__(self) -> None:
-        for weights in (self.room_weights, self.suggestion_weights):
-            if len(weights) != FEATURE_COUNT or not all(math.isfinite(x) for x in weights):
-                raise ValueError(f"model weights must contain {FEATURE_COUNT} finite values")
+        for weights, count in (
+            (self.room_weights, FEATURE_COUNT),
+            (self.suggestion_weights, FEATURE_COUNT),
+            (self.accusation_weights, ACCUSATION_FEATURE_COUNT),
+        ):
+            if len(weights) != count or not all(math.isfinite(x) for x in weights):
+                raise ValueError(f"model weights must contain {count} finite values")
 
     @classmethod
     def zeros(cls) -> "LinearModel":
@@ -89,47 +96,90 @@ def suggestion_features(
 
 
 class LearningPolicy(StrategicPolicy):
-    """Choose suggestions and room goals with a linear model; retain sound game rules."""
+    """Choose room goals, suggestions, and calculated accusations from visible evidence."""
 
     def __init__(
         self, rng: random.Random, model: LinearModel, *, explore: bool = False,
+        strategy: LearnedStrategy = DEFAULT_LEARNED_STRATEGY,
     ) -> None:
         super().__init__(rng)
         self.model = model
         self.explore = explore
+        self.strategy = strategy
         self.decisions: list[tuple[str, tuple[float, ...]]] = []
         self._goal: int | None = None
+        self._declined_accusation: tuple[tuple[Combination, int], ...] | None = None
+
+    def _count_deals(self, knowledge: Knowledge) -> dict[Combination, int] | None:
+        from .deal_analysis import solution_deal_counts
+
+        return solution_deal_counts(knowledge, max_candidates=24, max_nodes=60000)
 
     def _select(
         self, kind: str, candidates: tuple[tuple[T, tuple[float, ...]], ...],
+        *, offsets: tuple[float, ...] | None = None,
     ) -> T:
         if not candidates:
             raise ValueError("learned decisions require at least one candidate")
-        weights = self.model.room_weights if kind == "room" else self.model.suggestion_weights
-        scores = [sum(a * b for a, b in zip(weights, features, strict=True))
-                  for _, features in candidates]
-        if not self.explore:
+        weights = {
+            "room": self.model.room_weights,
+            "suggestion": self.model.suggestion_weights,
+            "accusation": self.model.accusation_weights,
+        }[kind]
+        temperature = 1.0 if self.explore else getattr(self.strategy, f"{kind}_temperature")
+        offsets = offsets if offsets is not None else (0.0,) * len(candidates)
+        scores = [
+            offset + sum(a * b for a, b in zip(weights, features, strict=True))
+            for (_, features), offset in zip(candidates, offsets, strict=True)
+        ]
+        if temperature == 0:
             best = max(scores)
+            if kind == "accusation":
+                return candidates[-1][0] if scores[-1] == best else candidates[0][0]
             return self.rng.choice(tuple(item for (item, _), score in zip(candidates, scores, strict=True)
                                          if score == best))
         peak = max(scores)
-        values = [math.exp(score - peak) for score in scores]
+        values = [math.exp((score - peak) / temperature) for score in scores]
         total = sum(values)
         probabilities = [value / total for value in values]
         index = self.rng.choices(range(len(candidates)), weights=probabilities, k=1)[0]
         chosen = candidates[index][1]
         gradient = tuple(
-            chosen[i] - sum(p * candidate[1][i]
-                            for p, candidate in zip(probabilities, candidates, strict=True))
-            for i in range(FEATURE_COUNT)
+            (chosen[i] - sum(p * candidate[1][i]
+                             for p, candidate in zip(probabilities, candidates, strict=True)))
+            / temperature
+            for i in range(len(weights))
         )
-        self.decisions.append((kind, gradient))
+        if self.explore:
+            self.decisions.append((kind, gradient))
         return candidates[index][0]
 
     def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
         if view.board is None:
             raise ValueError("learned policy supports board games only")
-        return super().choose(view, num_players, legal)
+        knowledge = knowledge_for(view, num_players)
+        accusation = self._analyze(knowledge, legal, enabled=True, risk=False)
+        if accusation is not None:
+            return accusation
+        if self._deal_counts and self.strategy.accusation_threshold < 1:
+            counts = self._deal_counts
+            signature = tuple(sorted(counts.items(), key=lambda item: (
+                item[0].suspect_id, item[0].weapon_id, item[0].room_id,
+            )))
+            if signature != self._declined_accusation:
+                best, count = max(counts.items(), key=lambda item: item[1])
+                confidence = count / sum(counts.values())
+                candidate = Accuse(best)
+                if candidate in legal:
+                    selected = self._select(
+                        "accusation",
+                        ((False, (0.0, 0.0)), (True, (1.0, confidence))),
+                        offsets=(0.0, 8.0 * (confidence - self.strategy.accusation_threshold)),
+                    )
+                    if selected:
+                        return candidate
+                    self._declined_accusation = signature
+        return self._choose_with_knowledge(view, knowledge, legal)
 
     def _board_suggestion(
         self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],

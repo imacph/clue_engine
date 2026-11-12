@@ -1,5 +1,6 @@
 """Validated, immutable configuration for optional game behavior."""
 
+import math
 from dataclasses import dataclass, fields
 
 
@@ -70,3 +71,32 @@ class BotStrategy:
         for item in fields(self):
             if type(getattr(self, item.name)) is not bool:
                 raise TypeError(f"{item.name} must be true or false")
+
+
+@dataclass(frozen=True, slots=True)
+class LearnedStrategy:
+    type: str = "learned"
+    room_temperature: float = 0.0
+    suggestion_temperature: float = 0.0
+    accusation_temperature: float = 0.0
+    accusation_threshold: float = 0.5
+
+    def __post_init__(self) -> None:
+        if self.type != "learned":
+            raise ValueError("learned strategy type must be 'learned'")
+        for item in fields(self):
+            if item.name == "type":
+                continue
+            value = getattr(self, item.name)
+            maximum = 1.0 if item.name == "accusation_threshold" else 5.0
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= maximum:
+                raise ValueError(f"{item.name} must be a finite number between 0 and {maximum:g}")
+
+
+DEFAULT_LEARNED_STRATEGY = LearnedStrategy()
+
+
+def bot_strategy_from_dict(value: dict[str, object]) -> BotStrategy | LearnedStrategy:
+    if "type" in value:
+        return LearnedStrategy(**value)
+    return BotStrategy(**value)
