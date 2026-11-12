@@ -720,6 +720,70 @@ produced 11 versus 8 and 10 versus 6 wins for candidate versus incumbent.
 Those exploratory results are also too small to justify replacing the packaged
 weights.
 
+#### Experimental opponent behavior model
+
+The learned bot can optionally use a separate, supervised model of opponents'
+suggestions and card reveals. Training simulates four bots sampled with
+replacement from the requested profiles and learns to predict their observed
+choices given hypothetical hands and solutions. It does not use RL. At play
+time, it weights only deals already consistent with the player's deductions,
+using visible suggestions and cards revealed to that player. It never uses
+another player's private reveal; the actual hands and solution are used only
+to generate training labels, not supplied to the playing bot.
+
+This model is **off by default**. Its likelihoods are tempered and bounded so
+behavioral guesses cannot rule out a legal deal. They influence suggestion
+certainty and risky accusation confidence only when the existing bounded
+search can enumerate all consistent deals (at most 128); otherwise the
+original policy is used. It is not a calibrated guarantee of correctness,
+does not learn individual player identities, and does not yet predict movement
+or how close an opponent is to winning. Other players' room choices can be
+constrained by movement and should not be treated as unconstrained guesses.
+
+Train and evaluate on separate seeds, then compare identical policy weights
+with and without the opponent model:
+
+```powershell
+python -m clue_engine.opponent_model train --games 500 --seed 2100000 --output opponent.json
+python -m clue_engine.opponent_model evaluate --games 128 --seed 2200000 --model opponent.json
+python -m clue_engine.learning benchmark --games 128 --seed 2300000 --model src\clue_engine\learned_model.json --incumbent src\clue_engine\learned_model.json --opponent-model opponent.json
+$env:CLUE_OPPONENT_MODEL = (Resolve-Path .\opponent.json).Path
+```
+
+Set the environment variable before launching the browser, desktop app, or
+batch CLI; it affects all learned bots in that process. Unset it to disable
+the model. Invalid model files are errors. `--opponents` accepts a
+comma-separated pool; the default is random, deductive, probing, strategic, and
+analytical. Evaluate on opponents excluded from training as well as fresh
+seeds, and do not assume bots reflect human behavior. Prediction reports
+include average log loss versus a uniform-choice baseline for suggestions and
+reveals with multiple eligible cards. Lower is better, but predictive accuracy
+alone does not demonstrate improved game outcomes. The `train` report is
+in-sample; use `evaluate` with disjoint game seeds for a meaningful check.
+Game evaluation and benchmark reports also show `opponent_model_choices` and
+`opponent_model_weightings`. The latter counts weighting operations, not
+distinct decisions: a single decision can perform more than one.
+
+The policy weights shipped with the app were trained without an opponent
+model. To train or tune those weights with a particular opponent model, pass
+`--opponent-model opponent.json` to `learning train` or `learning tune` as
+well. Keep their evaluation seeds separate from both opponent-model and policy
+training seeds. If `learned` is included in the opponent-training pool, its
+behavior also depends on the configured learned and opponent model environment
+variables.
+
+In one exploratory trial, training on 80 mixed-profile games and evaluating
+on 32 fresh games gave suggestion log loss 1.601 versus 1.792 uniform and
+reveal log loss 0.698 versus 0.746 uniform. In 24 paired games per opponent
+pool, the model won 10 versus 9 in the standard pool and 7 versus 7 in the
+analytical pool. The sample is too small to establish an improvement.
+In a separate 16-game standard-pool sample the model performed 36 weightings
+across 538 learned-policy choices; its impact is presently concentrated in
+small endgame deal spaces.
+Another model trained without analytical opponents achieved suggestion log loss
+1.554 versus 1.792 uniform and reveal log loss 0.734 versus 0.738 uniform on
+24 analytical-only games. These results do not establish human generalization.
+
 The shared browser and desktop app also provide **Batch simulation** from the
 main menu, or by selecting **Spectate bots** and **Run a batch of games** in
 the normal setup wizard. The wizard exposes game type, player count, per-seat named or
