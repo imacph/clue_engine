@@ -290,11 +290,6 @@ def _make_game(
 def _make_batch_policy(spec: PolicySpec, rng: random.Random) -> Policy:
     if isinstance(spec, BotStrategy):
         return CustomPolicy(rng, spec)
-    if spec == "learned":
-        from .learning import load_model
-        from .learning_policy import LearningPolicy
-
-        return LearningPolicy(rng, load_model(Path(__file__).with_name("learned_model.json")))
     return make_policy(spec, rng)
 
 

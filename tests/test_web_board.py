@@ -42,6 +42,21 @@ def test_board_player_limits_do_not_change_card_only(client, players):
     assert cards.get_json()["legal"]["suggest"] is True
 
 
+def test_learned_policy_is_available_for_board_play_only(client):
+    csrf = token(client)
+    board = post(client, csrf, "/api/game", {
+        "game_type": "board", "mode": "spectate", "players": 3,
+        "bots": ["learned", "random", "random"], "progress": "step",
+    })
+    assert board.status_code == 201
+    card_only = post(client, csrf, "/api/game", {
+        "game_type": "card_only", "mode": "spectate", "players": 3,
+        "bots": ["learned", "random", "random"],
+    })
+    assert card_only.status_code == 400
+    assert card_only.get_json()["error"] == "the learned policy supports board games only"
+
+
 def test_setup_page_and_public_board_state(client):
     csrf = token(client)
     page = client.get("/").data

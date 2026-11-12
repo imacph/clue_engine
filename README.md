@@ -609,15 +609,16 @@ named profile or a custom strategy object), plus `game_rules`, `board_rules`,
 }
 ```
 
-Board batches also accept the experimental `learned` policy in a setup JSON
-object, for example `"bots": ["learned", "deductive", "probing", "strategic"]`.
-It is a batch-only policy; it is not offered in the normal game setup UI and
-is rejected for card-only games. It uses a fixed packaged model to choose
-suggestions and room goals from the player's visible hand, deductions, event
-history, and public board. Existing rules validate actions, route movement,
-handle reveals, and allow only sound accusations. Room goals persist across
-turns until reached or no longer reachable. This experimental model has not
-been established to outperform the existing bots.
+The experimental `learned` policy is available for normal board-game play and
+board batches, for example `"bots": ["learned", "deductive", "probing", "strategic"]`.
+Select **Learned** in the board-game setup wizard, or use the same policy name
+in a board batch configuration. It is rejected for card-only games. The policy
+uses the packaged model to choose suggestions and room goals from the player's
+visible hand, deductions, event history, and public board. Existing rules
+validate actions, route movement, handle reveals, and allow only sound
+accusations. Room goals persist across turns until reached or no longer
+reachable. This experimental model has not been established to outperform
+the existing bots.
 
 The model is tuned offline from player-visible features and terminal
 win/loss outcomes. Suggestion ranking includes the strategic bot's public
@@ -652,14 +653,16 @@ batch policy always uses the packaged model; saving a new model does not
 automatically replace it. Overlapping intervals or small seed sets do not
 establish which policy is stronger.
 
-On the initial 64-game-per-pool benchmark (seed 300000; 16 games per seat;
-no timeouts), the packaged model won 16/64 (25.0%, 95% Wilson interval
-16.0–36.8%) against deductive, probing, and strategic bots, and 15/64
-(23.4%, interval 14.7–35.1%) when the pool included analytical. In the first
-pool, strategic won 19/64 (29.7%, interval 19.9–41.8%) and analytical won
-22/64 (34.4%, interval 23.9–46.6%). In the analytical pool, strategic won
-19/64 (29.7%) and analytical won 17/64 (26.6%). These are noisy baselines;
-the model is not yet demonstrated to outperform strategic or analytical.
+On a held-out 64-game-per-pool benchmark (seed 750000; 16 games per seat;
+no timeouts), the expanded-feature candidate won 22/64 (34.4%, 95% Wilson
+interval 23.9–46.6%) against deductive, probing, and strategic bots. The
+packaged incumbent won 19/64 (29.7%), strategic 20/64 (31.3%), and analytical
+25/64 (39.1%). Against the pool containing analytical, the candidate won
+14/64 (21.9%, interval 13.5–33.4%); the incumbent won 15/64 (23.4%),
+strategic 18/64 (28.1%), and analytical 16/64 (25.0%). Paired confidence
+intervals include zero for comparisons with the incumbent, strategic, and
+analytical in both pools. The candidate therefore has not shown a reliable
+improvement and was not promoted; the packaged model remains unchanged.
 Analytical can also make calculated risky accusations, while the learned
 policy makes only sound accusations, so these results compare full profiles
 with different accusation behavior.

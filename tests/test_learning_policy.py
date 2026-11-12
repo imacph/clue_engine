@@ -15,6 +15,7 @@ from clue_engine.learning_policy import (
 from clue_engine.models import Accuse, Combination, Reveal, Suggest
 from clue_engine.observations import Event, EventKind, view_for
 from clue_engine.session import create_board_game, create_game
+from clue_engine.setup_profiles import validate_setup_profile
 
 
 def test_model_validates_dimensions_and_finite_values():
@@ -29,6 +30,19 @@ def test_policy_rejects_card_only_games():
     policy = LearningPolicy(random.Random(1), LinearModel.zeros())
     with pytest.raises(ValueError, match="board"):
         policy.choose(engine.view(engine.to_move), 4, engine.legal_actions())
+
+
+def test_board_factory_loads_packaged_model_and_card_factory_rejects_policy():
+    _, policies = create_board_game(3, 42, "learned,random,random")
+    assert isinstance(policies[0], LearningPolicy)
+    with pytest.raises(ValueError, match="board games only"):
+        create_game(3, 42, "learned")
+    with pytest.raises(ValueError, match="board games only"):
+        validate_setup_profile({
+            "mode": "spectate", "game_type": "card_only", "players": 3, "seat": 0,
+            "bots": ["learned", "random", "random"], "progress": "step",
+            "max_steps": 100, "debug": False,
+        })
 
 
 def test_suggestions_use_only_legal_actions_and_player_visible_features():

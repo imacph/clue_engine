@@ -1037,17 +1037,20 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 if not 0 <= seat < num_players:
                     raise ValueError("Your seat must identify an existing player.")
             bots = body.get("bots")
+            additional_policies = ("learned",)
             if "bots" in body and ("policy" in body or "policies" in body):
                 raise ValueError("Use either bots or legacy policy fields, not both.")
             if "bots" in body:
                 if not isinstance(bots, list) or len(bots) != num_players:
                     raise ValueError("Supply one bot configuration per seat.")
+                if game_type != "board" and any(bot == "learned" for bot in bots):
+                    raise ValueError("the learned policy supports board games only")
                 for index, bot in enumerate(bots):
                     if bot is None:
                         if index != seat:
                             raise ValueError("Only the human seat may omit its bot configuration.")
                     elif isinstance(bot, str):
-                        policies_for_players(bot, 1)
+                        policies_for_players(bot, 1, additional=additional_policies)
                     elif isinstance(bot, dict):
                         allowed = {item.name for item in fields(BotStrategy)}
                         if set(bot) - allowed:
@@ -1064,7 +1067,9 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             )
             if not isinstance(policy_selection, str):
                 raise TypeError("Policy must be text.")
-            policies_for_players(policy_selection, num_players)
+            policies_for_players(
+                policy_selection, num_players, additional=additional_policies,
+            )
             debug = body.get("debug", False)
             if type(debug) is not bool:
                 raise ValueError("Debug must be true or false.")

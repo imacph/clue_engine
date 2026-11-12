@@ -48,8 +48,11 @@ def validate_setup_profile(value: object) -> None:
     if not isinstance(bots, list) or len(bots) != players:
         raise ValueError("Profile requires one bot configuration per seat.")
     for bot in bots:
-        if isinstance(bot, str) and bot in POLICY_NAMES:
-            continue
+        if isinstance(bot, str):
+            if bot == "learned" and game_type != "board":
+                raise ValueError("The learned policy supports board games only.")
+            if bot in POLICY_NAMES or bot == "learned":
+                continue
         if not isinstance(bot, dict) or set(bot) - {item.name for item in fields(BotStrategy)}:
             raise ValueError("Invalid bot configuration in setup profile.")
         BotStrategy(**bot)

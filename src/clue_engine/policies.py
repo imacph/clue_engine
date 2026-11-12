@@ -711,5 +711,11 @@ def policies_for_players(
 
 
 def make_policy(name: str, rng: random.Random) -> Policy:
+    if name == "learned":
+        validate_policy_names((name,), additional=("learned",))
+        from .learning import load_default_model
+        from .learning_policy import LearningPolicy
+
+        return LearningPolicy(rng, load_default_model())
     validate_policy_names((name,))
     return POLICY_TYPES[name](rng)

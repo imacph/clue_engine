@@ -53,6 +53,11 @@ def load_model(path: Path) -> LinearModel:
     return LinearModel(weights[0], weights[1])
 
 
+def load_default_model() -> LinearModel:
+    """Load the model shipped with the package for interactive and batch play."""
+    return load_model(Path(__file__).with_name("learned_model.json"))
+
+
 def _validate(games: int, max_steps: int, opponents: tuple[str, ...]) -> None:
     if type(games) is not int or games < 1:
         raise ValueError("games must be a positive integer")
