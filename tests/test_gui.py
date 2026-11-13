@@ -352,6 +352,7 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     window.games.set("2")
     window.players.set("2")
     window.policies.set("probing,strategic")
+    window.shuffle_bots.set(True)
     window.limit.set("0")
     window.trace.set(str(tmp_path / "trace.jsonl"))
     window.start()
@@ -362,6 +363,13 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     assert window._future is None
     assert "timeouts" in window.status.get()
     assert "timeout=2" in window.output.get("1.0", "end")
+    trace_lines = (tmp_path / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+    assert json.loads(trace_lines[0])["config"]["shuffle_bots"] is True
+    starts = [json.loads(line) for line in trace_lines if '"type":"game_start"' in line]
+    assert [start["policies"] for start in starts] in (
+        [["probing", "strategic"], ["strategic", "probing"]],
+        [["strategic", "probing"], ["probing", "strategic"]],
+    )
     assert window.distribution_view.data is not None
     window.distribution_view.metric.set("outcomes")
     window.distribution_view.mode.set("percent")
@@ -410,7 +418,7 @@ def test_batch_window_runs_board_setup_json(root, tmp_path, monkeypatch):
         '{"candidate_rooms":true,"deal_analysis":true},"strategic"],'
         '"game_rules":{"public_refutations":true},'
         '"board_rules":{"randomize_passages":true,"passage_count":1},'
-        '"seat_suspects":[0,2,4]}',
+        '"seat_suspects":[0,2,4],"shuffle_bots":true}',
         encoding="utf-8",
     )
     window = BatchWindow(root)

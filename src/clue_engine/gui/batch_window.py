@@ -3,6 +3,7 @@
 import json
 import tkinter as tk
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event
@@ -39,6 +40,7 @@ class BatchWindow(tk.Toplevel):
         self.setup_json = tk.StringVar(master=self)
         self.trace = tk.StringVar(master=self)
         self.rotate = tk.BooleanVar(master=self, value=True)
+        self.shuffle_bots = tk.BooleanVar(master=self, value=False)
         self.game_number = tk.StringVar(master=self, value="0")
         self.status = tk.StringVar(master=self, value="Choose a new trace file to begin.")
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clue-batch")
@@ -80,12 +82,17 @@ class BatchWindow(tk.Toplevel):
         ttk.Checkbutton(setup, text="Rotate policies over seats", variable=self.rotate).grid(
             row=8, column=0, columnspan=2, sticky="w"
         )
+        ttk.Checkbutton(
+            setup,
+            text="Randomize bot profiles; balance assignments across complete seat rotations",
+            variable=self.shuffle_bots,
+        ).grid(row=9, column=0, columnspan=4, sticky="w")
         ttk.Label(
             setup, text="WARNING: traces contain private hands, shown cards, and solutions.",
             foreground="red",
-        ).grid(row=9, column=0, columnspan=4, sticky="w", pady=4)
+        ).grid(row=10, column=0, columnspan=4, sticky="w", pady=4)
         buttons = ttk.Frame(setup)
-        buttons.grid(row=10, column=0, columnspan=4, sticky="w")
+        buttons.grid(row=11, column=0, columnspan=4, sticky="w")
         self.start_button = ttk.Button(buttons, text="Start batch", command=self.start)
         self.start_button.pack(side="left", padx=3)
         self.cancel_button = ttk.Button(buttons, text="Cancel", command=self.cancel, state="disabled")
@@ -158,8 +165,12 @@ class BatchWindow(tk.Toplevel):
                 if players < 2:
                     raise ValueError("players must be at least 2")
                 names = policies_for_players(self.policies.get(), players)
-                config = BatchConfig(count, names, seed, limit, self.rotate.get())
+                config = BatchConfig(
+                    count, names, seed, limit, self.rotate.get(), shuffle_bots=self.shuffle_bots.get()
+                )
                 config.validate()
+            if self.shuffle_bots.get() and not config.shuffle_bots:
+                config = replace(config, shuffle_bots=True)
             path_text = self.trace.get().strip()
             if not path_text:
                 raise ValueError("choose a new trace file")
@@ -168,7 +179,7 @@ class BatchWindow(tk.Toplevel):
             messagebox.showerror("Invalid batch settings", str(exc), parent=self)
             return
         warning = "The trace contains private hands, shown cards, and solutions. Save it locally?"
-        if config.rotate and config.games % len(config.policies):
+        if config.rotate and not config.shuffle_bots and config.games % len(config.policies):
             warning += "\n\nThe final rotation is incomplete; policy seat exposures may be unbalanced."
         if not messagebox.askyesno("Private trace", warning, parent=self):
             return
