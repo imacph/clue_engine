@@ -617,7 +617,8 @@ def run_batch(
             seed = config.seed + (game // len(config.policies) if config.rotate else game)
             specs = list(config.policies)
             if config.shuffle_bots:
-                random.Random(f"{config.seed}:{game}:bot-shuffle").shuffle(specs)
+                shuffle_round = game // len(specs) if config.rotate else game
+                random.Random(f"{config.seed}:{shuffle_round}:bot-shuffle").shuffle(specs)
             if config.rotate:
                 rotation = game % len(specs)
                 specs = specs[rotation:] + specs[:rotation]

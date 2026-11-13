@@ -51,6 +51,22 @@ def test_batch_accepts_rotated_advanced_profiles(tmp_path):
     assert summary["policy_stats"]["strategic"]["seat_games"] == 4
 
 
+def test_shuffled_profiles_are_evenly_distributed_for_odd_batch_lengths(tmp_path):
+    config = BatchConfig(
+        games=5, policies=("random", "deductive", "probing"), seed=0,
+        max_steps=0, shuffle_bots=True,
+    )
+    assignments = []
+    run_batch(config, tmp_path / "profiles.jsonl", on_game=assignments.append)
+
+    counts = {name: [0] * len(config.policies) for name in config.policies}
+    for result in assignments:
+        for seat, name in enumerate(result.policies):
+            counts[name][seat] += 1
+
+    assert all(max(seats) - min(seats) <= 1 for seats in counts.values())
+
+
 def test_action_counts_and_trace_preserve_multi_event_refutation(tmp_path, monkeypatch):
     from clue_engine import batch
 
