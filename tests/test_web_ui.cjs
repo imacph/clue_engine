@@ -1495,6 +1495,13 @@ test("replay replaces the card browser without adding a workspace tab", () => {
   assert.equal(ui.element("hand-cards").hidden, false);
 });
 
+test("replay options do not expose reveal-all controls", () => {
+  const options = template.match(/<div id="replay-controls"[\s\S]*?<\/div>/)?.[0];
+  assert.ok(options);
+  assert.doesNotMatch(options, /Reveal all|replay-omniscient/);
+  assert.doesNotMatch(source, /replay-omniscient/);
+});
+
 test("replay speed selector exposes faster modes without changing the default", () => {
   const selector = template.match(/<select id="replay-speed"[^>]*>([\s\S]*?)<\/select>/);
   assert.ok(selector);
