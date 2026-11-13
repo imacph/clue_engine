@@ -924,6 +924,7 @@ test("batch mode is an option within spectator setup only", () => {
       "mode", "batch-enabled", "batch-option-field", "setup-heading", "setup-review-title",
       "batch-games-field", "setup-quick-play", "save-quickplay-default", "setup-start",
       "notebook-mode-field", "notebook-mode-hint", "progress-field", "debug-field", "spectator-warning",
+      "shuffle-bots-label", "shuffle-bots-hint",
     ].map(id => [id, {}]));
     const $ = (id) => fields[id];
     let batchMode = true;
@@ -934,11 +935,17 @@ test("batch mode is an option within spectator setup only", () => {
   `, context);
   assert.equal(vm.runInContext('fields["batch-option-field"].hidden', context), false);
   assert.equal(vm.runInContext('fields["batch-games-field"].hidden', context), false);
+  assert.equal(vm.runInContext('fields["shuffle-bots-label"].textContent', context),
+    "Balance randomized bot profiles across seats");
+  assert.match(vm.runInContext('fields["shuffle-bots-hint"].textContent', context),
+    /every configured profile every seat once/);
   vm.runInContext('fields.mode.value = "play"; renderBatchMode()', context);
   assert.equal(vm.runInContext("batchMode", context), false);
   assert.equal(vm.runInContext('fields["batch-enabled"].checked', context), false);
   assert.equal(vm.runInContext('fields["batch-option-field"].hidden', context), true);
   assert.equal(vm.runInContext('fields["batch-games-field"].hidden', context), true);
+  assert.equal(vm.runInContext('fields["shuffle-bots-label"].textContent', context),
+    "Randomly assign bot styles to seats");
 });
 
 test("batch comparison and chart show meaningful rates and exact statistics", () => {
@@ -1182,6 +1189,30 @@ test("quickplay review describes shuffled styles without claiming assigned bot s
   assert.ok(result.some((row) => row.includes("probing, strategic · randomly assigned")));
   assert.ok(result.some((row) => row === "Player 2: Bot (random style)"));
   assert.ok(!result.some((row) => row.startsWith("Seed:")));
+});
+
+test("batch review explains balanced randomized profile seat assignments", () => {
+  const start = setupSource.indexOf("  function renderReview(");
+  const end = setupSource.indexOf("  function showStep(", start);
+  const context = vm.createContext({});
+  const result = vm.runInContext(`(() => {
+    let batchMode = true;
+    const data = { game_type: "card_only", mode: "spectate", players: 3, seat: 0,
+      bots: ["random", "probing", "strategic"], shuffle_bots: true, seed: 12,
+      progress: "auto", max_steps: 100, debug: false, game_rules: {} };
+    const payload = () => data, score = () => 50, standardRules = {};
+    const $ = (id) => ({ value: id === "batch-games" ? "5" : "" });
+    const document = { createElement: () => ({ textContent: "", children: [],
+      append(...items) { this.children.push(...items); } }),
+      createTextNode: (text) => ({ textContent: text }) };
+    ${setupSource.slice(start, end)}
+    const review = { children: [], replaceChildren() { this.children = []; },
+      append(child) { this.children.push(child); } };
+    renderReview(review, false);
+    return review.children.map((row) => row.children.map((item) => item.textContent).join(""));
+  })()`, context);
+  assert.ok(result.some((row) => row === "Bot styles: random, probing, strategic · randomized and balanced across full seat rotations; a partial final rotation can vary"));
+  assert.ok(result.some((row) => row === "Games: 5"));
 });
 
 test("review warns when an analytical bot can make risky accusations", () => {

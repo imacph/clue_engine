@@ -405,7 +405,10 @@ window.setupWizard = (() => {
     if (data.shuffle_bots || (data.shuffle_seat && data.mode === "play")) {
       const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
         .map((bot) => typeof bot === "string" ? bot : "custom");
-      add("Bot styles", `${styles.join(", ")}${data.shuffle_bots ? " · randomly assigned to bot seats" : ""}`);
+      const assignment = batchMode
+        ? " · randomized and balanced across full seat rotations; a partial final rotation can vary"
+        : " · randomly assigned to bot seats";
+      add("Bot styles", `${styles.join(", ")}${data.shuffle_bots ? assignment : ""}`);
     }
     if (data.bots.some((bot, i) => bot === "analytical" && (data.mode !== "play" || i !== data.seat))) {
       add("Analytical risk", "May accuse at 50% estimated confidence; a wrong accusation eliminates the bot");
@@ -456,6 +459,12 @@ window.setupWizard = (() => {
     $("progress-field").hidden = batchMode;
     $("debug-field").hidden = batchMode;
     $("spectator-warning").hidden = batchMode || $("mode").value !== "spectate";
+    $("shuffle-bots-label").textContent = batchMode
+      ? "Balance randomized bot profiles across seats"
+      : "Randomly assign bot styles to seats";
+    $("shuffle-bots-hint").textContent = batchMode
+      ? "Each complete rotation of player-count games gives every configured profile every seat once; a partial final rotation may be uneven."
+      : "Shuffle the configured bots among bot seats when the game starts.";
   }
 
   function showStep(next, focus = true) {
