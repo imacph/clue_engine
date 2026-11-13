@@ -831,6 +831,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
       players: { value: "6" }, seat: { value: "0" }, seed: { value: "42" },
       progress: { value: "turn" }, "max-steps": { value: "10000" }, debug: { checked: false },
       "shuffle-bots": { checked: false }, "shuffle-seat": { checked: false },
+      "shuffle-bot-count": { value: "6" },
       "rule-reverse-refutation": { checked: false },
       "rule-public-refutations": { checked: false },
       "rule-all-refute": { checked: false },
@@ -840,7 +841,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   vm.runInContext(`
     const $ = (id) => fields[id];
     let bots = [], characters = [0, 1, 2, 3, 4, 5], valid = true, syncCount = 0;
-    let batchMode = false;
+    let batchMode = false, shuffleBotProfileCount = 6;
     let lastError = "";
     const missingBoardSetup = "Board starting positions are unavailable. Reload the page and try again.";
     const validBasics = () => valid;
@@ -871,9 +872,11 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   assert.equal(batch.debug, false);
   assert.equal(batch.shuffle_bots, true);
   assert.equal(batch.bots.length, 6);
+  vm.runInContext("shuffleBotProfileCount = 2", context);
+  assert.equal(vm.runInContext("payload()", context).bots.length, 2);
   vm.runInContext("valid = false", context);
   assert.throws(() => vm.runInContext("payload()", context), /Correct the game settings/);
-  assert.equal(vm.runInContext("syncCount", context), 2);
+  assert.equal(vm.runInContext("syncCount", context), 3);
   vm.runInContext("lastError = missingBoardSetup", context);
   assert.throws(() => vm.runInContext("payload()", context), /Board starting positions are unavailable/);
 });
@@ -891,7 +894,10 @@ test("bot cards keep common controls in place and disclose custom options", () =
         row.children.filter((child) => child.tag === "details" && child.open)); },
     });
     const list = make("div");
-    const fields = { players: { value: "2" }, mode: { value: "spectate" }, "bot-list": list };
+    const fields = {
+      players: { value: "2" }, mode: { value: "spectate" },
+      "shuffle-bots": { checked: false }, "bot-list": list,
+    };
     const $ = (id) => fields[id];
     const document = { createElement: make };
     const option = (value, label) => ({ value, label });
@@ -901,6 +907,7 @@ test("bot cards keep common controls in place and disclose custom options", () =
     const strategyLabels = { candidate_suggestions: "Candidate cards" };
     const score = () => 50;
     const bots = ["random", { candidate_suggestions: true }];
+    const batchMode = false, shuffleBotProfileCount = 2;
     ${setupSource.slice(start, end)}
     renderBots();
   `, context);
@@ -916,7 +923,7 @@ test("bot cards keep common controls in place and disclose custom options", () =
 });
 
 test("batch mode is an option within spectator setup only", () => {
-  const start = setupSource.indexOf("  function renderBatchMode() {");
+  const start = setupSource.indexOf("  function renderShuffleBotCount() {");
   const end = setupSource.indexOf("  function showStep(", start);
   const context = vm.createContext({});
   vm.runInContext(`
@@ -924,9 +931,16 @@ test("batch mode is an option within spectator setup only", () => {
       "mode", "batch-enabled", "batch-option-field", "setup-heading", "setup-review-title",
       "batch-games-field", "setup-quick-play", "save-quickplay-default", "setup-start",
       "notebook-mode-field", "notebook-mode-hint", "progress-field", "debug-field", "spectator-warning",
-      "shuffle-bots-label", "shuffle-bots-hint",
+      "shuffle-bots-label", "shuffle-bots-hint", "shuffle-bots", "shuffle-bot-count-field",
+      "shuffle-bot-count", "players",
     ].map(id => [id, {}]));
+    fields.players.value = "3";
+    fields["shuffle-bots"].checked = true;
+    fields["shuffle-bot-count"].value = "2";
+    fields["shuffle-bot-count"].replaceChildren = (...options) => { fields["shuffle-bot-count"].options = options; };
     const $ = (id) => fields[id];
+    const option = (value, label) => ({ value: String(value), label });
+    let shuffleBotProfileCount = 2;
     let batchMode = true;
     fields.mode.value = "spectate";
     fields["batch-enabled"].checked = true;
@@ -938,7 +952,9 @@ test("batch mode is an option within spectator setup only", () => {
   assert.equal(vm.runInContext('fields["shuffle-bots-label"].textContent', context),
     "Balance randomized bot profiles across seats");
   assert.match(vm.runInContext('fields["shuffle-bots-hint"].textContent', context),
-    /every configured profile every seat once/);
+    /as evenly as possible across seats/);
+  assert.equal(vm.runInContext('fields["shuffle-bot-count"].value', context), "2");
+  assert.equal(vm.runInContext('fields["shuffle-bot-count"].options.length', context), 2);
   vm.runInContext('fields.mode.value = "play"; renderBatchMode()', context);
   assert.equal(vm.runInContext("batchMode", context), false);
   assert.equal(vm.runInContext('fields["batch-enabled"].checked', context), false);
@@ -1211,7 +1227,7 @@ test("batch review explains balanced randomized profile seat assignments", () =>
     renderReview(review, false);
     return review.children.map((row) => row.children.map((item) => item.textContent).join(""));
   })()`, context);
-  assert.ok(result.some((row) => row === "Bot styles: random, probing, strategic · randomized and balanced across full seat rotations; a partial final rotation can vary"));
+  assert.ok(result.some((row) => row === "Bot styles: random, probing, strategic · balanced across full profile rotations; a partial final rotation can vary"));
   assert.ok(result.some((row) => row === "Games: 5"));
 });
 
@@ -1262,6 +1278,8 @@ test("setup profiles validate and persist in browser and desktop storage", async
     ${setupSource.slice(start, end)}
     const profile = { mode: "play", game_type: "card_only", players: 2, seat: 0,
       bots: ["random", "random"], progress: "turn", max_steps: 100, debug: false };
+    const balanced = { ...profile, players: 3, bots: ["random", "random"], shuffle_bots: true };
+    validateProfile(balanced);
     await loadProfiles();
     await persistProfiles({ Browser: profile });
     profiles = Object.create(null);

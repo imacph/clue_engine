@@ -76,13 +76,18 @@ def test_desktop_profiles_persist_validate_and_require_csrf(tmp_path):
         "/api/desktop/profiles", json={"profiles": {"Game": profile}}, headers=headers
     )
     assert response.status_code == 200
+    balanced = dict(profile, bots=profile["bots"][:2], shuffle_bots=True)
+    response = client.put(
+        "/api/desktop/profiles", json={"profiles": {"Game": balanced}}, headers=headers
+    )
+    assert response.status_code == 200
     reloaded = create_app(desktop_preferences=DesktopPreferences(tmp_path / "settings")).test_client()
-    assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": profile}}
+    assert reloaded.get("/api/desktop/profiles").get_json() == {"profiles": {"Game": balanced}}
     invalid = dict(profile, seed=42)
     assert client.put(
         "/api/desktop/profiles", json={"profiles": {"Bad": invalid}}, headers=headers
     ).status_code == 400
-    assert preferences.get_profiles() == {"Game": profile}
+    assert preferences.get_profiles() == {"Game": balanced}
     for mode in ("manual", "automatic"):
         updated = dict(profile, notebook_mode=mode)
         response = client.put(

@@ -76,6 +76,26 @@ def test_batch_api_runs_setup_and_returns_summary_and_distributions(client):
     ).status_code == 400
 
 
+def test_batch_api_balances_two_profiles_across_three_player_seats(client):
+    token = csrf_token(client)
+    setup = {
+        "game_type": "card_only",
+        "players": 3,
+        "bots": ["random", "deductive"],
+        "shuffle_bots": True,
+        "max_steps": 0,
+    }
+    started = post(client, token, "/api/batch", {"setup": setup, "games": 5})
+    assert started.status_code == 202
+    result = wait_for_batch(client, started.get_json()["batch_id"])
+    assert result["status"] == "completed"
+    assert len(result["summary"]["wins_by_seat"]) == 3
+    random_seats = result["summary"]["policy_stats"]["random"]["seat_games"]
+    deductive_seats = result["summary"]["policy_stats"]["deductive"]["seat_games"]
+    assert random_seats + deductive_seats == 15
+    assert abs(random_seats - deductive_seats) == 1
+
+
 @pytest.mark.parametrize("game_type,players", [("card_only", 2), ("board", 3)])
 def test_batch_api_accepts_analytical_bots(client, game_type, players):
     token = csrf_token(client)

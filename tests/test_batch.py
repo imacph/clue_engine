@@ -67,6 +67,45 @@ def test_shuffled_profiles_are_evenly_distributed_for_odd_batch_lengths(tmp_path
     assert all(max(seats) - min(seats) <= 1 for seats in counts.values())
 
 
+def test_two_shuffled_profiles_cover_three_player_seats_evenly(tmp_path):
+    config = BatchConfig(
+        games=5, policies=("random", "deductive"), seed=0, max_steps=0,
+        shuffle_bots=True, players=3,
+    )
+    assignments = []
+    run_batch(config, tmp_path / "profiles.jsonl", on_game=assignments.append)
+
+    counts = {name: [0] * config.player_count for name in config.policies}
+    for result in assignments:
+        assert len(result.policies) == config.player_count
+        for seat, name in enumerate(result.policies):
+            counts[name][seat] += 1
+
+    assert all(max(seats) - min(seats) <= 1 for seats in counts.values())
+    assert abs(sum(counts["random"]) - sum(counts["deductive"])) <= 1
+
+
+def test_setup_accepts_shorter_profile_pool_when_shuffle_is_enabled():
+    config = batch_config_from_setup(
+        {
+            "players": 3,
+            "bots": ["random", "deductive"],
+            "shuffle_bots": True,
+        },
+        games=4,
+    )
+    assert config.player_count == 3
+    assert config.policies == ("random", "deductive")
+
+
+def test_policy_profile_list_can_be_shorter_than_seats_only_when_shuffling():
+    from clue_engine.batch import policy_profiles
+
+    assert policy_profiles("random,deductive", 3, True) == ("random", "deductive")
+    with pytest.raises(ValueError, match="one policy per player"):
+        policy_profiles("random,deductive", 3, False)
+
+
 def test_action_counts_and_trace_preserve_multi_event_refutation(tmp_path, monkeypatch):
     from clue_engine import batch
 

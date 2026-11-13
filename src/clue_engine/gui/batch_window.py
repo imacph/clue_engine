@@ -3,7 +3,6 @@
 import json
 import tkinter as tk
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import replace
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event
@@ -14,7 +13,7 @@ from ..batch import (
     BatchSummary,
     batch_config_from_setup,
     format_summary,
-    policies_for_players,
+    policy_profiles,
     read_game_trace,
     run_batch,
 )
@@ -157,6 +156,8 @@ class BatchWindow(tk.Toplevel):
             setup_path = self.setup_json.get().strip()
             if setup_path:
                 setup = json.loads(Path(setup_path).read_text(encoding="utf-8"))
+                if self.shuffle_bots.get():
+                    setup["shuffle_bots"] = True
                 config = batch_config_from_setup(
                     setup, games=count, seed=seed, max_steps=limit, rotate=self.rotate.get(),
                 )
@@ -164,13 +165,12 @@ class BatchWindow(tk.Toplevel):
                 players = int(self.players.get())
                 if players < 2:
                     raise ValueError("players must be at least 2")
-                names = policies_for_players(self.policies.get(), players)
+                names = policy_profiles(self.policies.get(), players, self.shuffle_bots.get())
                 config = BatchConfig(
-                    count, names, seed, limit, self.rotate.get(), shuffle_bots=self.shuffle_bots.get()
+                    count, names, seed, limit, self.rotate.get(),
+                    shuffle_bots=self.shuffle_bots.get(), players=players,
                 )
                 config.validate()
-            if self.shuffle_bots.get() and not config.shuffle_bots:
-                config = replace(config, shuffle_bots=True)
             path_text = self.trace.get().strip()
             if not path_text:
                 raise ValueError("choose a new trace file")
