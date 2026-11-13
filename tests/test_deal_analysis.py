@@ -20,8 +20,10 @@ from clue_engine.knowledge import (
     _settle_hand_size,
     knowledge_for,
 )
+from clue_engine.learning_policy import LearningPolicy, LinearModel
 from clue_engine.models import Accuse, CardType, Combination
-from clue_engine.observations import PlayerView
+from clue_engine.observations import Event, EventKind, PlayerView
+from clue_engine.opponent_model import OpponentModel
 from clue_engine.policies import CustomPolicy
 from clue_engine.session import create_game
 from clue_engine.state import deal
@@ -112,6 +114,25 @@ def test_enumerated_deals_match_complete_counts_and_respect_limits():
                 assert mark is Mark.UNKNOWN or (mark is Mark.HELD) == bool(hand & (1 << card))
     assert consistent_deals(knowledge, counts, max_deals=1) is None
     assert consistent_deals(knowledge, counts, max_nodes=0) is None
+
+
+def test_opponent_model_uses_real_enumerated_consistent_deals():
+    state, knowledge, alternatives, _ = ambiguous_deal()
+    counts = solution_deal_counts(knowledge)
+    assert counts is not None
+    deals = consistent_deals(knowledge, counts)
+    assert deals is not None
+    suggestion = Combination(alternatives[0], alternatives[1], state.solution.room_id)
+    view = PlayerView(0, state.player_hands[0], (Event(EventKind.SUGGEST, 1, combo=suggestion),))
+    policy = LearningPolicy(
+        random.Random(1), LinearModel.zeros(),
+        opponent_model=OpponentModel((-2.0, 0, 0, 0, 0), (0, 0)),
+    )
+    _, weights = policy._suggestion_evidence(view, knowledge, deals)
+    assert weights is not None and len(weights) == len(deals)
+    assert len(set(weights)) > 1
+    assert all(weight > 0 for weight in weights)
+    assert policy.opponent_model_weightings == 1
 
 
 def test_hand_size_combines_overlapping_clauses():

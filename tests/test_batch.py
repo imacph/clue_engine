@@ -5,6 +5,7 @@ import pytest
 
 from clue_engine.batch import (
     BatchConfig,
+    BatchPolicyError,
     batch_config_from_setup,
     read_game_trace,
     run_batch,
@@ -12,7 +13,12 @@ from clue_engine.batch import (
 from clue_engine.board_state import RoomPosition
 from clue_engine.board_turn import Move, Roll
 from clue_engine.engine import Engine
-from clue_engine.game_settings import BoardRules, BotStrategy, GameRules
+from clue_engine.game_settings import (
+    BoardRules,
+    BotStrategy,
+    GameRules,
+    LearnedStrategy,
+)
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
 from clue_engine.session import create_board_game
 from clue_engine.state import GameState
@@ -49,6 +55,65 @@ def test_batch_accepts_rotated_advanced_profiles(tmp_path):
     assert summary["outcomes"]["timeout"] == 0
     assert summary["policy_stats"]["probing"]["seat_games"] == 4
     assert summary["policy_stats"]["strategic"]["seat_games"] == 4
+
+
+def test_learned_policy_runs_in_board_batch_and_rejects_card_only(tmp_path):
+    from clue_engine.replay import replay_from_batch_trace
+
+    with pytest.raises(ValueError, match="board"):
+        BatchConfig(1, ("learned", "random", "random", "random")).validate()
+    config = batch_config_from_setup(
+        {"game_type": "board", "players": 4, "policies": "learned,random,random,random"},
+        games=1, seed=2,
+    )
+    trace = tmp_path / "learned.jsonl"
+    summary = run_batch(config, trace)
+    assert summary["outcomes"]["error"] == 0
+    assert summary["outcomes"]["timeout"] == 0
+    assert summary["policy_stats"]["learned"]["seat_games"] == 1
+    assert replay_from_batch_trace(trace, 0).history
+    second = tmp_path / "learned-repeat.jsonl"
+    assert run_batch(config, second) == summary
+    assert second.read_text(encoding="utf-8") == trace.read_text(encoding="utf-8")
+
+
+def test_invalid_learned_model_is_rejected_before_creating_trace(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(tmp_path / "missing-model.json"))
+    trace = tmp_path / "invalid-model.jsonl"
+    config = BatchConfig(1, (LearnedStrategy(), "random", "random"), game_type="board")
+
+    with pytest.raises(BatchPolicyError, match="invalid learned policy model"):
+        run_batch(config, trace)
+
+    assert not trace.exists()
+
+
+def test_configured_learned_batch_preserves_settings_and_distinguishes_profiles(tmp_path, monkeypatch):
+    from clue_engine.opponent_model import OpponentModel, save_model
+
+    model_path = tmp_path / "opponent.json"
+    save_model(model_path, OpponentModel((0, 0, 0, 0, 0), (0, 0)), {})
+    monkeypatch.setenv("CLUE_OPPONENT_MODEL", str(model_path))
+    setup = {
+        "game_type": "board", "players": 3,
+        "bots": [
+            {"type": "learned", "opponent_model": True, "threat_sensitivity": 0.7},
+            {"type": "learned", "opponent_model": False, "threat_sensitivity": 0.7},
+            "random",
+        ],
+    }
+    config = batch_config_from_setup(setup, games=1, seed=2, max_steps=1)
+    assert config.policies[0] == LearnedStrategy(opponent_model=True, threat_sensitivity=0.7)
+    trace = tmp_path / "configured.jsonl"
+    summary = run_batch(config, trace)
+    start = next(item for item in records(trace) if item["type"] == "game_start")
+    assert start["policy_configs"][0]["opponent_model"] is True
+    assert start["policy_configs"][1]["opponent_model"] is False
+    assert start["policy_configs"][0]["threat_sensitivity"] == 0.7
+    assert start["policies"][0] != start["policies"][1]
+    assert summary["outcomes"]["error"] == 0
+    with pytest.raises(ValueError, match="board"):
+        batch_config_from_setup({**setup, "game_type": "card_only"}, games=1)
 
 
 def test_action_counts_and_trace_preserve_multi_event_refutation(tmp_path, monkeypatch):

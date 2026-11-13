@@ -67,7 +67,9 @@ def completed_turns(engine: Engine, player: int) -> int:
 def create_game(
     num_players: int, seed: int, policy_name: str, *, game_rules: GameRules = DEFAULT_GAME_RULES,
 ) -> tuple[Engine, tuple[Policy, ...]]:
-    names = policies_for_players(policy_name, num_players)
+    names = policies_for_players(policy_name, num_players, additional=("learned",))
+    if "learned" in names:
+        raise ValueError("the learned policy supports board games only")
     state = deal(random.Random(seed), num_players)
     _configure_rules(state, seed, game_rules)
     engine = Engine(state)
@@ -87,7 +89,7 @@ def create_board_game(
     game_rules: GameRules = DEFAULT_GAME_RULES,
 ) -> tuple[Engine, tuple[Policy, ...]]:
     """Create an opt-in board game with dice independent of the card deal and bots."""
-    names = policies_for_players(policy_name, num_players)
+    names = policies_for_players(policy_name, num_players, additional=("learned",))
     state = deal_board(
         random.Random(seed), num_players, layout=layout,
         seat_suspects=seat_suspects, weapon_rooms=weapon_rooms, board_rules=board_rules,
