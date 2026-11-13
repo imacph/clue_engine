@@ -114,6 +114,9 @@ def verify_wheel(directory, versions):
         if message["Name"] != "clue-engine" or message["Version"] != versions.api:
             raise ValueError("Python wheel metadata does not match the API version")
         required = {
+            "clue_engine/learned_model.json",
+            "clue_engine/opponent_model.json",
+            "clue_engine/threat_model.json",
             "clue_engine/webapp/templates/index.html",
             "clue_engine/webapp/static/app.js",
             "clue_engine/webapp/static/setup.js",
@@ -121,7 +124,7 @@ def verify_wheel(directory, versions):
         }
         missing = required - names
         if missing:
-            raise ValueError(f"Python wheel is missing web assets: {sorted(missing)}")
+            raise ValueError(f"Python wheel is missing package assets: {sorted(missing)}")
 
 
 def create_artifacts(executable, destination_root, versions, commit, dependencies, node, notes):

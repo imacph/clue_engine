@@ -142,6 +142,9 @@ def test_wheel_verification_requires_version_and_web_assets(tmp_path):
     versions = versioning.Versions("1.2.3", "2.3.4", "3.4.5")
     wheel = tmp_path / "test.whl"
     assets = (
+        "clue_engine/learned_model.json",
+        "clue_engine/opponent_model.json",
+        "clue_engine/threat_model.json",
         "clue_engine/webapp/templates/index.html",
         "clue_engine/webapp/static/app.js",
         "clue_engine/webapp/static/setup.js",
@@ -158,7 +161,7 @@ def test_wheel_verification_requires_version_and_web_assets(tmp_path):
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("clue_engine-1.2.3.dist-info/METADATA",
                          "Name: clue-engine\nVersion: 1.2.3\n")
-    with pytest.raises(ValueError, match="missing web assets"):
+    with pytest.raises(ValueError, match="missing package assets"):
         release.verify_wheel(tmp_path, versions)
 
 

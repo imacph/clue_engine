@@ -14,8 +14,8 @@ No license granting redistribution rights is provided.
 ## Versions
 
 <!-- component-versions:start -->
-The game API and Python distribution are **0.6.3**, the shared browser/desktop
-frontend is **0.6.2**, and the Windows desktop wrapper is **0.4.1**.
+The game API and Python distribution are **0.7.0**, the shared browser/desktop
+frontend is **0.7.0**, and the Windows desktop wrapper is **0.5.0**.
 <!-- component-versions:end -->
 
 These are pre-1.0 versions and do not yet promise a stable public API.

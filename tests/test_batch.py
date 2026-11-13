@@ -5,6 +5,7 @@ import pytest
 
 from clue_engine.batch import (
     BatchConfig,
+    BatchPolicyError,
     batch_config_from_setup,
     read_game_trace,
     run_batch,
@@ -74,6 +75,17 @@ def test_learned_policy_runs_in_board_batch_and_rejects_card_only(tmp_path):
     second = tmp_path / "learned-repeat.jsonl"
     assert run_batch(config, second) == summary
     assert second.read_text(encoding="utf-8") == trace.read_text(encoding="utf-8")
+
+
+def test_invalid_learned_model_is_rejected_before_creating_trace(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(tmp_path / "missing-model.json"))
+    trace = tmp_path / "invalid-model.jsonl"
+    config = BatchConfig(1, (LearnedStrategy(), "random", "random"), game_type="board")
+
+    with pytest.raises(BatchPolicyError, match="invalid learned policy model"):
+        run_batch(config, trace)
+
+    assert not trace.exists()
 
 
 def test_configured_learned_batch_preserves_settings_and_distinguishes_profiles(tmp_path, monkeypatch):

@@ -41,6 +41,10 @@ GAME_TYPES = ("card_only", "board")
 BATCH_POLICY_NAMES = (*POLICY_NAMES, "learned")
 
 
+class BatchPolicyError(ValueError):
+    """A configured learned policy could not be initialized."""
+
+
 @dataclass(frozen=True)
 class BatchConfig:
     games: int
@@ -297,6 +301,16 @@ def _make_game(
 
 def _make_batch_policy(spec: PolicySpec, rng: random.Random) -> Policy:
     return make_policy(spec, rng)
+
+
+def _validate_policy_models(config: BatchConfig) -> None:
+    for seat, spec in enumerate(config.policies):
+        if spec != "learned" and not isinstance(spec, LearnedStrategy):
+            continue
+        try:
+            _make_batch_policy(spec, random.Random(f"{config.seed}:preflight:{seat}"))
+        except (OSError, ValueError) as exc:
+            raise BatchPolicyError(f"invalid learned policy model: {exc}") from exc
 
 
 def policies_for_players(value: str, players: int) -> tuple[str, ...]:
@@ -621,6 +635,7 @@ def run_batch(
 ) -> BatchSummary:
     """Write all private traces to a new file and return aggregate statistics."""
     config.validate()
+    _validate_policy_models(config)
     should_cancel = cancelled if cancelled is not None else lambda: False
     aggregate = _Aggregate(config)
     with trace_path.open("x", encoding="utf-8", newline="\n") as stream:
