@@ -7,6 +7,7 @@ from clue_engine.batch import (
     BatchConfig,
     BatchPolicyError,
     batch_config_from_setup,
+    format_batch_settings,
     format_summary,
     read_game_trace,
     run_batch,
@@ -103,8 +104,35 @@ def test_batch_summary_shows_effective_settings_in_full_detail(tmp_path):
     }
     formatted = format_summary(summary)
     assert formatted.startswith("Settings used:\n")
-    assert '"candidate_rooms": true' in formatted
-    assert '"reverse_refutation": true' in formatted
+    assert "Profile 1: Custom bot strategy" in formatted
+    assert "Candidate rooms: Yes" in formatted
+    assert "Reverse refutation: Yes" in formatted
+    assert "Action limit per game: 0" in formatted
+
+
+def test_batch_settings_formatter_uses_readable_labels_for_board_assignments():
+    formatted = format_batch_settings({
+        "game_type": "board",
+        "games": 2,
+        "players": 3,
+        "seed": 7,
+        "max_steps": 100,
+        "rotate": True,
+        "shuffle_bots": False,
+        "policies": ("random", {"type": "learned", "opponent_model": True}),
+        "game_rules": {"reverse_refutation": False},
+        "board_rules": {"randomize_rooms": True},
+        "seat_suspects": (0, 2, 4),
+    })
+
+    assert "Game type: Board game" in formatted
+    assert "Profile 1: Random" in formatted
+    assert "Profile 2: Learned" in formatted
+    assert "Opponent model: Yes" in formatted
+    assert "Randomize rooms: Yes" in formatted
+    assert "Player 1: Miss Scarlet" in formatted
+    assert "Player 2: Mrs. White" in formatted
+    assert "Player 3: Mrs. Peacock" in formatted
 
 
 def test_batch_accepts_rotated_advanced_profiles(tmp_path):

@@ -19,6 +19,7 @@ from ..batch import (
     BatchSummary,
     GameResult,
     batch_config_from_setup,
+    format_batch_settings,
     run_batch,
 )
 from ..board import DEFAULT_BOARD, Square
@@ -851,6 +852,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 game_type=batch.game_type,
                 requested_games=batch.requested_games,
                 settings=batch.settings,
+                settings_display=format_batch_settings(batch.settings),
                 finished_games=batch.finished_games,
                 cancel_requested=batch.cancel_requested,
                 summary=batch.summary,

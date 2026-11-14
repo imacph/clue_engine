@@ -618,7 +618,7 @@ class _Aggregate:
 def format_summary(summary: BatchSummary) -> str:
     lines = [
         "Settings used:",
-        json.dumps(summary["settings"], indent=2, sort_keys=True),
+        format_batch_settings(summary["settings"]),
         "",
         f"Games: {summary['started_games']} started / {summary['requested_games']} requested",
         f"Completed: {summary['completed_games']}",
@@ -656,6 +656,76 @@ def format_summary(summary: BatchSummary) -> str:
     if summary["cancelled"]:
         lines.append("Batch cancelled.")
     return "\n".join(lines)
+
+
+def format_batch_settings(settings: dict[str, object]) -> str:
+    game_type = settings.get("game_type")
+    lines = [
+        "Batch",
+        f"  Game type: {'Board game' if game_type == 'board' else 'Card-only game'}",
+        f"  Games requested: {settings.get('games')}",
+        f"  Players: {settings.get('players')}",
+        f"  Seed: {settings.get('seed')}",
+        f"  Action limit per game: {settings.get('max_steps')}",
+        f"  Rotate profiles across seats: {_enabled(settings.get('rotate'))}",
+        f"  Shuffle bot profiles: {_enabled(settings.get('shuffle_bots'))}",
+        "Bot profiles (configured order):",
+    ]
+    policies = settings.get("policies", ())
+    if isinstance(policies, (list, tuple)):
+        for index, policy in enumerate(policies, start=1):
+            if isinstance(policy, str):
+                lines.append(f"  Profile {index}: {policy.replace('_', ' ').title()}")
+            elif isinstance(policy, dict):
+                profile_type = policy.get("type")
+                label = (
+                    "Custom bot strategy"
+                    if profile_type is None
+                    else str(profile_type).replace("_", " ").title()
+                )
+                lines.append(f"  Profile {index}: {label}")
+                for name, value in policy.items():
+                    if name != "type":
+                        lines.append(f"    {_setting_label(name)}: {_setting_value(value)}")
+    lines.append("Game rules:")
+    _append_setting_group(lines, settings.get("game_rules"))
+    lines.append(
+        "Board rules (only used for board games):"
+        if game_type == "board"
+        else "Board rules (inactive for card-only games):"
+    )
+    _append_setting_group(lines, settings.get("board_rules"))
+    lines.append("Character assignment by seat:")
+    suspects = settings.get("seat_suspects")
+    if isinstance(suspects, (list, tuple)):
+        for seat, suspect_id in enumerate(suspects, start=1):
+            suspect = CARDS_BY_ID.get(suspect_id) if type(suspect_id) is int else None
+            name = suspect.name if suspect is not None else f"Character ID {suspect_id}"
+            lines.append(f"  Player {seat}: {name}")
+    else:
+        lines.append("  Default assignment")
+    return "\n".join(lines)
+
+
+def _append_setting_group(lines: list[str], settings: object) -> None:
+    if not isinstance(settings, dict):
+        return
+    for name, value in settings.items():
+        lines.append(f"  {_setting_label(name)}: {_setting_value(value)}")
+
+
+def _setting_label(name: str) -> str:
+    return name.replace("_", " ").capitalize()
+
+
+def _setting_value(value: object) -> str:
+    if type(value) is bool:
+        return _enabled(value)
+    return str(value)
+
+
+def _enabled(value: object) -> str:
+    return "Yes" if value else "No"
 
 
 def run_batch(

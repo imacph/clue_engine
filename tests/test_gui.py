@@ -364,7 +364,7 @@ def test_batch_window_runs_and_opens_private_trace(root, tmp_path, monkeypatch):
     assert "timeouts" in window.status.get()
     assert "timeout=2" in window.output.get("1.0", "end")
     assert "Settings used:" in window.output.get("1.0", "end")
-    assert '"shuffle_bots": true' in window.output.get("1.0", "end")
+    assert "Shuffle bot profiles: Yes" in window.output.get("1.0", "end")
     trace_lines = (tmp_path / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(trace_lines[0])["config"]["shuffle_bots"] is True
     starts = [json.loads(line) for line in trace_lines if '"type":"game_start"' in line]
