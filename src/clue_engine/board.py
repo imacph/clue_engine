@@ -303,14 +303,171 @@ def _door_candidates(room: Room, hallways: frozenset[Square]) -> dict[tuple[int,
 
 
 def _random_doors(layout: BoardLayout, rng: random.Random) -> tuple[Door, ...]:
-    result = []
-    for room in layout.rooms:
-        candidates = _door_candidates(room, layout.hallways)
-        count = len(layout.doors_for(room.card_id))
-        if count > len(candidates):
-            raise ValueError(f"Room {room.card_id} has too few eligible sides for {count} doors")
-        for side in rng.sample(sorted(candidates), count):
-            result.append(rng.choice(candidates[side]))
+    return _random_doors_for_rooms(
+        layout.rooms,
+        layout.hallways,
+        {room.card_id: len(layout.doors_for(room.card_id)) for room in layout.rooms},
+        rng,
+        randomize_counts=True,
+    )
+
+
+def _doors_pair(
+    first: Door, second: Door, hallways: frozenset[Square],
+) -> bool:
+    if first.room_id == second.room_id:
+        return False
+    dx = first.hallway_square.x - first.room_square.x
+    dy = first.hallway_square.y - first.room_square.y
+    if (
+        second.hallway_square.x - second.room_square.x != -dx
+        or second.hallway_square.y - second.room_square.y != -dy
+        or (dx and first.hallway_square.y != second.hallway_square.y)
+        or (dy and first.hallway_square.x != second.hallway_square.x)
+    ):
+        return False
+    current = first.hallway_square
+    while current != second.hallway_square:
+        current = Square(current.x + dx, current.y + dy)
+        if current not in hallways:
+            return False
+    return True
+
+
+def _random_doors_for_rooms(
+    rooms: tuple[Room, ...],
+    hallways: frozenset[Square],
+    counts: dict[int, int],
+    rng: random.Random,
+    *,
+    randomize_counts: bool = False,
+) -> tuple[Door, ...]:
+    candidates = {room.card_id: _door_candidates(room, hallways) for room in rooms}
+    for room in rooms:
+        if not candidates[room.card_id]:
+            raise ValueError(f"Room {room.card_id} has no eligible sides for a door")
+    if randomize_counts:
+        counts = {
+            room.card_id: rng.randint(1, len(candidates[room.card_id]))
+            for room in rooms
+        }
+    if any(counts[room.card_id] > len(candidates[room.card_id]) for room in rooms):
+        room = next(room for room in rooms if counts[room.card_id] > len(candidates[room.card_id]))
+        raise ValueError(
+            f"Room {room.card_id} has too few eligible sides for {counts[room.card_id]} doors"
+        )
+
+    pairs = [
+        (first, first_side, second, second_side)
+        for index, first_room in enumerate(rooms)
+        for second_room in rooms[index + 1:]
+        for first_side, first_doors in candidates[first_room.card_id].items()
+        for second_side, second_doors in candidates[second_room.card_id].items()
+        for first in first_doors
+        for second in second_doors
+        if _doors_pair(first, second, hallways)
+    ]
+    rng.shuffle(pairs)
+    selected: list[Door] = []
+    selected_sides: set[tuple[int, tuple[int, int]]] = set()
+    selected_counts = {room.card_id: 0 for room in rooms}
+    for first, first_side, second, second_side in pairs:
+        first_key = first.room_id, first_side
+        second_key = second.room_id, second_side
+        if (
+            selected_counts[first.room_id] < counts[first.room_id]
+            and selected_counts[second.room_id] < counts[second.room_id]
+            and first_key not in selected_sides
+            and second_key not in selected_sides
+        ):
+            selected.extend((first, second))
+            selected_sides.update((first_key, second_key))
+            selected_counts[first.room_id] += 1
+            selected_counts[second.room_id] += 1
+
+    for room in rooms:
+        room_id = room.card_id
+        available = [
+            side for side in candidates[room_id]
+            if (room_id, side) not in selected_sides
+        ]
+        needed = counts[room_id] - selected_counts[room_id]
+        for side in rng.sample(available, needed):
+            selected.append(rng.choice(candidates[room_id][side]))
+    return tuple(selected)
+
+
+def _adjacent_room_pairs(
+    rooms: tuple[Room, ...], hallways: frozenset[Square],
+) -> set[frozenset[int]]:
+    adjacent = set()
+    for index, first_room in enumerate(rooms):
+        for second_room in rooms[index + 1:]:
+            if any(
+                (next_square := Square(square.x + dx, square.y + dy)) in second_room.squares
+                or _hallway_reaches_room(next_square, dx, dy, second_room, hallways)
+                for square in first_room.squares
+                for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0))
+            ):
+                adjacent.add(frozenset((first_room.card_id, second_room.card_id)))
+    return adjacent
+
+
+def _hallway_reaches_room(
+    square: Square, dx: int, dy: int, room: Room, hallways: frozenset[Square],
+) -> bool:
+    while square in hallways:
+        square = Square(square.x + dx, square.y + dy)
+    return square in room.squares
+
+
+def _maximum_matching_size(
+    room_ids: tuple[int, ...], pairs: set[frozenset[int]],
+) -> int:
+    if not room_ids:
+        return 0
+    first, *remaining = room_ids
+    best = _maximum_matching_size(tuple(remaining), pairs)
+    for index, second in enumerate(remaining):
+        if frozenset((first, second)) in pairs:
+            best = max(
+                best,
+                1 + _maximum_matching_size(
+                    tuple(remaining[:index] + remaining[index + 1:]), pairs,
+                ),
+            )
+    return best
+
+
+def _random_passage_pairs(
+    room_ids: tuple[int, ...],
+    adjacent: set[frozenset[int]],
+    count: int,
+    rng: random.Random,
+) -> tuple[tuple[int, int], ...]:
+    available_pairs = {
+        frozenset((first, second))
+        for index, first in enumerate(room_ids)
+        for second in room_ids[index + 1:]
+        if frozenset((first, second)) not in adjacent
+    }
+
+    def choose(remaining: tuple[int, ...], needed: int) -> list[tuple[int, int]] | None:
+        if needed == 0:
+            return []
+        candidates = [
+            tuple(sorted(pair)) for pair in available_pairs if pair <= set(remaining)
+        ]
+        rng.shuffle(candidates)
+        for first, second in candidates:
+            result = choose(tuple(room for room in remaining if room not in (first, second)), needed - 1)
+            if result is not None:
+                return [(first, second), *result]
+        return None
+
+    result = choose(room_ids, count)
+    if result is None:
+        raise ValueError("passage_count exceeds the available non-adjacent room pairs")
     return tuple(result)
 
 
@@ -342,17 +499,33 @@ def randomize_board_layout(
     if procedural:
         from .board_generation import generate_board_layout
 
-        layout = generate_board_layout(layout, random.Random(f"{seed}:map"), random.Random(
-            f"{seed}:map-doors:{int(doors)}",
-        ))
+        layout = generate_board_layout(
+            layout,
+            random.Random(f"{seed}:map"),
+            random.Random(f"{seed}:map-doors:{int(doors)}"),
+            randomize_doors=doors,
+        )
     elif doors:
         layout = replace(layout, doors=_random_doors(layout, random.Random(f"{seed}:doors")))
     if passages:
-        room_ids = [room.card_id for room in layout.rooms]
-        random.Random(f"{seed}:passages").shuffle(room_ids)
-        layout = replace(
-            layout,
-            passages=tuple((room_ids[2 * index], room_ids[2 * index + 1])
-                           for index in range(passage_count)),
+        room_ids = tuple(room.card_id for room in layout.rooms)
+        room_indices = tuple(range(len(room_ids)))
+        index_by_id = {room_id: index for index, room_id in enumerate(room_ids)}
+        adjacent = {
+            frozenset(index_by_id[room_id] for room_id in pair)
+            for pair in _adjacent_room_pairs(layout.rooms, layout.hallways)
+        }
+        eligible = {
+            frozenset((first, second))
+            for first in room_indices
+            for second in room_indices
+            if first < second and frozenset((first, second)) not in adjacent
+        }
+        if passage_count > _maximum_matching_size(room_indices, eligible):
+            raise ValueError("passage_count exceeds the available non-adjacent room pairs")
+        passage_indices = _random_passage_pairs(
+            room_indices, adjacent, passage_count, random.Random(f"{seed}:passages"),
         )
+        passage_pairs = tuple((room_ids[first], room_ids[second]) for first, second in passage_indices)
+        layout = replace(layout, passages=passage_pairs)
     return replace(layout, layout_id=f"{layout.layout_id}-randomized-v1")

@@ -388,9 +388,12 @@ and requires each player to have at least one card. Board games also offer
 suggesting without moving when starting a turn in a room and other movement,
 relocation, and accusation options. Independent layout options scramble room
 identities, randomize door positions away from corners and outside walls with
-at most one door per side while keeping each room's door count, and
-randomize 0–4 passages between distinct room pairs. A seed reproduces the
-layout, and replays retain it. The strategy toolkit score describes the
+at most one door per side and pair doors across adjacent rooms where possible,
+with any extra doors placed independently. Each room has at least one door,
+and door counts vary by layout. Randomized passages exclude adjacent rooms,
+use at most one passage per room, and are limited by the layout's available
+non-adjacent pairs (up to four). A seed reproduces the layout, and replays
+retain it. The strategy toolkit score describes the
 enabled techniques; it is not a predicted win rate. See the
 [board rules contract](docs/board-rules.md) for rule defaults and effects.
 

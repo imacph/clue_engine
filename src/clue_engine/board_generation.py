@@ -3,7 +3,14 @@
 import random
 from dataclasses import replace
 
-from .board import BoardLayout, Room, Square, _connected, _door_candidates, _neighbors
+from .board import (
+    BoardLayout,
+    Room,
+    Square,
+    _connected,
+    _neighbors,
+    _random_doors_for_rooms,
+)
 
 
 def _room_shape(room_id: int, box: tuple[int, int, int, int], shape: str) -> Room:
@@ -25,7 +32,13 @@ def _open_without_dead_ends(hallways: set[Square]) -> bool:
     return all(sum(neighbor in hallways for neighbor in _neighbors(square)) >= 2 for square in hallways)
 
 
-def generate_board_layout(layout: BoardLayout, rng: random.Random, door_rng: random.Random) -> BoardLayout:
+def generate_board_layout(
+    layout: BoardLayout,
+    rng: random.Random,
+    door_rng: random.Random,
+    *,
+    randomize_doors: bool = False,
+) -> BoardLayout:
     """Generate rooms and a connected hallway network without hallway dead ends."""
     from .board import DEFAULT_BOARD
 
@@ -65,14 +78,20 @@ def generate_board_layout(layout: BoardLayout, rng: random.Random, door_rng: ran
         starts = {start.square for start in layout.starts}
         if not starts <= hallways or not _connected(frozenset(hallways)) or not _open_without_dead_ends(hallways):
             continue
-        candidates = [_door_candidates(room, frozenset(hallways)) for room in generated]
-        counts = [len(layout.doors_for(room.card_id)) for room in generated]
-        if any(len(sides) < count for sides, count in zip(candidates, counts, strict=True)):
+        counts = {
+            room.card_id: len(layout.doors_for(room.card_id))
+            for room in generated
+        }
+        try:
+            doors = _random_doors_for_rooms(
+                generated,
+                frozenset(hallways),
+                counts,
+                door_rng,
+                randomize_counts=randomize_doors,
+            )
+        except ValueError:
             continue
-        doors = []
-        for sides, count in zip(candidates, counts, strict=True):
-            for side in door_rng.sample(sorted(sides), count):
-                doors.append(door_rng.choice(sides[side]))
         protected = starts | {door.hallway_square for door in doors}
         for door in doors:
             dx = door.hallway_square.x - door.room_square.x
