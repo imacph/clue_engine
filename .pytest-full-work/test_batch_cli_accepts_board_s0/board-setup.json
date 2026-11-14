@@ -1,1 +1,0 @@
-{"game_type": "board", "players": 3, "bots": ["random", {"candidate_rooms": true, "deal_analysis": true}, "strategic"], "game_rules": {"all_refute": true}, "board_rules": {"randomize_passages": true, "passage_count": 1}, "seat_suspects": [0, 2, 4], "shuffle_bots": true, "mode": "spectate", "notebook_mode": "automatic"}
