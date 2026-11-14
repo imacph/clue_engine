@@ -1,5 +1,34 @@
 # Changelog
 
+## Desktop 0.5.0 / App 0.7.1 / API 0.7.1 - 2026-11-14
+
+### Added
+
+- Add named learned bot profiles to setup, with player-count-specific learned
+  policies for three through six players and separate bundled model weights.
+- Add optional opponent-behavior and threat models for learned suggestions,
+  configurable model paths, and offline policy training, tuning, and evaluation.
+- Expand batch analysis with filterable per-seat turn-count and first-solution
+  distributions, plus knowledge trends across each seat's completed turns with
+  sample counts and ranges.
+- Include normalized effective settings in batch summaries and the web API;
+  rotate seeded bot-profile assignments across seats for reproducible, balanced
+  batch comparisons.
+- Add independent visibility controls for card hand badges and positive
+  notebook markers, and apply actor/type history filters to recent events.
+
+### Changed
+
+- Randomize room door counts within eligible sides, prioritize facing door
+  pairs across hallways, and restrict randomized passages to non-adjacent rooms.
+- Update batch-distribution labels and filtering to clarify changing cohorts,
+  incomplete games, and sample semantics.
+- Keep clause-marker selection responsive without rebuilding the notebook
+  table, and remove the Reveal all control from replay options.
+- Integrate learned profiles and model selection into shared browser and
+  Windows setup; package the player-count-specific model assets in the desktop
+  build.
+
 ## Desktop 0.5.0 / App 0.7.0 / API 0.7.0 - 2026-11-12
 
 ### Added
