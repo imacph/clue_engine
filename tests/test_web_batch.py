@@ -66,6 +66,13 @@ def test_batch_api_runs_setup_and_returns_summary_and_distributions(client):
     assert result["finished_games"] == 2
     assert result["summary"]["requested_games"] == 2
     assert result["summary"]["game_type"] == "card_only"
+    assert result["settings"]["games"] == 2
+    assert result["settings"]["seed"] == 13
+    assert result["settings"]["max_steps"] == 0
+    assert result["settings"]["players"] == 2
+    assert result["settings"]["policies"] == ["random", "deductive"]
+    assert "Game type: Card-only game" in result["settings_display"]
+    assert "Rotate profiles across seats: Yes" in result["settings_display"]
     assert set(result["summary"]["policy_stats"]) == {"random", "deductive"}
 
     chart = client.get(f"/api/batch/{batch_id}/distribution?metric=outcomes&width=1")

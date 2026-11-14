@@ -175,6 +175,8 @@ function renderBatchSummary(data) {
   const summary = data.summary;
   $("batch-summary").replaceChildren();
   $("batch-policy-summary").replaceChildren();
+  $("batch-settings").textContent = data.settings_display || "";
+  $("batch-settings-disclosure").hidden = !data.settings_display;
   if (!summary) return;
 
   const summaryGrid = document.createElement("div");
