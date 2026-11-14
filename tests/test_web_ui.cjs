@@ -15,7 +15,7 @@ const setupSource = fs.readFileSync(
   "utf8",
 );
 const learnedHelpers = setupSource.slice(
-  setupSource.indexOf("  const learnedDefaults ="),
+  setupSource.indexOf("  const legacyPresetNames ="),
   setupSource.indexOf("  const weights ="),
 );
 const stylesheet = fs.readFileSync(
@@ -1022,6 +1022,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
       reverse_refutation: "rule-reverse-refutation", public_refutations: "rule-public-refutations",
       all_refute: "rule-all-refute", face_up_card: "rule-face-up",
     };
+    ${learnedHelpers}
     ${setupSource.slice(start, end)}
   `, context);
   const result = vm.runInContext("payload()", context);
@@ -1050,7 +1051,7 @@ test("wizard payload validates and synchronizes unvisited seat and bot defaults"
   assert.throws(() => vm.runInContext("payload()", context), /Board starting positions are unavailable/);
 });
 
-test("bot cards keep common controls in place and disclose custom options", () => {
+test("bot cards show learned profiles by default and custom legacy controls on opt-in", () => {
   const start = setupSource.indexOf("  function renderBots() {");
   const end = setupSource.indexOf("  function rules()", start);
   const context = vm.createContext({});
@@ -1064,21 +1065,25 @@ test("bot cards keep common controls in place and disclose custom options", () =
         row.children.filter((child) => child.tag === "details" && child.open)); },
     });
     const list = make("div");
+    const shared = make("select");
     const fields = {
       players: { value: "2" }, mode: { value: "spectate" },
       "shuffle-bots": { checked: false }, "bot-list": list,
+      "enable-legacy-bots": { checked: false },
+      "all-bots": shared, "apply-bots": { disabled: false },
+      "bot-setup-message": { hidden: true, textContent: "" },
     };
     const $ = (id) => fields[id];
     const document = { createElement: make };
     const option = (value, label) => ({ value, label });
-    const isBoard = () => false;
+    const isBoard = () => true;
     const presets = { random: {}, deductive: {} };
-    const presetDescriptions = { random: "Random", deductive: "Deductive", learned: "Learned" };
     const strategyLabels = { candidate_suggestions: "Candidate cards" };
     const score = () => 50;
-    const bots = ["random", { candidate_suggestions: true }];
+    let bots;
     const batchMode = false, shuffleBotProfileCount = 2;
     ${learnedHelpers}
+    bots = [learnedProfile("hard"), learnedProfile("steady")];
     ${setupSource.slice(start, end)}
     renderBots();
   `, context);
@@ -1086,17 +1091,23 @@ test("bot cards keep common controls in place and disclose custom options", () =
   assert.deepEqual(Array.from(cards, (card) => Array.from(card.children, (child) => child.tag)),
     [["label", "p", "label", "details"], ["label", "p", "label", "details"]]);
   assert.equal(cards[0].children[3].open, false);
-  assert.equal(cards[1].children[3].children[0].textContent, "Edit strategy");
-  assert.equal(cards[1].children[3].children[2].tag, "fieldset");
-  cards[1].children[3].open = true;
+  assert.equal(cards[0].children[0].children[0].value, "hard");
+  assert.equal(cards[0].children[1].textContent, "Learned · Hard · opponent model on");
+  assert.equal(cards[1].children[0].children[0].value, "steady");
+  vm.runInContext('fields["enable-legacy-bots"].checked = true; bots[1] = {candidate_suggestions:true}; renderBots()', context);
+  const legacyCard = vm.runInContext("list.children[1]", context);
+  assert.equal(legacyCard.children[0].children[0].value, "custom");
+  assert.equal(legacyCard.children[3].children[0].textContent, "Edit custom strategy");
+  assert.equal(legacyCard.children[3].children[2].tag, "fieldset");
+  legacyCard.children[3].open = true;
   vm.runInContext("renderBots()", context);
   assert.equal(vm.runInContext("list.children[1].children[3].open", context), true);
   vm.runInContext('bots[0] = {type:"learned", room_temperature:0.7}; renderBots()', context);
   const controls = vm.runInContext("list.children[0].children[3].children.slice(3)", context);
-  assert.equal(controls.length, 6);
+  assert.equal(controls.length, 5);
   assert.equal(controls[0].children[1].value, "0.7");
-  assert.equal(controls[3].children[1].value, "0.5");
-  assert.equal(controls[5].children[0].checked, false);
+  assert.equal(controls[3].children[1].value, "0.275");
+  assert.equal(vm.runInContext("learnedSettings(bots[0]).opponent_model", context), true);
 });
 
 test("batch mode is an option within spectator setup only", () => {
@@ -1528,18 +1539,38 @@ test("random human seat preserves characters and every bot with or without bot s
   assert.equal(input.seat, 0);
 });
 
-test("factory quickplay uses four board players and the three requested bot styles", () => {
+test("factory quickplay uses learned profiles for its board-game bots", () => {
   const start = setupSource.indexOf("  function defaultQuickplay()");
   const end = setupSource.indexOf("  async function loadQuickplay()", start);
   const context = vm.createContext({});
-  vm.runInContext(`const standardRules = { secret_passages: true };
-    const gameRuleIds = { all_refute: "rule-all-refute" }; ${setupSource.slice(start, end)}`, context);
-  const config = context.defaultQuickplay();
+  const result = vm.runInContext(`${learnedHelpers}
+    const standardRules = { secret_passages: true };
+    const gameRuleIds = { all_refute: "rule-all-refute" }; ${setupSource.slice(start, end)}
+    const config = defaultQuickplay();
+    ({ config, profileNames: config.bots.slice(1).map(learnedProfileName) })`, context);
+  const config = result.config;
   assert.equal(config.game_type, "board");
   assert.equal(config.players, 4);
   assert.equal(config.mode, "play");
   assert.equal(config.shuffle_bots, true);
-  assert.deepEqual(Array.from(config.bots).slice(1).sort(), ["deductive", "probing", "strategic"]);
+  assert.deepEqual(Array.from(result.profileNames), ["focused", "steady", "cautious"]);
+  assert.ok(Array.from(config.bots).every((bot) => bot.opponent_model === true));
+});
+
+test("learned bot profiles stay bounded and always use the experimental opponent model", () => {
+  const result = vm.runInNewContext(`${learnedHelpers}
+    ({ profiles: learnedProfiles, hard: learnedProfile("hard"),
+      settings: learnedSettings({type:"learned", opponent_model:false}) })`);
+  assert.deepEqual(Object.keys(result.profiles), ["hard", "focused", "steady", "cautious", "gentle"]);
+  for (const profile of Object.values(result.profiles)) {
+    assert.ok(profile.room_temperature <= 0.3);
+    assert.ok(profile.suggestion_temperature <= 0.3);
+    assert.ok(profile.accusation_temperature <= 0.3);
+  }
+  assert.equal(result.hard.accusation_threshold, 0.275);
+  assert.equal(result.hard.threat_sensitivity, 0.9);
+  assert.equal(result.hard.opponent_model, true);
+  assert.equal(result.settings.opponent_model, true);
 });
 
 test("setup exposes the analytical preset with its additional reasoning described", () => {

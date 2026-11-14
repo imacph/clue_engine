@@ -1133,14 +1133,48 @@ body:not(.game-active) #error-message { bottom: 96px; left: 50%; max-width: min(
 #setup-screen .setup-bots-intro summary { color: var(--blue); cursor: pointer; font-weight: 600; }
 #setup-screen .setup-bots-intro details[open] { flex-basis: 100%; }
 #setup-screen .setup-bots-intro details[open] .hint { margin-top: 6px; }
+#setup-screen .bot-setup-intro {
+  align-items: center;
+  background: var(--clauses-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, .75fr);
+  margin: 0 0 14px;
+  padding: 12px 16px;
+}
+#setup-screen .bot-setup-intro > .hint { line-height: 1.4; margin: 0; }
+#setup-screen .legacy-bots-toggle {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  margin: 0;
+  min-height: 48px;
+  padding: 8px 10px;
+}
+#setup-screen .legacy-bots-toggle strong { color: var(--ink); }
+#setup-screen .bot-setup-intro .legacy-bots-toggle small { line-height: 1.35; }
+#setup-screen #bot-setup-message { margin: 0 0 12px; }
 #setup-screen #bot-list {
   align-items: stretch;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
 }
-#setup-screen #bot-list .setup-seat { display: flex; flex-direction: column; gap: 6px; }
+#setup-screen #bot-list .setup-seat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px var(--panel-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+}
 #setup-screen #bot-list label { min-width: 0; }
 #setup-screen #bot-list .hint { font-size: .8rem; line-height: 1.25; margin: 0; }
+#setup-screen #bot-list .bot-choice-label { color: var(--label-ink); font-size: .86rem; font-weight: 700; gap: 5px; }
+#setup-screen #bot-list .bot-profile-select { border-radius: 8px; font-size: .95rem; font-weight: 650; min-height: 42px; }
 #setup-screen #bot-list .bot-score {
   background: var(--blue-pale);
   border-radius: 5px;
@@ -1150,9 +1184,19 @@ body:not(.game-active) #error-message { bottom: 96px; left: 50%; max-width: min(
   padding: 3px 7px;
 }
 #setup-screen #bot-list .bot-copy { font-size: .8rem; }
-#setup-screen #bot-list details { font-size: .8rem; min-width: 0; overflow-wrap: anywhere; }
-#setup-screen #bot-list details summary { color: var(--blue); cursor: pointer; font-weight: 650; }
+#setup-screen #bot-list details {
+  border-top: 1px solid var(--line);
+  font-size: .8rem;
+  margin-top: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-top: 8px;
+}
+#setup-screen #bot-list details summary { color: var(--blue); cursor: pointer; font-weight: 700; }
 #setup-screen #bot-list details .hint { margin-top: 8px; }
+#setup-screen #bot-list .bot-settings-hint { line-height: 1.4; }
+#setup-screen #bot-list .bot-range-control { color: var(--label-ink); display: grid; font-size: .8rem; font-weight: 600; gap: 3px; margin-top: 10px; }
+#setup-screen #bot-list .bot-range-control input[type="range"] { accent-color: var(--blue); margin: 2px 0 0; min-height: 20px; padding: 0; width: 100%; }
 #setup-screen #bot-list fieldset { margin-top: 4px; }
 #setup-screen #bot-list fieldset .check-row { align-items: flex-start; margin: 8px 0; }
 #setup-screen #bot-list fieldset .check-row input { flex: 0 0 18px; margin: 2px 0 0; }
@@ -1190,6 +1234,7 @@ body:not(.game-active) #error-message { bottom: 96px; left: 50%; max-width: min(
 @media (max-width: 760px) {
   #setup-screen .setup-game-layout, #setup-screen .setup-seats-layout { grid-template-columns: minmax(0, 1fr); }
   #setup-screen .setup-board-preview svg { max-height: 320px; }
+  #setup-screen .bot-setup-intro { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 620px) {
   body:not(.game-active) main { margin: 10px auto 0; }
