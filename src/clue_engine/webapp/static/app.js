@@ -2769,7 +2769,6 @@ async function loadReplay() {
     position: $("replay-position").value,
     player: $("replay-player").value,
     manual: $("replay-manual").checked ? "1" : "0",
-    omniscient: $("replay-omniscient").checked ? "1" : "0",
   });
   try {
     const state = await requestJson(`/api/replay/state?${params}`);
@@ -3092,7 +3091,6 @@ async function openReplay() {
   lastReplayDeductionFingerprint = null;
   lastReplayKnowledgeFingerprint = null;
   $("replay-manual").checked = false;
-  $("replay-omniscient").checked = false;
   if (currentState.board) switchBoardTab("cards");
   await loadReplay();
 }
@@ -3823,7 +3821,7 @@ $("replay-position").addEventListener("input", () => {
   stopReplayPlayback();
   $("replay-position").value = target;
 });
-for (const id of ["replay-position", "replay-player", "replay-manual", "replay-omniscient"]) {
+for (const id of ["replay-position", "replay-player", "replay-manual"]) {
   $(id).addEventListener("change", () => {
     const target = $("replay-position").value;
     stopReplayPlayback();

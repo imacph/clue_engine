@@ -455,8 +455,7 @@ based only on what that player had observed at that point.
 Playback speeds range from 0.5× to 16×. At 4× and above, suggestion animations
 and reading pauses also shorten; a changed speed takes effect on the next step.
 For a human manual notebook, **Original notes** shows the marks and clauses
-actually recorded, including intermediate edits. **Reveal all** additionally
-shows the solution, all hands, and private events. Replay is read-only.
+actually recorded, including intermediate edits. Replay is read-only.
 The timeline and playback controls remain at the bottom of the screen. The
 player knowledge comparison replaces the card browser in the **Actions** area
 during replay. Its rankings animate during playback when players change
@@ -468,7 +467,7 @@ independently of the notebook perspective.
 Select a flag to jump there, or use **Previous flag** and **Next flag** when
 markers are close together. A flag can represent multiple discoveries; hover,
 focus, or select it to see their details. Flags cover the entire replay
-and reveal future discoveries, regardless of **Reveal all**. They represent
+including future discoveries. They represent
 deductions available from each player's observations, not necessarily what
 they noticed; direct card shows do not create inferred-card flags. Flags show
 card icons, with player colors and numbers when showing all players, or
@@ -491,8 +490,8 @@ discards the current game, and returns to the main menu. Ending permanently ends
 that game; an action limit alone does not unlock
 its secrets. **Save private replay** downloads a JSON file, and **Load replay**
 on the main menu opens a saved record. Replay files contain every
-hand and the solution even if **Reveal all** was not selected: do not share
-them with anyone who should not see the answers. Files are not encrypted.
+hand and the solution: do not share them with anyone who should not see the
+answers. Files are not encrypted.
 Import also accepts existing private version-1 and version-2 board records, but
 they have no historical manual notes. Notes are captured only in newly played
 games. A saved replay cannot be used to resume play.
