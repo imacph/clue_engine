@@ -47,6 +47,7 @@ let desktopFullscreen = false;
 let fullscreenBusy = false;
 let showCardHandIndicators = true;
 let showBoardIndicators = true;
+let hideOwnNegativeMarkers = true;
 let cardMarkerVisibility = { positive: true, negative: false, unknown: false, clause: false };
 let roomMarkerVisibility = { positive: true, negative: false, unknown: false, clause: false };
 let cardView = "hand";
@@ -1466,6 +1467,7 @@ function notebookOverlayMarkers(cardId, notes, visibility) {
     const type = mark === "+" ? "positive" : mark === "-" ? "negative" : "unknown";
     if (!visibility[type]
       || (type === "negative" && hasPositive)
+      || (type === "negative" && hideOwnNegativeMarkers && holder === notes.player)
       || (holder === notes.player && notes.hand.has(cardId))
       || (mark === "+" && conflict)) return [];
     const owner = holder === notes.players ? "Envelope" : `Player ${holder + 1}`;
@@ -3664,6 +3666,10 @@ $("show-card-hand-indicators").addEventListener("change", (event) => {
 $("show-board-indicators").addEventListener("change", (event) => {
   showBoardIndicators = event.target.checked;
   if (currentState) updateKnowledgeIndicators(currentState);
+});
+$("hide-own-negative-markers").addEventListener("change", (event) => {
+  hideOwnNegativeMarkers = event.target.checked;
+  if (currentState) updateCardNotes(currentState);
 });
 for (const target of ["card", "room"]) {
   for (const type of ["positive", "negative", "unknown", "clause"]) {

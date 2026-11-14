@@ -294,6 +294,7 @@ input, select {
 .game-options-dialog { max-width: min(560px, calc(100vw - 32px)); width: min(560px, calc(100vw - 32px)); }
 .game-options-actions { display: grid; gap: 8px; }
 .overlay-option-groups { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+.overlay-shared-option { border-bottom: 1px solid var(--line); grid-column: 1 / -1; margin: 0; padding: 0 0 8px; }
 .overlay-option-group { border: 1px solid var(--line); border-radius: 8px; margin: 0; min-width: 0; padding: 8px 12px; }
 .overlay-option-group legend { font-weight: 750; padding: 0 4px; }
 .overlay-option-group .check-row { font-size: .88rem; margin: 7px 0; }
