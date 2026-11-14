@@ -342,8 +342,12 @@
               <option value="outcomes">Outcomes</option>
               <option value="seat_outcomes">Bot seat outcomes</option>
               <option value="actions">Actions per game</option>
-              <option value="turns">Player 1 turns</option>
+              <option value="seat_turns">Turns per seat</option>
+              <option value="turns">Player 1 turns (game cohort)</option>
               <option value="deduction">First solution action</option>
+              <option value="solution_turn">First solution turn</option>
+              <option value="knowledge_learned">Solution learned over turns</option>
+              <option value="knowledge_candidates">Remaining candidates over turns</option>
               <optgroup label="Board events">
                 <option value="rolls" data-board-only>Dice rolls</option>
                 <option value="moves" data-board-only>Movement actions</option>
@@ -384,8 +388,8 @@
         <details class="batch-chart-method">
           <summary>How filters and samples work</summary>
           <p class="hint">Game measures select games containing the chosen profile at the chosen seat
-            (each game counts once). Bot seat outcomes and deduction count matching seat appearances.
-            Player 1 turns always means Player 1, regardless of filter.</p>
+            (each game counts once). Seat outcomes, turns per seat, and knowledge measures count
+            matching seat appearances. Player 1 turns always means Player 1, regardless of filter.</p>
         </details>
       </section>
       <section id="batch-panel-runs" class="panel batch-runs-panel" role="tabpanel" aria-labelledby="batch-tab-runs" hidden>

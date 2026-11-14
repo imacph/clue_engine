@@ -317,6 +317,7 @@ input, select {
 .batch-chart-grid { stroke: var(--line); stroke-width: 1; }
 .batch-chart-axis { fill: var(--muted); font-size: 11px; }
 .batch-chart-bar { fill: var(--blue); }
+.batch-chart-line { stroke: var(--blue); stroke-width: 2; }
 .batch-chart-bin:hover .batch-chart-bar, .batch-chart-bin:focus .batch-chart-bar { fill: var(--green); }
 .batch-chart-bin:focus { outline: none; }
 .batch-chart-bin:focus .batch-chart-hit { stroke: var(--focus); stroke-width: 2; }

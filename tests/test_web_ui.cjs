@@ -1089,6 +1089,31 @@ test("exact distribution data is paginated with cumulative counts across pages",
   assert.equal(ui.element("batch-bin-next").disabled, false);
 });
 
+test("knowledge over turns renders a line and paginated seat observations", () => {
+  const ui = frontend();
+  ui.element("batch-metric").value = "knowledge_learned";
+  ui.element("batch-chart-values").open = true;
+  ui.evaluate(`
+    lastBatchChart = {
+      title: "Solution learned over turns", details: "Matching seats", percent: true,
+      points: Array.from({ length: 60 }, (_, turn) =>
+        ({ turn, samples: 2, mean: .5, minimum: 0, maximum: 1 })),
+    };
+    renderBatchChart();
+  `);
+  const graph = ui.element("batch-chart-graph").children;
+  assert.equal(graph.filter((child) => child.class === "batch-chart-line").length, 59);
+  assert.match(graph.find((child) => child["aria-label"]?.includes("Turn 0"))["aria-label"], /50%.*range 0–100%/);
+  assert.equal(ui.element("batch-chart-empty").hidden, true);
+  assert.equal(ui.element("batch-bin-next").disabled, false);
+  ui.evaluate("batchBinOffset = 50; renderBatchBinTable()");
+  const rows = ui.element("batch-chart-table").children[0].children;
+  assert.equal(rows.length, 11);
+  assert.equal(rows[1].children[0].textContent, "50");
+  assert.equal(rows[1].children[2].textContent, "50");
+  assert.equal(ui.element("batch-bin-next").disabled, true);
+});
+
 test("batch workspace tabs switch visible panels without losing the selection", () => {
   const ui = frontend();
   ui.evaluate('switchBatchTab("runs")');

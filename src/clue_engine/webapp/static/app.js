@@ -340,6 +340,10 @@ function drawBatchGraph(chart) {
   const graph = $("batch-chart-graph");
   graph.replaceChildren();
   $("batch-chart-grouping").textContent = "";
+  if (chart?.points) {
+    drawBatchKnowledgeGraph(chart);
+    return;
+  }
   if (!chart || !chart.samples) return;
   const width = Math.max(240, graph.clientWidth || 900);
   const height = Math.max(190, graph.clientHeight || 240);
@@ -418,10 +422,79 @@ function drawBatchGraph(chart) {
   }
 }
 
+function drawBatchKnowledgeGraph(chart) {
+  const graph = $("batch-chart-graph");
+  if (!chart.points.length) return;
+  const width = Math.max(240, graph.clientWidth || 900);
+  const height = Math.max(190, graph.clientHeight || 240);
+  graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const left = 60, right = width - 18, top = 24, bottom = height - 38;
+  const lastTurn = Math.max(1, chart.points[chart.points.length - 1].turn);
+  const maximum = chart.percent ? 1 : chart.points.reduce((max, point) => Math.max(max, point.maximum), 1);
+  graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
+    chart.percent ? "Learned (%)" : "Candidates"));
+  for (let index = 0; index <= 4; index++) {
+    const fraction = index / 4;
+    const y = bottom - fraction * (bottom - top);
+    graph.append(svgElement("line", { x1: left, y1: y, x2: right, y2: y, class: "batch-chart-grid" }));
+    graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" },
+      formatBatchNumber(fraction * maximum * (chart.percent ? 100 : 1))));
+    graph.append(svgElement("text", { x: left + fraction * (right - left), y: bottom + 17,
+      "text-anchor": "middle", class: "batch-chart-axis" }, formatBatchNumber(fraction * lastTurn)));
+  }
+  graph.append(svgElement("text", { x: right, y: height - 2, "text-anchor": "end", class: "batch-chart-axis" }, "Seat turns"));
+  let previous = null;
+  for (const point of chart.points) {
+    const x = left + point.turn / lastTurn * (right - left);
+    const y = bottom - point.mean / maximum * (bottom - top);
+    if (previous) graph.append(svgElement("line", {
+      x1: previous.x, y1: previous.y, x2: x, y2: y, class: "batch-chart-line",
+    }));
+    const scale = chart.percent ? 100 : 1;
+    const description = `Turn ${point.turn}: mean ${formatBatchNumber(point.mean * scale)}`
+      + `${chart.percent ? "%" : ""}, ${point.samples} seat appearances; range `
+      + `${formatBatchNumber(point.minimum * scale)}–${formatBatchNumber(point.maximum * scale)}${chart.percent ? "%" : ""}.`;
+    const marker = svgElement("circle", { cx: x, cy: y, r: 4, class: "batch-chart-bar",
+      tabindex: 0, role: "img", "aria-label": description });
+    marker.append(svgElement("title", {}, description));
+    const inspect = () => { $("batch-chart-inspection").textContent = description; };
+    marker.addEventListener("mouseenter", inspect);
+    marker.addEventListener("focus", inspect);
+    graph.append(marker);
+    previous = { x, y };
+  }
+}
+
 function renderBatchBinTable() {
   const container = $("batch-chart-table");
   container.replaceChildren();
   const chart = lastBatchChart;
+  if (chart?.points) {
+    if (!$("batch-chart-values").open) return;
+    const table = document.createElement("table");
+    table.className = "batch-policy-table";
+    table.setAttribute("aria-label", "Knowledge by seat turn");
+    const end = Math.min(batchBinOffset + 50, chart.points.length);
+    for (const values of [
+      ["Turn", "Seat appearances", chart.percent ? "Learned (%)" : "Mean candidates", "Minimum", "Maximum"],
+      ...chart.points.slice(batchBinOffset, end).map((point) => [point.turn, point.samples,
+        formatBatchNumber(point.mean * (chart.percent ? 100 : 1)),
+        point.minimum * (chart.percent ? 100 : 1), point.maximum * (chart.percent ? 100 : 1)]),
+    ]) {
+      const row = document.createElement("tr");
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = String(value);
+        row.append(cell);
+      }
+      table.append(row);
+    }
+    container.append(table);
+    $("batch-bin-status").textContent = `Showing ${batchBinOffset + 1}–${end} of ${chart.points.length} turns.`;
+    $("batch-bin-previous").disabled = batchBinOffset === 0;
+    $("batch-bin-next").disabled = end >= chart.points.length;
+    return;
+  }
   if (!chart || !chart.samples || !$("batch-chart-values").open) return;
   const end = Math.min(batchBinOffset + 50, chart.bins.length);
   $("batch-bin-status").textContent =
@@ -464,14 +537,15 @@ function renderBatchChart() {
   stats.replaceChildren();
   $("batch-chart-graph").replaceChildren();
   $("batch-chart-table").replaceChildren();
-  $("batch-chart-empty").hidden = !chart || Boolean(chart.samples);
-  $("batch-chart-values").hidden = !chart || !chart.samples;
+  const hasData = chart && (chart.points ? chart.points.length : chart.samples);
+  $("batch-chart-empty").hidden = !chart || Boolean(hasData);
+  $("batch-chart-values").hidden = !hasData;
   $("batch-chart-grouping").textContent = "";
   $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
   if (!chart) return;
   $("batch-distribution-title").textContent =
     $("batch-metric").value === "deduction" ? "First solution action" : displayPlayerText(chart.title);
-  $("batch-chart-details").textContent =
+  $("batch-chart-details").textContent = chart.points ? chart.details :
     `${chart.samples} samples · ${chart.denominator}. ${chart.details}`;
   if (chart.numeric_summary) {
     for (const [label, key] of [
@@ -3577,7 +3651,7 @@ $("batch-bin-previous").addEventListener("click", () => {
   renderBatchBinTable();
 });
 $("batch-bin-next").addEventListener("click", () => {
-  if (!lastBatchChart || batchBinOffset + 50 >= lastBatchChart.bins.length) return;
+  if (!lastBatchChart || batchBinOffset + 50 >= (lastBatchChart.points || lastBatchChart.bins).length) return;
   batchBinOffset += 50;
   renderBatchBinTable();
 });

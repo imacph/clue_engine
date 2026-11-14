@@ -859,10 +859,16 @@ unavailable when there are no observed wins or no completed seats.
 Filter browser/desktop distributions by profile, seat, or both. Game-level
 measures select games containing that profile in the selected seat, counting
 each game once even if the profile appears more than once. The Player 1 turn
-measure always refers to Player 1, not the filtered seat. Bot seat outcomes and
-first-solution distributions instead count matching seat appearances; the
-latter includes only appearances recorded as learned in the histogram and
-reports the number not learned, including incomplete games. Game-length and
+measure always refers to Player 1, not the filtered seat. Turns per seat, bot
+seat outcomes, and first-solution distributions instead count matching seat
+appearances. Turns per seat pools completed seat appearances across all seats
+unless filtered. First-solution action and turn histograms include only
+appearances recorded as learned and report the number not learned, including
+incomplete games. Knowledge graphs show the fraction that learned the
+solution or mean remaining envelope candidates against each seat's own
+completed-turn count, using the last snapshot at that count. Later points
+include only seats still observed; the exact data lists sample counts and
+ranges. Game-length and
 board-event measures exclude incomplete games; outcomes include them. Numeric
 statistics are calculated from the original observations, not histogram bins.
 The fixed-height distribution graph plots numeric bins on a continuous axis,
