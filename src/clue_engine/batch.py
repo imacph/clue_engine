@@ -21,16 +21,28 @@ from .game_settings import (
     BoardRules,
     BotStrategy,
     GameRules,
+    LearnedStrategy,
+    bot_strategy_from_dict,
 )
 from .knowledge import InconsistentKnowledgeError, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, EndTurn, Pass, Reveal, Suggest
 from .observations import Event, EventKind
-from .policies import CustomPolicy, Policy, make_policy, validate_policy_names
+from .policies import (
+    POLICY_NAMES,
+    Policy,
+    make_policy,
+    validate_policy_names,
+)
 from .policies import policies_for_players as _policies_for_players
 from .session import create_board_game, create_game
 
-PolicySpec: TypeAlias = str | BotStrategy
+PolicySpec: TypeAlias = str | BotStrategy | LearnedStrategy
 GAME_TYPES = ("card_only", "board")
+BATCH_POLICY_NAMES = (*POLICY_NAMES, "learned")
+
+
+class BatchPolicyError(ValueError):
+    """A configured learned policy could not be initialized."""
 
 
 @dataclass(frozen=True)
@@ -57,9 +69,9 @@ class BatchConfig:
             raise ValueError("at least two player policies are required")
         for policy in self.policies:
             if isinstance(policy, str):
-                validate_policy_names((policy,))
-            elif not isinstance(policy, BotStrategy):
-                raise TypeError("policies must be named policies or BotStrategy values")
+                validate_policy_names((policy,), additional=("learned",))
+            elif not isinstance(policy, (BotStrategy, LearnedStrategy)):
+                raise TypeError("policies must be named policies or bot strategy values")
         if type(self.seed) is not int:
             raise TypeError("seed must be an integer")
         if type(self.max_steps) is not int or self.max_steps < 0:
@@ -72,6 +84,10 @@ class BatchConfig:
             raise ValueError("one bot profile per player is required unless profile shuffling is enabled")
         if not isinstance(self.game_type, str) or self.game_type not in GAME_TYPES:
             raise ValueError(f"game_type must be one of {', '.join(GAME_TYPES)}")
+        if self.game_type != "board" and any(
+            policy == "learned" or isinstance(policy, LearnedStrategy) for policy in self.policies
+        ):
+            raise ValueError("the learned policy supports board games only")
         if not isinstance(self.game_rules, GameRules):
             raise TypeError("game_rules must be GameRules")
         if not isinstance(self.board_rules, BoardRules):
@@ -129,7 +145,7 @@ def batch_config_from_setup(
             if isinstance(bot, str):
                 policies.append(bot)
             elif isinstance(bot, dict):
-                policies.append(BotStrategy(**bot))
+                policies.append(bot_strategy_from_dict(bot))
             else:
                 raise TypeError(
                     f"bot {index} must be a named policy or strategy object; "
@@ -266,11 +282,16 @@ class BatchSummary(TypedDict):
 def _policy_label(spec: PolicySpec) -> str:
     if isinstance(spec, str):
         return spec
+    if isinstance(spec, LearnedStrategy):
+        return "learned:" + ",".join(
+            f"{item.name}={getattr(spec, item.name):g}"
+            for item in fields(LearnedStrategy) if item.name != "type"
+        )
     enabled = [item.name for item in fields(BotStrategy) if getattr(spec, item.name)]
     return f"custom:{','.join(enabled) if enabled else 'none'}"
 
 
-def _policy_data(spec: PolicySpec) -> str | dict[str, bool]:
+def _policy_data(spec: PolicySpec) -> str | dict[str, object]:
     return spec if isinstance(spec, str) else asdict(spec)
 
 
@@ -291,17 +312,27 @@ def _make_game(
             if config.game_type == "board" else {}
         ),
     )
-    policies = tuple(
-        CustomPolicy(random.Random(f"{seed}:{game}:{seat}"), spec)
-        if isinstance(spec, BotStrategy) else
-        make_policy(spec, random.Random(f"{seed}:{game}:{seat}"))
-        for seat, spec in enumerate(specs)
-    )
+    policies = tuple(_make_batch_policy(spec, random.Random(f"{seed}:{game}:{seat}"))
+                     for seat, spec in enumerate(specs))
     return engine, policies
 
 
+def _make_batch_policy(spec: PolicySpec, rng: random.Random) -> Policy:
+    return make_policy(spec, rng)
+
+
+def _validate_policy_models(config: BatchConfig) -> None:
+    for seat, spec in enumerate(config.policies):
+        if spec != "learned" and not isinstance(spec, LearnedStrategy):
+            continue
+        try:
+            _make_batch_policy(spec, random.Random(f"{config.seed}:preflight:{seat}"))
+        except (OSError, ValueError) as exc:
+            raise BatchPolicyError(f"invalid learned policy model: {exc}") from exc
+
+
 def policies_for_players(value: str, players: int) -> tuple[str, ...]:
-    return _policies_for_players(value, players)
+    return _policies_for_players(value, players, additional=("learned",))
 
 
 def policy_profiles(value: str, players: int, shuffle_bots: bool) -> tuple[str, ...]:
@@ -310,7 +341,7 @@ def policy_profiles(value: str, players: int, shuffle_bots: bool) -> tuple[str, 
         return _policies_for_players(value, players)
     if len(names) != players and (not shuffle_bots or not 2 <= len(names) < players):
         raise ValueError("supply one policy or one policy per player")
-    validate_policy_names(names)
+    validate_policy_names(names, additional=("learned",))
     return names
 
 
@@ -632,6 +663,7 @@ def run_batch(
 ) -> BatchSummary:
     """Write all private traces to a new file and return aggregate statistics."""
     config.validate()
+    _validate_policy_models(config)
     should_cancel = cancelled if cancelled is not None else lambda: False
     aggregate = _Aggregate(config)
     with trace_path.open("x", encoding="utf-8", newline="\n") as stream:

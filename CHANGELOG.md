@@ -1,5 +1,29 @@
 # Changelog
 
+## Desktop 0.5.0 / App 0.7.0 / API 0.7.0 - 2026-11-12
+
+### Added
+
+- Add an optional learned board policy with configurable room, suggestion, and
+  accusation decisions, including packaged policy weights and setup-profile
+  controls.
+- Add optional opponent-behavior and threat models for learned suggestions,
+  with configurable model paths; the opponent model can be overridden with
+  `CLUE_OPPONENT_MODEL`.
+- Add offline policy training, curriculum and evolutionary tuning, and
+  evaluation tools with paired policy comparisons and uncertainty estimates.
+- Integrate learned strategies into board setup, batch simulations, and CLI
+  configuration.
+
+### Changed
+
+- Preserve deduction-based suggestion filters when applying learned policy
+  preferences, and retain learned room goals across turns.
+- Expand batch analysis and traces to report learned-policy configuration and
+  benchmark comparisons.
+- Bundle the learned, opponent, and threat model files in the Windows desktop
+  build.
+
 ## Desktop 0.4.1 / App 0.6.2 / API 0.6.3 - 2026-11-08
 
 ### Added

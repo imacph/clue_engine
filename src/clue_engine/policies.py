@@ -12,7 +12,7 @@ from .deal_analysis import (
     deduce_deal_constraints,
     solution_deal_counts,
 )
-from .game_settings import BotStrategy
+from .game_settings import BotStrategy, LearnedStrategy
 from .knowledge import (
     InconsistentKnowledgeError,
     Knowledge,
@@ -461,6 +461,18 @@ class StrategicPolicy(ProbingPolicy):
         self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
         *, prefer_probe: bool,
     ) -> Action:
+        ranked = self._suggestion_components(
+            view, knowledge, suggestions, prefer_probe=prefer_probe,
+        )
+        best = max(ranked.values())
+        return self.rng.choice(tuple(
+            suggestion for suggestion, score in ranked.items() if score == best
+        ))
+
+    def _suggestion_components(
+        self, view: PlayerView, knowledge: Knowledge, suggestions: tuple[Suggest, ...],
+        *, prefer_probe: bool,
+    ) -> dict[Suggest, tuple[int | float, ...]]:
         deals = consistent_deals(knowledge, self._deal_counts) if self._deal_counts else None
         hints, weights = self._suggestion_evidence(view, knowledge, deals)
         unresolved: dict[int, set[frozenset[int]]] = {}
@@ -524,9 +536,7 @@ class StrategicPolicy(ProbingPolicy):
                 relocation,
             )
 
-        ranked = [(score(suggestion), suggestion) for suggestion in suggestions]
-        best = max(item[0] for item in ranked)
-        return self.rng.choice(tuple(suggestion for value, suggestion in ranked if value == best))
+        return {suggestion: score(suggestion) for suggestion in suggestions}
 
 
 class AnalyticalPolicy(StrategicPolicy):
@@ -680,22 +690,46 @@ POLICY_TYPES: dict[str, type[RandomPolicy]] = {
 POLICY_NAMES = tuple(POLICY_TYPES)
 
 
-def validate_policy_names(names: Sequence[str]) -> None:
+def validate_policy_names(names: Sequence[str], *, additional: Sequence[str] = ()) -> None:
     for name in names:
-        if name not in POLICY_TYPES:
-            raise ValueError(f"unknown policy {name!r}; choose from {', '.join(POLICY_NAMES)}")
+        if name not in POLICY_TYPES and name not in additional:
+            raise ValueError(
+                f"unknown policy {name!r}; choose from {', '.join((*POLICY_NAMES, *additional))}"
+            )
 
 
-def policies_for_players(value: str, players: int) -> tuple[str, ...]:
+def policies_for_players(
+    value: str, players: int, *, additional: Sequence[str] = (),
+) -> tuple[str, ...]:
     names = tuple(name.strip().lower() for name in value.split(","))
     if len(names) == 1:
         names = names * players
     if len(names) != players:
         raise ValueError("supply one policy or one policy per player")
-    validate_policy_names(names)
+    validate_policy_names(names, additional=additional)
     return names
 
 
-def make_policy(name: str, rng: random.Random) -> Policy:
+def make_policy(name: str | BotStrategy | LearnedStrategy, rng: random.Random) -> Policy:
+    if isinstance(name, BotStrategy):
+        return CustomPolicy(rng, name)
+    if name == "learned" or isinstance(name, LearnedStrategy):
+        from .learning import load_default_model
+        from .learning_policy import LearningPolicy
+        from .opponent_model import load_packaged_model
+        from .threat_model import load_packaged_model as load_threat_model
+
+        return LearningPolicy(
+            rng, load_default_model(),
+            strategy=name if isinstance(name, LearnedStrategy) else LearnedStrategy(),
+            opponent_model=(
+                load_packaged_model() if isinstance(name, LearnedStrategy) and name.opponent_model
+                else None
+            ),
+            threat_model=(
+                load_threat_model() if isinstance(name, LearnedStrategy) and name.threat_sensitivity > 0
+                else None
+            ),
+        )
     validate_policy_names((name,))
     return POLICY_TYPES[name](rng)

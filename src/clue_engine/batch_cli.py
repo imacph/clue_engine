@@ -8,7 +8,9 @@ from pathlib import Path
 from threading import Event
 
 from .batch import (
+    BATCH_POLICY_NAMES,
     BatchConfig,
+    BatchPolicyError,
     BatchSummary,
     batch_config_from_setup,
     format_summary,
@@ -21,7 +23,6 @@ from .distributions_cli import (
     render_options,
     validate_options,
 )
-from .policies import POLICY_NAMES
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--players", type=int, help="card-only player count (default: 4)")
     parser.add_argument(
         "--policies",
-        help=f"one policy or comma-separated policies: {', '.join(POLICY_NAMES)}",
+        help=f"one policy or comma-separated policies: {', '.join(BATCH_POLICY_NAMES)}",
     )
     parser.add_argument(
         "--setup", type=Path,
@@ -100,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
         summary = run_batch(
             config, args.trace, progress=progress, cancelled=stop.is_set, on_game=distributions.add_game,
         )
+    except BatchPolicyError as exc:
+        print(f"Unable to initialize learned policy: {exc}", file=sys.stderr)
+        return 2
     except OSError as exc:
         print(f"Unable to write trace: {exc}", file=sys.stderr)
         return 2

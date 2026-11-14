@@ -14,6 +14,10 @@ const setupSource = fs.readFileSync(
   path.join(__dirname, "..", "src", "clue_engine", "webapp", "static", "setup.js"),
   "utf8",
 );
+const learnedHelpers = setupSource.slice(
+  setupSource.indexOf("  const learnedDefaults ="),
+  setupSource.indexOf("  const weights ="),
+);
 const stylesheet = fs.readFileSync(
   path.join(__dirname, "..", "src", "clue_engine", "webapp", "static", "style.css"),
   "utf8",
@@ -890,6 +894,7 @@ test("bot cards keep common controls in place and disclose custom options", () =
       tag, children: [], dataset: {}, open: false,
       append(...items) { this.children.push(...items); },
       replaceChildren(...items) { this.children = items; },
+      addEventListener() {},
       querySelectorAll() { return this.children.flatMap((row) =>
         row.children.filter((child) => child.tag === "details" && child.open)); },
     });
@@ -903,11 +908,12 @@ test("bot cards keep common controls in place and disclose custom options", () =
     const option = (value, label) => ({ value, label });
     const isBoard = () => false;
     const presets = { random: {}, deductive: {} };
-    const presetDescriptions = { random: "Random", deductive: "Deductive" };
+    const presetDescriptions = { random: "Random", deductive: "Deductive", learned: "Learned" };
     const strategyLabels = { candidate_suggestions: "Candidate cards" };
     const score = () => 50;
     const bots = ["random", { candidate_suggestions: true }];
     const batchMode = false, shuffleBotProfileCount = 2;
+    ${learnedHelpers}
     ${setupSource.slice(start, end)}
     renderBots();
   `, context);
@@ -920,6 +926,12 @@ test("bot cards keep common controls in place and disclose custom options", () =
   cards[1].children[3].open = true;
   vm.runInContext("renderBots()", context);
   assert.equal(vm.runInContext("list.children[1].children[3].open", context), true);
+  vm.runInContext('bots[0] = {type:"learned", room_temperature:0.7}; renderBots()', context);
+  const controls = vm.runInContext("list.children[0].children[3].children.slice(3)", context);
+  assert.equal(controls.length, 6);
+  assert.equal(controls[0].children[1].value, "0.7");
+  assert.equal(controls[3].children[1].value, "0.5");
+  assert.equal(controls[5].children[0].checked, false);
 });
 
 test("batch mode is an option within spectator setup only", () => {
@@ -1196,6 +1208,7 @@ test("quickplay review describes shuffled styles without claiming assigned bot s
     const document = { createElement: () => ({ textContent: "", children: [],
       append(...items) { this.children.push(...items); } }),
       createTextNode: (text) => ({ textContent: text }) };
+    ${learnedHelpers}
     ${setupSource.slice(start, end)}
     const review = { children: [], replaceChildren() { this.children = []; },
       append(child) { this.children.push(child); } };
@@ -1221,6 +1234,7 @@ test("batch review explains balanced randomized profile seat assignments", () =>
     const document = { createElement: () => ({ textContent: "", children: [],
       append(...items) { this.children.push(...items); } }),
       createTextNode: (text) => ({ textContent: text }) };
+    ${learnedHelpers}
     ${setupSource.slice(start, end)}
     const review = { children: [], replaceChildren() { this.children = []; },
       append(child) { this.children.push(child); } };
@@ -1244,6 +1258,7 @@ test("review warns when an analytical bot can make risky accusations", () => {
     const document = { createElement: () => ({ textContent: "", children: [],
       append(...items) { this.children.push(...items); } }),
       createTextNode: (text) => ({ textContent: text }) };
+    ${learnedHelpers}
     ${setupSource.slice(start, end)}
     const review = { children: [], replaceChildren() { this.children = []; },
       append(child) { this.children.push(child); } };
@@ -1259,7 +1274,9 @@ test("setup profiles validate and persist in browser and desktop storage", async
   assert.ok(start !== -1 && end !== -1);
   const context = vm.createContext({});
   const result = await vm.runInContext(`(async () => {
-    const presets = { random: {} }, strategyLabels = {}, ruleIds = {}, gameRuleIds = {};
+    const presets = { random: {} }, strategyLabels = {},
+      ruleIds = {move_suspect: "", move_weapon: "", summoned_suggestion: "", secret_passages: ""},
+      gameRuleIds = {};
     const storageKey = "profiles", quickplayProfile = "__clue_engine_quickplay__";
     let profiles = Object.create(null), profilesReady = false, saved = null, calls = [];
     const select = { value: "", replaceChildren(...items) { this.items = items; },
@@ -1275,11 +1292,19 @@ test("setup profiles validate and persist in browser and desktop storage", async
       calls.push({ path, options });
       return { profiles: { Desktop: profile } };
     };
+    ${learnedHelpers}
     ${setupSource.slice(start, end)}
     const profile = { mode: "play", game_type: "card_only", players: 2, seat: 0,
       bots: ["random", "random"], progress: "turn", max_steps: 100, debug: false };
     const balanced = { ...profile, players: 3, bots: ["random", "random"], shuffle_bots: true };
     validateProfile(balanced);
+    const board = { ...profile, game_type: "board", players: 3, seat_suspects: [0, 1, 2],
+      bots: ["random", {type: "learned", room_temperature: 0.7, opponent_model: true}, "random"],
+      board_rules: {move_suspect: true, move_weapon: true, summoned_suggestion: true, secret_passages: true} };
+    validateProfile(board);
+    let invalidLearned;
+    try { validateProfile({...board, bots: ["random", {type: "learned", room_temperature: -1}, "random"]}); }
+    catch (error) { invalidLearned = error.message; }
     await loadProfiles();
     await persistProfiles({ Browser: profile });
     profiles = Object.create(null);
@@ -1291,10 +1316,11 @@ test("setup profiles validate and persist in browser and desktop storage", async
     window.clueOptions.desktop = true;
     await loadProfiles();
     await persistProfiles({ Desktop: profile });
-    return { browserNames, invalid, desktopNames: Object.keys(profiles), ready: profilesReady, calls };
+    return { browserNames, invalid, invalidLearned, desktopNames: Object.keys(profiles), ready: profilesReady, calls };
   })()`, context);
   assert.deepEqual(Array.from(result.browserNames), ["Browser"]);
   assert.match(result.invalid, /Invalid setup profile/);
+  assert.match(result.invalidLearned, /Invalid learned bot settings/);
   assert.deepEqual(Array.from(result.desktopNames), ["Desktop"]);
   assert.equal(result.ready, true);
   assert.equal(result.calls[0].path, "/api/desktop/profiles");

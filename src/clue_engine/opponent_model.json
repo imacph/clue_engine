@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "suggestion_weights": [
+    -1.8413703840457092,
+    0.2458515433413969,
+    -0.7542983737670353,
+    3.952789545200893,
+    2.012666802973844
+  ],
+  "reveal_weights": [
+    1.6705810514398274,
+    0.0
+  ],
+  "metadata": {
+    "games": 160,
+    "seed": 3100000,
+    "opponents": [
+      "analytical",
+      "analytical",
+      "analytical",
+      "strategic",
+      "probing",
+      "deductive"
+    ],
+    "boards": "mixed",
+    "timeouts": 0,
+    "training_prediction": {
+      "suggestion": {
+        "examples": 5808,
+        "log_loss": 1.5351633756648997,
+        "uniform_log_loss": 1.7917594692280547
+      },
+      "reveal": {
+        "examples": 624,
+        "log_loss": 0.7177173878094263,
+        "uniform_log_loss": 0.731484426358634
+      }
+    }
+  }
+}

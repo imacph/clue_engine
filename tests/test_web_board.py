@@ -42,6 +42,51 @@ def test_board_player_limits_do_not_change_card_only(client, players):
     assert cards.get_json()["legal"]["suggest"] is True
 
 
+def test_learned_policy_is_available_for_board_play_only(client):
+    csrf = token(client)
+    board = post(client, csrf, "/api/game", {
+        "game_type": "board", "mode": "spectate", "players": 3,
+        "bots": ["learned", "random", "random"], "progress": "step",
+    })
+    assert board.status_code == 201
+    card_only = post(client, csrf, "/api/game", {
+        "game_type": "card_only", "mode": "spectate", "players": 3,
+        "bots": ["learned", "random", "random"],
+    })
+    assert card_only.status_code == 400
+    assert card_only.get_json()["error"] == "the learned policy supports board games only"
+
+
+def test_configured_learned_policy_is_validated_for_web_games(client):
+    csrf = token(client)
+    bot = {
+        "type": "learned", "room_temperature": 0.7, "suggestion_temperature": 1.2,
+        "accusation_temperature": 0.3, "accusation_threshold": 0.75,
+        "opponent_model": True, "threat_sensitivity": 0.7,
+    }
+    setup = {"mode": "spectate", "players": 3, "bots": [bot, "random", "random"]}
+    assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 201
+    assert post(client, csrf, "/api/game", {**setup, "game_type": "card_only"}).status_code == 400
+    bot["room_temperature"] = -1
+    assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 400
+    bot["room_temperature"] = 0.7
+    for field, value in (("opponent_model", "true"), ("threat_sensitivity", 1.1)):
+        original = bot[field]
+        bot[field] = value
+        assert post(client, csrf, "/api/game", {**setup, "game_type": "board"}).status_code == 400
+        bot[field] = original
+
+
+def test_missing_learned_model_is_reported_by_web_api(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(tmp_path / "missing.json"))
+    response = post(client, token(client), "/api/game", {
+        "game_type": "board", "mode": "spectate", "players": 3,
+        "bots": ["learned", "random", "random"],
+    })
+    assert response.status_code == 500
+    assert "CLUE_LEARNED_MODEL" in response.get_json()["error"]
+
+
 def test_setup_page_and_public_board_state(client):
     csrf = token(client)
     page = client.get("/").data

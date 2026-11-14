@@ -29,7 +29,12 @@ from ..cards import CARDS, CARDS_BY_ID
 from ..desktop_preferences import DesktopPreferences
 from ..distributions import BOARD_METRICS, Distribution, DistributionBin, Distributions
 from ..engine import Engine, IllegalActionError, replay_history
-from ..game_settings import BoardRules, BotStrategy, GameRules
+from ..game_settings import (
+    BoardRules,
+    GameRules,
+    LearnedStrategy,
+    bot_strategy_from_dict,
+)
 from ..knowledge import Knowledge, Mark, knowledge_for
 from ..models import (
     Accuse,
@@ -47,7 +52,7 @@ from ..observations import (
     is_incorrect_accusation,
     view_for,
 )
-from ..policies import POLICY_NAMES, CustomPolicy, make_policy, policies_for_players
+from ..policies import POLICY_NAMES, make_policy, policies_for_players
 from ..presentation import (
     format_clauses,
     format_event,
@@ -1037,22 +1042,24 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 if not 0 <= seat < num_players:
                     raise ValueError("Your seat must identify an existing player.")
             bots = body.get("bots")
+            additional_policies = ("learned",)
             if "bots" in body and ("policy" in body or "policies" in body):
                 raise ValueError("Use either bots or legacy policy fields, not both.")
             if "bots" in body:
                 if not isinstance(bots, list) or len(bots) != num_players:
                     raise ValueError("Supply one bot configuration per seat.")
+                if game_type != "board" and any(bot == "learned" for bot in bots):
+                    raise ValueError("the learned policy supports board games only")
                 for index, bot in enumerate(bots):
                     if bot is None:
                         if index != seat:
                             raise ValueError("Only the human seat may omit its bot configuration.")
                     elif isinstance(bot, str):
-                        policies_for_players(bot, 1)
+                        policies_for_players(bot, 1, additional=additional_policies)
                     elif isinstance(bot, dict):
-                        allowed = {item.name for item in fields(BotStrategy)}
-                        if set(bot) - allowed:
-                            raise ValueError("Unknown bot strategy setting.")
-                        BotStrategy(**bot)
+                        strategy = bot_strategy_from_dict(bot)
+                        if isinstance(strategy, LearnedStrategy) and game_type != "board":
+                            raise ValueError("the learned policy supports board games only")
                     else:
                         raise TypeError("Each bot must be a policy name or strategy object.")
             per_seat_policies = body.get("policies", "")
@@ -1064,7 +1071,9 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             )
             if not isinstance(policy_selection, str):
                 raise TypeError("Policy must be text.")
-            policies_for_players(policy_selection, num_players)
+            policies_for_players(
+                policy_selection, num_players, additional=additional_policies,
+            )
             debug = body.get("debug", False)
             if type(debug) is not bool:
                 raise ValueError("Debug must be true or false.")
@@ -1094,13 +1103,20 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             engine, policies = factory(num_players, seed, policy_selection, **board_options)
             if bots is not None:
                 policies = tuple(
-                    CustomPolicy(random.Random(f"{seed}:{index}"), BotStrategy(**bot))
-                    if isinstance(bot, dict) else
-                    make_policy(bot if isinstance(bot, str) else "random", random.Random(f"{seed}:{index}"))
+                    make_policy(
+                        bot_strategy_from_dict(bot) if isinstance(bot, dict)
+                        else bot if isinstance(bot, str) else "random",
+                        random.Random(f"{seed}:{index}"),
+                    )
                     for index, bot in enumerate(bots)
                 )
         except (TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
+        except OSError:
+            app.logger.exception("Failed to load a learned or opponent model")
+            return jsonify(error=(
+                "Could not load a model. Check CLUE_LEARNED_MODEL and CLUE_OPPONENT_MODEL."
+            )), 500
 
         session_game = GameSession(
             engine,

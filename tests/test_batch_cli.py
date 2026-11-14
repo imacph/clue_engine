@@ -28,6 +28,25 @@ def test_batch_cli_rejects_bad_policy_count_before_writing(tmp_path):
     assert not trace.exists()
 
 
+def test_batch_cli_reports_invalid_learned_model_without_creating_trace(
+    tmp_path, monkeypatch, capsys,
+):
+    from clue_engine import batch_cli
+
+    setup = tmp_path / "setup.json"
+    setup.write_text(json.dumps({
+        "game_type": "board", "players": 3, "bots": ["learned", "random", "random"],
+    }), encoding="utf-8")
+    trace = tmp_path / "invalid-model.jsonl"
+    monkeypatch.setenv("CLUE_LEARNED_MODEL", str(tmp_path / "missing-model.json"))
+
+    result = batch_cli.main(["--setup", str(setup), "--trace", str(trace)])
+
+    assert result == 2
+    assert "Unable to initialize learned policy" in capsys.readouterr().err
+    assert not trace.exists()
+
+
 def test_batch_cli_accepts_advanced_profiles(tmp_path):
     trace = tmp_path / "advanced.jsonl"
     result = subprocess.run(

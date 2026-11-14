@@ -23,6 +23,7 @@ window.setupWizard = (() => {
       repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
       deal_analysis: true,
     },
+    learned: {},
     analytical: {
       candidate_suggestions: true, rank_suggestions: true,
       repeat_reveals: true, candidate_rooms: true, prefer_suggest: true,
@@ -35,7 +36,26 @@ window.setupWizard = (() => {
     probing: "Adds controlled probes and repeats previously shown cards.",
     strategic: "Ranks suggestions and analyzes possible deals when practical; never guesses.",
     analytical: "Adds deeper deal counting and opponent modeling; risks accusations at 50% estimated confidence.",
+    learned: "Uses the configured learned model for room goals, suggestions, and calculated accusations.",
   };
+  const learnedDefaults = {
+    type: "learned", room_temperature: 0, suggestion_temperature: 0,
+    accusation_temperature: 0, accusation_threshold: 0.5, opponent_model: false,
+    threat_sensitivity: 0,
+  };
+  const learnedControls = {
+    room_temperature: ["Room exploration", 5, 0.1],
+    suggestion_temperature: ["Suggestion exploration", 5, 0.1],
+    accusation_temperature: ["Accusation exploration", 5, 0.1],
+    accusation_threshold: ["Accusation confidence threshold (1 = sound only)", 1, 0.05],
+    threat_sensitivity: ["Opponent threat sensitivity", 1, 0.1],
+  };
+  function isLearned(value) {
+    return value === "learned" || (value && typeof value === "object" && value.type === "learned");
+  }
+  function learnedSettings(value) {
+    return { ...learnedDefaults, ...(typeof value === "object" ? value : {}) };
+  }
   const weights = {
     candidate_suggestions: 20, probe_suggestions: 15, rank_suggestions: 15,
     repeat_reveals: 15, candidate_rooms: 15, prefer_suggest: 10, deal_analysis: 15,
@@ -123,6 +143,10 @@ window.setupWizard = (() => {
     }
     if (isBoard() && !metadata) {
       showError(missingBoardSetup);
+      return false;
+    }
+    if (!isBoard() && bots.some(isLearned)) {
+      showError("The learned policy supports board games only.");
       return false;
     }
     return true;
@@ -237,6 +261,11 @@ window.setupWizard = (() => {
   function renderBots() {
     const count = Number($("players").value);
     if (!Number.isInteger(count) || count < 2 || (isBoard() && count > 6)) return;
+    const learnedUnavailable = !isBoard();
+    const sharedBots = $("all-bots");
+    const sharedLearnedOption = sharedBots
+      ? sharedBots.querySelector('option[value="learned"]') : null;
+    if (sharedLearnedOption) sharedLearnedOption.disabled = learnedUnavailable;
     const human = $("mode").value === "play" ? Number($("seat").value) : null;
     const profileCount = batchMode && $("shuffle-bots").checked
       ? shuffleBotProfileCount : count;
@@ -255,24 +284,30 @@ window.setupWizard = (() => {
       label.textContent = `Player ${i + 1} bot`;
       const select = document.createElement("select");
       select.dataset.botSeat = String(i);
-      for (const name of Object.keys(presets)) select.append(option(name, name[0].toUpperCase() + name.slice(1)));
+      for (const name of Object.keys(presets)) {
+        const preset = option(name, name[0].toUpperCase() + name.slice(1));
+        if (name === "learned") preset.disabled = learnedUnavailable;
+        select.append(preset);
+      }
       select.append(option("custom", "Custom"));
-      select.value = typeof value === "string" ? value : "custom";
+      select.value = isLearned(value) ? "learned" : typeof value === "string" ? value : "custom";
       label.append(select);
       const summary = document.createElement("p");
       summary.className = "hint bot-score";
       summary.dataset.botScore = String(i);
-      summary.textContent = `Toolkit: ${score(value)}/100`
-        + (value === "analytical" ? " · may accuse at 50%" : "");
+      summary.textContent = isLearned(value) ? "Learned model · board only · may risk elimination"
+        : `Toolkit: ${score(value)}/100${value === "analytical" ? " · may accuse at 50%" : ""}`;
       const description = document.createElement("p");
       description.className = "hint";
-      description.textContent = typeof value === "string" ? presetDescriptions[value]
+      description.textContent = isLearned(value) ? presetDescriptions.learned
+        : typeof value === "string" ? presetDescriptions[value]
         : "Custom choices use probes first, then candidate filtering, followed by optional ranking; they do not include analytical opponent modeling.";
       const details = document.createElement("details");
       details.dataset.botDetails = String(i);
       details.open = expanded.has(String(i));
       const detailsTitle = document.createElement("summary");
-      detailsTitle.textContent = typeof value === "string" ? "Strategy details" : "Edit strategy";
+      detailsTitle.textContent = isLearned(value) ? "Configure learned bot"
+        : typeof value === "string" ? "Strategy details" : "Edit strategy";
       details.append(detailsTitle, description);
       const copyLabel = document.createElement("label");
       copyLabel.className = "bot-copy";
@@ -287,7 +322,39 @@ window.setupWizard = (() => {
       }
       copyLabel.append(copySelect);
       row.append(label, summary, copyLabel, details);
-      if (typeof value !== "string") {
+      if (isLearned(value)) {
+        const settings = learnedSettings(value);
+        const hint = document.createElement("p");
+        hint.className = "hint";
+        hint.textContent = "Zero temperature chooses the highest-scoring action; higher values add randomness. Confidence is estimated from bounded deal counts, not guaranteed.";
+        details.append(hint);
+        for (const [key, [text, max, increment]] of Object.entries(learnedControls)) {
+          const item = document.createElement("label");
+          const output = document.createElement("span");
+          output.textContent = `${text}: ${settings[key]}`;
+          const input = document.createElement("input");
+          input.type = "range";
+          input.min = "0";
+          input.max = String(max);
+          input.step = String(increment);
+          input.value = String(settings[key]);
+          input.dataset.learnedSetting = key;
+          input.dataset.botIndex = String(i);
+          input.addEventListener("input", () => { output.textContent = `${text}: ${input.value}`; });
+          item.append(output, input);
+          details.append(item);
+        }
+        const modelLabel = document.createElement("label");
+        modelLabel.className = "check-row";
+        const modelInput = document.createElement("input");
+        modelInput.type = "checkbox";
+        modelInput.checked = settings.opponent_model;
+        modelInput.dataset.learnedModel = String(i);
+        const modelText = document.createElement("span");
+        modelText.textContent = "Use trained opponent behavior model (experimental)";
+        modelLabel.append(modelInput, modelText);
+        details.append(modelLabel);
+      } else if (typeof value !== "string") {
         const options = document.createElement("fieldset");
         const legend = document.createElement("legend");
         legend.textContent = "Custom strategies";
@@ -409,7 +476,7 @@ window.setupWizard = (() => {
     if (data.shuffle_seat && data.mode === "play") add("Your seat", "Randomly assigned at startup");
     if (data.shuffle_bots || (data.shuffle_seat && data.mode === "play")) {
       const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
-        .map((bot) => typeof bot === "string" ? bot : "custom");
+        .map((bot) => isLearned(bot) ? "learned" : typeof bot === "string" ? bot : "custom");
       const assignment = batchMode
         ? " · balanced across full profile rotations; a partial final rotation can vary"
         : " · randomly assigned to bot seats";
@@ -423,7 +490,9 @@ window.setupWizard = (() => {
       const human = data.mode === "play" && i === data.seat && !randomHuman;
       const character = data.seat_suspects ? ` · ${cardName(data.seat_suspects[i])}` : "";
       const bot = randomHuman ? "You or bot" : human ? "You" : data.shuffle_bots ? "Bot (random style)"
-        : `Bot: ${typeof data.bots[i] === "string" ? data.bots[i] : "custom"} (${score(data.bots[i])}/100)`;
+        : isLearned(data.bots[i]) ? `Bot: learned (${Object.entries(learnedSettings(data.bots[i]))
+          .filter(([key]) => key !== "type").map(([key, value]) => `${key.replaceAll("_", " ")} ${value}`).join(", ")})`
+          : `Bot: ${typeof data.bots[i] === "string" ? data.bots[i] : "custom"} (${score(data.bots[i])}/100)`;
       add(`Player ${i + 1}`, `${bot}${character}${data.seat_suspects && data.seat_suspects[i] === 0 ? " · starts" : ""}`);
     }
     if (data.board_rules) {
@@ -566,6 +635,19 @@ window.setupWizard = (() => {
     for (const bot of data.bots) {
       if (typeof bot === "string") {
         if (!Object.hasOwn(presets, bot)) throw new Error("Unknown bot preset in setup profile.");
+        if (bot === "learned" && data.game_type !== "board") {
+          throw new Error("The learned policy supports board games only.");
+        }
+      } else if (isLearned(bot)) {
+        if (data.game_type !== "board" || Array.isArray(bot)
+          || Object.keys(bot).some((key) => key !== "type" && key !== "opponent_model"
+            && !Object.hasOwn(learnedControls, key))
+          || (bot.opponent_model !== undefined && typeof bot.opponent_model !== "boolean")
+          || Object.entries(bot).some(([key, value]) => key !== "type" && key !== "opponent_model"
+            && (typeof value !== "number" || !Number.isFinite(value) || value < 0
+              || value > learnedControls[key][1]))) {
+          throw new Error("Invalid learned bot settings.");
+        }
       } else if (!bot || typeof bot !== "object" || Array.isArray(bot)
         || Object.keys(bot).some((key) => !Object.hasOwn(strategyLabels, key) || typeof bot[key] !== "boolean")) {
         throw new Error("Invalid bot strategy in setup profile.");
@@ -682,7 +764,9 @@ window.setupWizard = (() => {
   }
 
   for (const name of Object.keys(presets)) {
-    $("all-bots").append(option(name, name[0].toUpperCase() + name.slice(1)));
+    const preset = option(name, name[0].toUpperCase() + name.slice(1));
+    if (name === "learned") preset.disabled = !isBoard();
+    $("all-bots").append(preset);
   }
   $("all-bots").value = "random";
   $("roll-seed").addEventListener("click", () => {
@@ -769,6 +853,12 @@ window.setupWizard = (() => {
       bots[i][target.dataset.botSetting] = target.checked;
       document.querySelector(`[data-bot-score="${i}"]`).textContent =
         `Toolkit: ${score(bots[i])}/100`;
+    } else if (target.dataset.learnedSetting) {
+      const i = Number(target.dataset.botIndex);
+      bots[i] = { ...learnedSettings(bots[i]), [target.dataset.learnedSetting]: Number(target.value) };
+    } else if (target.dataset.learnedModel !== undefined) {
+      const i = Number(target.dataset.learnedModel);
+      bots[i] = { ...learnedSettings(bots[i]), opponent_model: target.checked };
     } else if (target.dataset.copySeat !== undefined && target.value !== "") {
       const i = Number(target.dataset.copySeat);
       if (typeof bots[i] !== "string" && !await confirmAction("Replace this bot's custom settings?", {
