@@ -364,6 +364,7 @@ function batchGraphBuckets(chart, plotWidth) {
 function drawBatchGraph(chart) {
   const graph = $("batch-chart-graph");
   graph.replaceChildren();
+  graph.style.minWidth = "";
   $("batch-chart-grouping").textContent = "";
   if (chart?.points) {
     drawBatchKnowledgeGraph(chart);
@@ -451,33 +452,47 @@ function drawBatchGraph(chart) {
   }
 }
 
+function formatBatchSeatNumber(value) {
+  return value !== 0 && Math.abs(value) < 0.005
+    ? Number(value.toPrecision(3)).toString() : formatBatchNumber(value);
+}
+
 function batchSeatValue(bar, unit) {
   if (bar.value === null || bar.samples === 0) return "No samples";
-  return `${formatBatchNumber(bar.value)}${unit === "%" ? "%" : ` ${unit}`}`;
+  return `${formatBatchSeatNumber(bar.value)}${unit === "%" ? "%" : ` ${unit}`}`;
 }
 
 function drawBatchSeatGraph(chart) {
   const graph = $("batch-chart-graph");
   if (!chart.seat_bars.length) return;
-  const width = Math.max(240, graph.clientWidth || 900);
+  const minimumWidth = 78 + chart.seat_bars.length * 18;
+  graph.style.minWidth = `${minimumWidth}px`;
+  const width = Math.max(240, graph.clientWidth || 900, minimumWidth);
   const height = Math.max(190, graph.clientHeight || 240);
   graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  const left = 60, right = width - 18, top = 24, bottom = height - 38;
-  const maximum = chart.unit === "%" ? 100 : Math.max(1,
-    ...chart.seat_bars.map((bar) => bar.samples && bar.value !== null ? bar.value : 0));
+  const left = 60, right = width - 18, top = 24;
+  const slot = (right - left) / chart.seat_bars.length;
+  const rotatedLabels = slot < 55;
+  const bottom = height - (rotatedLabels ? 70 : 38);
+  const maximum = chart.unit === "%" ? 100 : Math.max(0,
+    ...chart.seat_bars.map((bar) => bar.samples && bar.value !== null ? bar.value : 0)) || 1;
   graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
     chart.unit === "%" ? "Percent (%)" : chart.unit === "turns" ? "Mean turns" : "Mean actions"));
+  if (rotatedLabels && chart.seat_bars.some((bar) => bar.value === null || bar.samples === 0)) {
+    graph.append(svgElement("text", { x: right, y: 13, "text-anchor": "end",
+      class: "batch-chart-axis" }, "— = no data"));
+  }
   for (let index = 0; index <= 4; index++) {
     const fraction = index / 4;
     const y = bottom - fraction * (bottom - top);
     graph.append(svgElement("line", { x1: left, y1: y, x2: right, y2: y, class: "batch-chart-grid" }));
     graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" },
-      formatBatchNumber(fraction * maximum)));
+      formatBatchSeatNumber(fraction * maximum)));
   }
-  const slot = (right - left) / chart.seat_bars.length;
   for (const [index, bar] of chart.seat_bars.entries()) {
     const x = left + index * slot;
-    const barHeight = bar.value !== null && bar.samples > 0 ? bar.value / maximum * (bottom - top) : 0;
+    const barHeight = bar.value !== null && bar.samples > 0 && bar.value > 0
+      ? Math.max(1, bar.value / maximum * (bottom - top)) : 0;
     const description = `Player ${bar.seat + 1}: ${batchSeatValue(bar, chart.unit)} · ${bar.samples} samples`;
     const group = svgElement("g", { class: "batch-chart-bin", tabindex: 0, role: "img", "aria-label": description });
     group.append(
@@ -492,13 +507,17 @@ function drawBatchSeatGraph(chart) {
     graph.append(group);
     if (bar.value === null || bar.samples === 0) {
       graph.append(svgElement("text", { x: x + slot / 2, y: bottom - 6, "text-anchor": "middle",
-        class: "batch-chart-axis" }, "No data"));
+        class: "batch-chart-axis" }, rotatedLabels ? "—" : "No data"));
     } else if (bar.value === 0) {
       graph.append(svgElement("text", { x: x + slot / 2, y: bottom - 6, "text-anchor": "middle",
         class: "batch-chart-axis" }, "0"));
     }
-    graph.append(svgElement("text", { x: x + slot / 2, y: bottom + 17, "text-anchor": "middle",
-      class: "batch-chart-axis" }, `Player ${bar.seat + 1}`));
+    const center = x + slot / 2;
+    const labelY = bottom + (rotatedLabels ? 5 : 17);
+    const labelAttrs = { x: center, y: labelY, "text-anchor": rotatedLabels ? "end" : "middle",
+      class: "batch-chart-axis" };
+    if (rotatedLabels) labelAttrs.transform = `rotate(-90 ${center} ${labelY})`;
+    graph.append(svgElement("text", labelAttrs, `Player ${bar.seat + 1}`));
   }
 }
 

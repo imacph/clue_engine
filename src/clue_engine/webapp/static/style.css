@@ -313,7 +313,7 @@ input, select {
 .batch-chart-controls h3 { flex: 1 1 100%; font-size: 1rem; margin: 0; }
 .batch-chart-controls label { flex: 1 1 120px; }
 .batch-chart-controls #batch-metric { min-width: 0; width: 100%; }
-.batch-graph-frame { background: var(--clauses-bg); border: 1px solid var(--line); height: clamp(190px, 31vh, 300px); margin-top: 8px; position: relative; }
+.batch-graph-frame { background: var(--clauses-bg); border: 1px solid var(--line); height: clamp(190px, 31vh, 300px); margin-top: 8px; overflow-x: auto; position: relative; }
 .batch-chart-graph { display: block; height: 100%; width: 100%; }
 .batch-chart-grid { stroke: var(--line); stroke-width: 1; }
 .batch-chart-axis { fill: var(--muted); font-size: 11px; }

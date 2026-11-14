@@ -1152,6 +1152,58 @@ test("player comparison renders exact values, units, zero and missing samples ac
   assert.match(template, /id="batch-bin-next"[^>]*>Next rows/);
 });
 
+test("small nonzero player values remain visible in labels, axes and data", () => {
+  const ui = frontend();
+  ui.element("batch-chart-values").open = true;
+  for (const unit of ["%", "turns"]) {
+    ui.evaluate(`lastBatchChart = {
+      title: "Players", details: "", unit: "${unit}",
+      seat_bars: [{ seat: 0, value: 0.000123456, samples: 1 }],
+    }; renderBatchChart()`);
+    const graph = ui.element("batch-chart-graph").children;
+    const bar = graph.find((child) => child.class === "batch-chart-bin");
+    const expected = unit === "%" ? "0.000123%" : "0.000123 turns";
+    assert.ok(bar["aria-label"].includes(expected));
+    assert.ok(Number(bar.children[1].height) >= 1);
+    bar.listeners.focus();
+    assert.ok(ui.element("batch-chart-inspection").textContent.includes(expected));
+    assert.equal(ui.element("batch-chart-table").children[0].children[1].children[0].children[1].textContent, expected);
+    if (unit === "turns") assert.ok(graph.some((child) => child.textContent === "0.000123"));
+  }
+  assert.equal(ui.evaluate("formatBatchSeatNumber(1e-12)"), "1e-12");
+});
+
+test("narrow player charts rotate full labels without overlap", () => {
+  const ui = frontend();
+  ui.element("batch-chart-graph").clientWidth = 240;
+  ui.evaluate(`lastBatchChart = {
+    title: "Players", details: "", unit: "%",
+    seat_bars: Array.from({ length: 8 }, (_, seat) => ({ seat, value: seat ? 0 : null, samples: seat ? 1 : 0 })),
+  }; renderBatchChart()`);
+  const graph = ui.element("batch-chart-graph").children;
+  const labels = graph.filter((child) => /^Player \d+$/.test(child.textContent));
+  assert.equal(labels.length, 8);
+  assert.deepEqual(labels.map((label) => label.textContent), Array.from({ length: 8 }, (_, i) => `Player ${i + 1}`));
+  assert.ok(labels.every((label) => label.transform?.startsWith("rotate(-90 ")));
+  assert.ok(labels.every((label, index) => !index || Number(label.x) - Number(labels[index - 1].x) >= 11));
+  assert.ok(graph.some((child) => child.textContent === "— = no data"));
+  ui.element("batch-chart-graph").clientWidth = 900;
+  ui.evaluate("drawBatchGraph(lastBatchChart)");
+  assert.ok(ui.element("batch-chart-graph").children.filter((child) => /^Player \d+$/.test(child.textContent))
+    .every((label) => !label.transform));
+  ui.element("batch-chart-graph").clientWidth = 240;
+  ui.evaluate(`lastBatchChart.seat_bars = Array.from({ length: 18 },
+    (_, seat) => ({ seat, value: 1, samples: 1 })); drawBatchGraph(lastBatchChart)`);
+  assert.equal(ui.element("batch-chart-graph").style.minWidth, "402px");
+  assert.match(ui.element("batch-chart-graph").viewBox, /^0 0 402 /);
+  const manyLabels = ui.element("batch-chart-graph").children.filter((child) => /^Player \d+$/.test(child.textContent));
+  assert.equal(manyLabels.length, 18);
+  assert.ok(manyLabels.every((label, index) => !index || Number(label.x) - Number(manyLabels[index - 1].x) >= 18));
+  assert.match(stylesheet, /\.batch-graph-frame\s*\{[^}]*overflow-x:\s*auto/);
+  ui.evaluate(`drawBatchGraph({ points: [] })`);
+  assert.equal(ui.element("batch-chart-graph").style.minWidth, "");
+});
+
 test("distribution categories preserve measures and disable unavailable options", () => {
   const ui = frontend();
   const metric = ui.element("batch-metric");
