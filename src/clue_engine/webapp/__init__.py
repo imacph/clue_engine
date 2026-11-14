@@ -68,6 +68,7 @@ from ..session import (
     create_board_game,
     create_game,
 )
+from .batch_charts import knowledge_charts, seat_comparison, seat_turns
 
 _SESSION_TTL_SECONDS = 60 * 60
 _MAX_ACTIVE_SESSIONS = 64
@@ -894,12 +895,34 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                     chart = batch.distributions.chart(
                         metric, width=width, policy=policy, seat=seat,
                     )
+                elif metric in {"seat_turns", "solution_turn", "knowledge_candidates", "knowledge_learned"}:
+                    observations = list(batch.observations)
+                    directory = batch.trace_directory
+                    status = batch.status
+                elif metric in {
+                    "seat_compare_turns", "seat_compare_win_rate",
+                    "seat_compare_learned_rate", "seat_compare_first_action",
+                }:
+                    observations = list(batch.observations)
                 elif metric != "seat_outcomes" and policy is None and seat is None:
                     chart = batch.distributions.chart(metric, width=width)
                 else:
                     observations = list(batch.observations)
             if metric == "seat_outcomes":
                 chart = _seat_outcomes(observations, policy, seat)
+            elif metric in {
+                "seat_compare_turns", "seat_compare_win_rate",
+                "seat_compare_learned_rate", "seat_compare_first_action",
+            }:
+                return jsonify(seat_comparison(observations, policy, seat, metric))
+            elif metric == "seat_turns":
+                chart = seat_turns(observations, policy, seat, width)
+            elif metric in {"solution_turn", "knowledge_candidates", "knowledge_learned"}:
+                if status not in {"completed", "cancelled"} or directory is None:
+                    return jsonify(error="Knowledge charts are available after the batch finishes."), 409
+                chart = knowledge_charts(Path(directory.name) / "trace.jsonl", policy, seat, width, metric)
+                if isinstance(chart, dict):
+                    return jsonify(chart)
             elif metric != "deduction" and (policy is not None or seat is not None):
                 selected = Distributions()
                 for result in observations:

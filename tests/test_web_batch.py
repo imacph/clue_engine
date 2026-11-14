@@ -1,3 +1,4 @@
+import json
 import re
 import threading
 import time
@@ -7,6 +8,7 @@ import pytest
 from clue_engine.batch import GameResult, _Aggregate
 from clue_engine.engine import IllegalActionError
 from clue_engine.webapp import create_app
+from clue_engine.webapp.batch_charts import knowledge_charts
 
 
 @pytest.fixture
@@ -78,6 +80,14 @@ def test_batch_api_runs_setup_and_returns_summary_and_distributions(client):
     chart = client.get(f"/api/batch/{batch_id}/distribution?metric=outcomes&width=1")
     assert chart.status_code == 200
     assert chart.get_json()["samples"] == 2
+    knowledge = client.get(
+        f"/api/batch/{batch_id}/distribution?metric=knowledge_candidates&seat=0"
+    )
+    assert knowledge.status_code == 200
+    assert knowledge.get_json()["points"][0]["samples"] == 2
+    first = client.get(f"/api/batch/{batch_id}/distribution?metric=solution_turn&seat=1")
+    assert first.status_code == 200
+    assert first.get_json()["samples"] <= 2
     assert client.get(
         f"/api/batch/{batch_id}/distribution?metric=rolls&width=1"
     ).status_code == 400
@@ -210,7 +220,7 @@ def test_filtered_distributions_count_games_and_seat_exposures(client, monkeypat
         ]):
             result = GameResult(
                 game=index, seed=index, policies=policies, outcome=outcome, winner=winner,
-                steps=steps, turns=[1, 1, 1], suggestions=0, passes=0, refutations=0,
+                steps=steps, turns=[index + 1, 2, 3], suggestions=0, passes=0, refutations=0,
                 first_solution_step=first, final_knowledge=[], game_type=game_type,
                 moves=(index * 5 if game_type == "board" else 0),
             )
@@ -254,6 +264,11 @@ def test_filtered_distributions_count_games_and_seat_exposures(client, monkeypat
         "won": 1, "not_won": 3, "timeout": 1, "error": 0, "cancelled": 0,
     }
     assert chart(metric="seat_outcomes", policy="random", seat=0)["samples"] == 1
+    turns = chart(metric="seat_turns", policy="random", width=1)
+    assert turns["samples"] == 4
+    assert {item["label"]: item["count"] for item in turns["bins"]} == {"1": 1, "2": 2, "3": 1}
+    assert chart(metric="seat_turns", policy="random", seat=0, width=1)["samples"] == 1
+    assert chart(metric="seat_turns", policy="absent")["samples"] == 0
     runs_path = f"/api/batch/{batch_id}/runs"
     runs = client.get(runs_path, query_string={
         "policy": "random", "sort": "steps", "order": "desc", "offset": 1, "limit": 1,
@@ -275,6 +290,145 @@ def test_filtered_distributions_count_games_and_seat_exposures(client, monkeypat
         assert moves["numeric_summary"]["median"] == 2.5
     assert client.get(path, query_string={"metric": "seat_outcomes", "seat": -1}).status_code == 400
     assert client.get(path, query_string={"metric": "seat_outcomes", "width": 0}).status_code == 400
+
+
+def test_seat_comparison_api_uses_matching_appearances_and_metric_denominators(client, monkeypatch):
+    def fake_run(config, trace_path, *, progress, cancelled, on_game):
+        aggregate = _Aggregate(config)
+        for index, (policies, outcome, winner, turns, first) in enumerate([
+            (("random", "random", "deductive"), "won", 0, [1, 2, 3], [0, None, None]),
+            (("deductive", "random", "random"), "all_eliminated", None, [2, 4, 6], [1, 4, 5]),
+            (("deductive", "deductive", "random"), "timeout", None, [3, 5, 7], [None, None, 9]),
+            (("deductive", "deductive", "probing"), "error", None, [0, 0, 0], [None, None, None]),
+        ]):
+            result = GameResult(
+                game=index, seed=index, policies=policies, outcome=outcome, winner=winner,
+                steps=20, turns=turns, suggestions=0, passes=0, refutations=0,
+                first_solution_step=first, final_knowledge=[],
+            )
+            aggregate.add(result)
+            on_game(result)
+        return aggregate.summary(False)
+
+    monkeypatch.setattr("clue_engine.webapp.run_batch", fake_run)
+    token = csrf_token(client)
+    started = post(client, token, "/api/batch", {
+        "setup": {"game_type": "card_only", "players": 3,
+                  "bots": ["random", "deductive", "probing"]},
+        "games": 4,
+    })
+    batch_id = started.get_json()["batch_id"]
+    assert wait_for_batch(client, batch_id)["status"] == "completed"
+    path = f"/api/batch/{batch_id}/distribution"
+
+    def chart(metric, **filters):
+        response = client.get(path, query_string={"metric": metric, **filters})
+        assert response.status_code == 200
+        data = response.get_json()
+        assert set(data) == {"title", "details", "seat_bars", "unit"}
+        return data
+
+    turns = chart("seat_compare_turns", policy="random")
+    assert turns["unit"] == "turns"
+    assert turns["seat_bars"] == [
+        {"seat": 0, "value": 1, "samples": 1},
+        {"seat": 1, "value": 3, "samples": 2},
+        {"seat": 2, "value": 6, "samples": 1},
+    ]
+    assert "1 incomplete matching appearances excluded" in turns["details"]
+    wins = chart("seat_compare_win_rate", policy="random")
+    assert wins["unit"] == "%"
+    assert wins["seat_bars"] == [
+        {"seat": 0, "value": 100, "samples": 1},
+        {"seat": 1, "value": 0, "samples": 2},
+        {"seat": 2, "value": 0, "samples": 1},
+    ]
+    learned = chart("seat_compare_learned_rate", policy="random")
+    assert learned["unit"] == "%"
+    assert learned["seat_bars"] == [
+        {"seat": 0, "value": 100, "samples": 1},
+        {"seat": 1, "value": 50, "samples": 2},
+        {"seat": 2, "value": 100, "samples": 2},
+    ]
+    assert "including incomplete games" in learned["details"]
+    first = chart("seat_compare_first_action", policy="random")
+    assert first["unit"] == "actions"
+    assert first["seat_bars"] == [
+        {"seat": 0, "value": 0, "samples": 1},
+        {"seat": 1, "value": 4, "samples": 1},
+        {"seat": 2, "value": 7, "samples": 2},
+    ]
+    assert "1 appearances not recorded as learned are excluded" in first["details"]
+    assert chart("seat_compare_win_rate", seat=2)["seat_bars"] == [
+        {"seat": 2, "value": 0, "samples": 2},
+    ]
+    assert chart("seat_compare_turns", policy="random", seat=2)["seat_bars"] == [
+        {"seat": 2, "value": 6, "samples": 1},
+    ]
+    assert chart("seat_compare_win_rate", policy="random", seat=0)["seat_bars"][0]["value"] == 100
+    for metric in ("seat_compare_turns", "seat_compare_win_rate", "seat_compare_learned_rate",
+                   "seat_compare_first_action"):
+        assert chart(metric, policy="random", seat=9)["seat_bars"] == []
+        assert chart(metric, policy="absent")["seat_bars"] == []
+    unavailable_turns = chart("seat_compare_turns", policy="probing")
+    assert "unavailable" in unavailable_turns["details"]
+    assert unavailable_turns["seat_bars"] == [
+        {"seat": 2, "value": None, "samples": 0},
+    ]
+    assert chart("seat_compare_win_rate", policy="probing")["seat_bars"] == [
+        {"seat": 2, "value": None, "samples": 0},
+    ]
+    assert chart("seat_compare_learned_rate", policy="probing")["seat_bars"] == [
+        {"seat": 2, "value": 0, "samples": 1},
+    ]
+    unavailable_action = chart("seat_compare_first_action", policy="probing")
+    assert "unavailable" in unavailable_action["details"]
+    assert unavailable_action["seat_bars"] == [
+        {"seat": 2, "value": None, "samples": 0},
+    ]
+    assert chart("seat_compare_turns", policy="probing", seat=1)["seat_bars"] == []
+    assert client.get(path, query_string={"metric": "seat_compare_turns", "seat": -1}).status_code == 400
+    assert client.get(path, query_string={"metric": "seat_compare_turns", "width": 0}).status_code == 400
+
+
+def test_knowledge_charts_use_filtered_seat_turns_and_last_snapshots(tmp_path):
+    solution = {"suspect_id": 1, "weapon_id": 2, "room_id": 3}
+
+    def item(player, candidates, learned=False):
+        return {"player": player, "candidates": {"suspect": candidates, "weapon": 1, "room": 1},
+                "knows_solution": learned}
+
+    records = [
+        {"type": "game_start", "policies": ["random", "random"], "solution": solution},
+        {"type": "initial_knowledge", "knowledge": [item(0, 3), item(1, 2)]},
+        {"type": "action", "actor": 0, "action": {"kind": "EndTurn"},
+         "events": [{"kind": "END_TURN", "actor": 0}]},
+        {"type": "knowledge", "knowledge": [item(0, 2), item(1, 2)]},
+        {"type": "action", "actor": 1, "action": {"kind": "Pass"}, "events": []},
+        {"type": "knowledge", "knowledge": [item(0, 1, True), item(1, 2)]},
+        {"type": "action", "actor": 0, "action": {"kind": "Accuse", "combination": solution}, "events": []},
+        {"type": "knowledge", "knowledge": [item(0, 1, True), item(1, 2)]},
+        {"type": "game_result"},
+        {"type": "game_start", "policies": ["deductive", "random"], "solution": solution},
+        {"type": "initial_knowledge", "knowledge": [item(0, 1, True), item(1, 3)]},
+        {"type": "game_result"},
+    ]
+    path = tmp_path / "trace.jsonl"
+    path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    histogram = knowledge_charts(path, "random", 0, 1, "solution_turn")
+    assert histogram.samples == 1
+    assert [(bin.label, bin.count) for bin in histogram.bins] == [("1", 1)]
+    assert "1 matching seat appearances; 0 not recorded" in histogram.details
+    assert knowledge_charts(path, "absent", None, 1, "solution_turn").samples == 0
+    series = knowledge_charts(path, "random", 0, 1, "knowledge_candidates")
+    assert series["points"] == [
+        {"turn": 0, "samples": 1, "mean": 5, "minimum": 5, "maximum": 5},
+        {"turn": 1, "samples": 1, "mean": 3, "minimum": 3, "maximum": 3},
+        {"turn": 2, "samples": 1, "mean": 3, "minimum": 3, "maximum": 3},
+    ]
+    learned = knowledge_charts(path, "random", None, 1, "knowledge_learned")
+    assert learned["points"][0]["samples"] == 3
+    assert learned["points"][1]["mean"] == 1
 
 
 @pytest.mark.parametrize("game_type", ["card_only", "board"])

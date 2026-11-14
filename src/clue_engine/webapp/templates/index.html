@@ -337,27 +337,42 @@
       <section id="batch-panel-distribution" class="panel batch-distribution-panel" role="tabpanel" aria-labelledby="batch-tab-distribution">
         <div class="batch-chart-controls">
           <h3 id="batch-distribution-title">Observed distributions</h3>
-          <label>Measure
-            <select id="batch-metric">
-              <option value="outcomes">Outcomes</option>
-              <option value="seat_outcomes">Bot seat outcomes</option>
-              <option value="actions">Actions per game</option>
-              <option value="turns">Player 1 turns</option>
-              <option value="deduction">First solution action</option>
-              <optgroup label="Board events">
-                <option value="rolls" data-board-only>Dice rolls</option>
-                <option value="moves" data-board-only>Movement actions</option>
-                <option value="room_entries" data-board-only>Room entries</option>
-                <option value="passages" data-board-only>Secret passages</option>
-                <option value="suspect_relocations" data-board-only>Suspect relocations</option>
-                <option value="weapon_relocations" data-board-only>Weapon relocations</option>
-              </optgroup>
+          <label>Category
+            <select id="batch-category">
+              <option value="game">Games</option>
+              <option value="seat">Seat appearances</option>
+              <option value="compare">Compare players</option>
+              <option value="knowledge">Knowledge over turns</option>
+              <option value="board" data-board-only>Board events</option>
             </select>
           </label>
-          <label>Bin width
+          <label>Measure
+            <select id="batch-metric">
+              <option value="outcomes" data-category="game">Outcomes</option>
+              <option value="actions" data-category="game">Actions per game</option>
+              <option value="turns" data-category="game">Player 1 turns (game cohort)</option>
+              <option value="seat_outcomes" data-category="seat">Bot seat outcomes</option>
+              <option value="seat_turns" data-category="seat">Turns per seat</option>
+              <option value="deduction" data-category="seat">First solution action</option>
+              <option value="solution_turn" data-category="seat">First solution turn</option>
+              <option value="seat_compare_turns" data-category="compare">Mean turns</option>
+              <option value="seat_compare_win_rate" data-category="compare">Win rate</option>
+              <option value="seat_compare_learned_rate" data-category="compare">Learned solution rate</option>
+              <option value="seat_compare_first_action" data-category="compare">Mean first learned action</option>
+              <option value="knowledge_learned" data-category="knowledge">Solution learned over turns</option>
+              <option value="knowledge_candidates" data-category="knowledge">Remaining candidates over turns</option>
+              <option value="rolls" data-category="board" data-board-only>Dice rolls</option>
+              <option value="moves" data-category="board" data-board-only>Movement actions</option>
+              <option value="room_entries" data-category="board" data-board-only>Room entries</option>
+              <option value="passages" data-category="board" data-board-only>Secret passages</option>
+              <option value="suspect_relocations" data-category="board" data-board-only>Suspect relocations</option>
+              <option value="weapon_relocations" data-category="board" data-board-only>Weapon relocations</option>
+            </select>
+          </label>
+          <label id="batch-bin-width-control">Bin width
             <input id="batch-bin-width" type="number" min="1" value="10">
           </label>
-          <label>Display
+          <label id="batch-display-control">Display
             <select id="batch-display-mode">
               <option value="count">Counts</option>
               <option value="percent">Percentages</option>
@@ -373,18 +388,19 @@
         <p id="batch-chart-inspection" class="batch-chart-inspection hint">Hover or focus a bar to inspect its count and share.</p>
         <p id="batch-chart-grouping" class="hint"></p>
         <details id="batch-chart-values" class="batch-chart-values">
-          <summary>View exact bin data</summary>
+          <summary id="batch-values-summary">View exact bin data</summary>
           <p id="batch-bin-status" class="hint" role="status"></p>
           <div id="batch-chart-table" class="batch-chart-table"></div>
           <div class="batch-runs-pages">
-            <button id="batch-bin-previous" class="button button-quiet" type="button" disabled>Previous bins</button>
-            <button id="batch-bin-next" class="button button-quiet" type="button" disabled>Next bins</button>
+            <button id="batch-bin-previous" class="button button-quiet" type="button" disabled>Previous rows</button>
+            <button id="batch-bin-next" class="button button-quiet" type="button" disabled>Next rows</button>
           </div>
         </details>
         <details class="batch-chart-method">
           <summary>How filters and samples work</summary>
           <p class="hint">Game measures select games containing the chosen profile at the chosen seat
-            (each game counts once). Bot seat outcomes and deduction count matching seat appearances.
+            (each game counts once). Seat outcomes, turns per seat, first solution, and knowledge measures count
+            matching seat appearances; player comparisons group those appearances by seat.
             Player 1 turns always means Player 1, regardless of filter.</p>
         </details>
       </section>

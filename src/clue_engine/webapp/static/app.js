@@ -287,6 +287,31 @@ function renderBatchSummary(data) {
 }
 
 const batchTabs = ["distribution", "summary", "runs"];
+const batchCategorySelections = {};
+
+function updateBatchMeasureOptions() {
+  const category = $("batch-category").value;
+  const select = $("batch-metric");
+  const options = Array.from(select.options);
+  for (const option of options) {
+    const available = option.dataset.category === category;
+    option.hidden = !available;
+    option.disabled = !available;
+  }
+  const selected = options.find((option) => option.value === select.value && !option.disabled);
+  if (!selected) {
+    const remembered = options.find((option) => option.value === batchCategorySelections[category] && !option.disabled);
+    select.value = (remembered || options.find((option) => !option.disabled))?.value || "";
+  }
+  batchCategorySelections[category] = select.value;
+  updateBatchChartControls();
+}
+
+function updateBatchChartControls() {
+  const special = /^(seat_compare_|knowledge_)/.test($("batch-metric").value);
+  $("batch-bin-width-control").hidden = special;
+  $("batch-display-control").hidden = special;
+}
 
 function switchBatchTab(name) {
   for (const tab of batchTabs) {
@@ -339,7 +364,16 @@ function batchGraphBuckets(chart, plotWidth) {
 function drawBatchGraph(chart) {
   const graph = $("batch-chart-graph");
   graph.replaceChildren();
+  graph.style.minWidth = "";
   $("batch-chart-grouping").textContent = "";
+  if (chart?.points) {
+    drawBatchKnowledgeGraph(chart);
+    return;
+  }
+  if (chart?.seat_bars) {
+    drawBatchSeatGraph(chart);
+    return;
+  }
   if (!chart || !chart.samples) return;
   const width = Math.max(240, graph.clientWidth || 900);
   const height = Math.max(190, graph.clientHeight || 240);
@@ -418,10 +452,180 @@ function drawBatchGraph(chart) {
   }
 }
 
+function formatBatchSeatNumber(value) {
+  return value !== 0 && Math.abs(value) < 0.005
+    ? Number(value.toPrecision(3)).toString() : formatBatchNumber(value);
+}
+
+function batchSeatValue(bar, unit) {
+  if (bar.value === null || bar.samples === 0) return "No samples";
+  return `${formatBatchSeatNumber(bar.value)}${unit === "%" ? "%" : ` ${unit}`}`;
+}
+
+function drawBatchSeatGraph(chart) {
+  const graph = $("batch-chart-graph");
+  if (!chart.seat_bars.length) return;
+  const minimumWidth = 78 + chart.seat_bars.length * 18;
+  graph.style.minWidth = `${minimumWidth}px`;
+  const width = Math.max(240, graph.clientWidth || 900, minimumWidth);
+  const height = Math.max(190, graph.clientHeight || 240);
+  graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const left = 60, right = width - 18, top = 24;
+  const slot = (right - left) / chart.seat_bars.length;
+  const rotatedLabels = slot < 55;
+  const bottom = height - (rotatedLabels ? 70 : 38);
+  const maximum = chart.unit === "%" ? 100 : Math.max(0,
+    ...chart.seat_bars.map((bar) => bar.samples && bar.value !== null ? bar.value : 0)) || 1;
+  graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
+    chart.unit === "%" ? "Percent (%)" : chart.unit === "turns" ? "Mean turns" : "Mean actions"));
+  if (rotatedLabels && chart.seat_bars.some((bar) => bar.value === null || bar.samples === 0)) {
+    graph.append(svgElement("text", { x: right, y: 13, "text-anchor": "end",
+      class: "batch-chart-axis" }, "— = no data"));
+  }
+  for (let index = 0; index <= 4; index++) {
+    const fraction = index / 4;
+    const y = bottom - fraction * (bottom - top);
+    graph.append(svgElement("line", { x1: left, y1: y, x2: right, y2: y, class: "batch-chart-grid" }));
+    graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" },
+      formatBatchSeatNumber(fraction * maximum)));
+  }
+  for (const [index, bar] of chart.seat_bars.entries()) {
+    const x = left + index * slot;
+    const barHeight = bar.value !== null && bar.samples > 0 && bar.value > 0
+      ? Math.max(1, bar.value / maximum * (bottom - top)) : 0;
+    const description = `Player ${bar.seat + 1}: ${batchSeatValue(bar, chart.unit)} · ${bar.samples} samples`;
+    const group = svgElement("g", { class: "batch-chart-bin", tabindex: 0, role: "img", "aria-label": description });
+    group.append(
+      svgElement("title", {}, description),
+      svgElement("rect", { x: x + slot * .15, y: bottom - barHeight, width: slot * .7,
+        height: barHeight, class: "batch-chart-bar" }),
+      svgElement("rect", { x, y: top, width: slot, height: bottom - top, class: "batch-chart-hit" }),
+    );
+    const inspect = () => { $("batch-chart-inspection").textContent = description; };
+    group.addEventListener("mouseenter", inspect);
+    group.addEventListener("focus", inspect);
+    graph.append(group);
+    if (bar.value === null || bar.samples === 0) {
+      graph.append(svgElement("text", { x: x + slot / 2, y: bottom - 6, "text-anchor": "middle",
+        class: "batch-chart-axis" }, rotatedLabels ? "—" : "No data"));
+    } else if (bar.value === 0) {
+      graph.append(svgElement("text", { x: x + slot / 2, y: bottom - 6, "text-anchor": "middle",
+        class: "batch-chart-axis" }, "0"));
+    }
+    const center = x + slot / 2;
+    const labelY = bottom + (rotatedLabels ? 5 : 17);
+    const labelAttrs = { x: center, y: labelY, "text-anchor": rotatedLabels ? "end" : "middle",
+      class: "batch-chart-axis" };
+    if (rotatedLabels) labelAttrs.transform = `rotate(-90 ${center} ${labelY})`;
+    graph.append(svgElement("text", labelAttrs, `Player ${bar.seat + 1}`));
+  }
+}
+
+function drawBatchKnowledgeGraph(chart) {
+  const graph = $("batch-chart-graph");
+  if (!chart.points.length) return;
+  const width = Math.max(240, graph.clientWidth || 900);
+  const height = Math.max(190, graph.clientHeight || 240);
+  graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const left = 60, right = width - 18, top = 24, bottom = height - 38;
+  const lastTurn = Math.max(1, chart.points[chart.points.length - 1].turn);
+  const maximum = chart.percent ? 1 : chart.points.reduce((max, point) => Math.max(max, point.maximum), 1);
+  graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
+    chart.percent ? "Learned (%)" : "Candidates"));
+  for (let index = 0; index <= 4; index++) {
+    const fraction = index / 4;
+    const y = bottom - fraction * (bottom - top);
+    graph.append(svgElement("line", { x1: left, y1: y, x2: right, y2: y, class: "batch-chart-grid" }));
+    graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" },
+      formatBatchNumber(fraction * maximum * (chart.percent ? 100 : 1))));
+    graph.append(svgElement("text", { x: left + fraction * (right - left), y: bottom + 17,
+      "text-anchor": "middle", class: "batch-chart-axis" }, formatBatchNumber(fraction * lastTurn)));
+  }
+  graph.append(svgElement("text", { x: right, y: height - 2, "text-anchor": "end", class: "batch-chart-axis" }, "Seat turns"));
+  let previous = null;
+  for (const point of chart.points) {
+    const x = left + point.turn / lastTurn * (right - left);
+    const y = bottom - point.mean / maximum * (bottom - top);
+    if (previous) graph.append(svgElement("line", {
+      x1: previous.x, y1: previous.y, x2: x, y2: y, class: "batch-chart-line",
+    }));
+    const scale = chart.percent ? 100 : 1;
+    const description = `Turn ${point.turn}: mean ${formatBatchNumber(point.mean * scale)}`
+      + `${chart.percent ? "%" : ""}, ${point.samples} seat appearances; range `
+      + `${formatBatchNumber(point.minimum * scale)}–${formatBatchNumber(point.maximum * scale)}${chart.percent ? "%" : ""}.`;
+    const marker = svgElement("circle", { cx: x, cy: y, r: 4, class: "batch-chart-bar",
+      tabindex: 0, role: "img", "aria-label": description });
+    marker.append(svgElement("title", {}, description));
+    const inspect = () => { $("batch-chart-inspection").textContent = description; };
+    marker.addEventListener("mouseenter", inspect);
+    marker.addEventListener("focus", inspect);
+    graph.append(marker);
+    previous = { x, y };
+  }
+}
+
 function renderBatchBinTable() {
   const container = $("batch-chart-table");
   container.replaceChildren();
   const chart = lastBatchChart;
+  if (chart?.seat_bars) {
+    if (!$("batch-chart-values").open || !chart.seat_bars.length) return;
+    const table = document.createElement("table");
+    table.className = "batch-policy-table";
+    table.setAttribute("aria-label", "Player comparison data");
+    const head = document.createElement("thead");
+    const header = document.createElement("tr");
+    for (const label of ["Player", `Value (${chart.unit})`, "Samples"]) {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      cell.textContent = label;
+      header.append(cell);
+    }
+    head.append(header);
+    const body = document.createElement("tbody");
+    const end = Math.min(batchBinOffset + 50, chart.seat_bars.length);
+    for (const bar of chart.seat_bars.slice(batchBinOffset, end)) {
+      const row = document.createElement("tr");
+      for (const value of [`Player ${bar.seat + 1}`, batchSeatValue(bar, chart.unit), String(bar.samples)]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(head, body);
+    container.append(table);
+    $("batch-bin-status").textContent = `Showing ${batchBinOffset + 1}–${end} of ${chart.seat_bars.length} players.`;
+    $("batch-bin-previous").disabled = batchBinOffset === 0;
+    $("batch-bin-next").disabled = end >= chart.seat_bars.length;
+    return;
+  }
+  if (chart?.points) {
+    if (!$("batch-chart-values").open) return;
+    const table = document.createElement("table");
+    table.className = "batch-policy-table";
+    table.setAttribute("aria-label", "Knowledge by seat turn");
+    const end = Math.min(batchBinOffset + 50, chart.points.length);
+    for (const values of [
+      ["Turn", "Seat appearances", chart.percent ? "Learned (%)" : "Mean candidates", "Minimum", "Maximum"],
+      ...chart.points.slice(batchBinOffset, end).map((point) => [point.turn, point.samples,
+        formatBatchNumber(point.mean * (chart.percent ? 100 : 1)),
+        point.minimum * (chart.percent ? 100 : 1), point.maximum * (chart.percent ? 100 : 1)]),
+    ]) {
+      const row = document.createElement("tr");
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = String(value);
+        row.append(cell);
+      }
+      table.append(row);
+    }
+    container.append(table);
+    $("batch-bin-status").textContent = `Showing ${batchBinOffset + 1}–${end} of ${chart.points.length} turns.`;
+    $("batch-bin-previous").disabled = batchBinOffset === 0;
+    $("batch-bin-next").disabled = end >= chart.points.length;
+    return;
+  }
   if (!chart || !chart.samples || !$("batch-chart-values").open) return;
   const end = Math.min(batchBinOffset + 50, chart.bins.length);
   $("batch-bin-status").textContent =
@@ -464,14 +668,20 @@ function renderBatchChart() {
   stats.replaceChildren();
   $("batch-chart-graph").replaceChildren();
   $("batch-chart-table").replaceChildren();
-  $("batch-chart-empty").hidden = !chart || Boolean(chart.samples);
-  $("batch-chart-values").hidden = !chart || !chart.samples;
+  const hasData = chart && (chart.seat_bars ? chart.seat_bars.length : chart.points ? chart.points.length : chart.samples);
+  $("batch-chart-empty").hidden = !chart || Boolean(hasData);
+  $("batch-chart-values").hidden = !hasData;
   $("batch-chart-grouping").textContent = "";
-  $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
+  $("batch-chart-inspection").textContent = chart?.seat_bars
+    ? "Hover or focus a player to inspect its value and samples."
+    : chart?.points ? "Hover or focus a point to inspect its value and samples."
+      : "Hover or focus a bar to inspect its count and share.";
+  $("batch-values-summary").textContent = chart?.seat_bars ? "View player data"
+    : chart?.points ? "View exact turn data" : "View exact bin data";
   if (!chart) return;
   $("batch-distribution-title").textContent =
     $("batch-metric").value === "deduction" ? "First solution action" : displayPlayerText(chart.title);
-  $("batch-chart-details").textContent =
+  $("batch-chart-details").textContent = chart.points || chart.seat_bars ? chart.details :
     `${chart.samples} samples · ${chart.denominator}. ${chart.details}`;
   if (chart.numeric_summary) {
     for (const [label, key] of [
@@ -491,15 +701,15 @@ async function loadBatchChart() {
   lastBatchChart = null;
   renderBatchChart();
   $("batch-chart-details").textContent = "Loading distribution…";
+  const metric = $("batch-metric").value;
+  const special = /^(seat_compare_|knowledge_)/.test(metric);
   const width = Number($("batch-bin-width").value);
-  if (!Number.isSafeInteger(width) || width < 1) {
+  if (!special && (!Number.isSafeInteger(width) || width < 1)) {
     $("batch-chart-details").textContent = "Histogram bin width must be a positive whole number.";
     throw new Error("Histogram bin width must be a positive whole number.");
   }
-  const query = new URLSearchParams({
-    metric: $("batch-metric").value,
-    width: String(width),
-  });
+  const query = new URLSearchParams({ metric });
+  if (!special) query.set("width", String(width));
   if ($("batch-policy-filter").value) query.set("policy", $("batch-policy-filter").value);
   if ($("batch-seat-filter").value !== "") query.set("seat", $("batch-seat-filter").value);
   let chart;
@@ -647,6 +857,7 @@ function updateBatchScreen(data) {
   $("batch-cancel").disabled = data.cancel_requested;
   $("batch-new-run").hidden = running;
   $("batch-main-menu").hidden = running;
+  $("batch-category").disabled = running;
   $("batch-metric").disabled = running;
   $("batch-bin-width").disabled = running;
   $("batch-policy-filter").disabled = running;
@@ -654,16 +865,21 @@ function updateBatchScreen(data) {
   batchFinished = !running;
   if (data.summary) renderBatchSummary(data);
   if (data.game_type === "board") {
-    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = false;
-  } else {
-    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = true;
-    if ($("batch-metric").selectedOptions[0]?.hasAttribute("data-board-only")) {
-      $("batch-metric").value = "outcomes";
+    for (const option of document.querySelectorAll("[data-board-only]")) {
+      option.hidden = false;
+      option.disabled = false;
     }
+  } else {
+    for (const option of document.querySelectorAll("[data-board-only]")) {
+      option.hidden = true;
+      option.disabled = true;
+    }
+    if ($("batch-category").value === "board") $("batch-category").value = "game";
     if ($("batch-runs-sort").selectedOptions[0]?.hasAttribute("data-board-only")) {
       $("batch-runs-sort").value = "game";
     }
   }
+  updateBatchMeasureOptions();
 }
 
 async function pollBatch() {
@@ -3520,7 +3736,14 @@ $("batch-main-menu").addEventListener("click", () => {
   activeBatchId = null;
   showMainMenu();
 });
+$("batch-category").addEventListener("change", () => {
+  updateBatchMeasureOptions();
+  loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+});
+updateBatchMeasureOptions();
 $("batch-metric").addEventListener("change", () => {
+  batchCategorySelections[$("batch-category").value] = $("batch-metric").value;
+  updateBatchChartControls();
   loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
 });
 $("batch-bin-width").addEventListener("change", () => {
@@ -3577,7 +3800,7 @@ $("batch-bin-previous").addEventListener("click", () => {
   renderBatchBinTable();
 });
 $("batch-bin-next").addEventListener("click", () => {
-  if (!lastBatchChart || batchBinOffset + 50 >= lastBatchChart.bins.length) return;
+  if (!lastBatchChart || batchBinOffset + 50 >= (lastBatchChart.seat_bars || lastBatchChart.points || lastBatchChart.bins).length) return;
   batchBinOffset += 50;
   renderBatchBinTable();
 });

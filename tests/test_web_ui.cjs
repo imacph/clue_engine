@@ -56,6 +56,7 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       textContent: "",
       hidden: false,
       disabled: false,
+      listeners: {},
       dataset: {},
       style: { setProperty(name, value) { this[name] = value; } },
       classList: {
@@ -78,7 +79,7 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       },
       contains() { return false; },
       focus() {},
-      addEventListener() {},
+      addEventListener(name, callback) { this.listeners[name] = callback; },
       remove() {
         if (this.parentElement) {
           this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
@@ -1087,6 +1088,190 @@ test("exact distribution data is paginated with cumulative counts across pages",
   assert.equal(ui.element("batch-bin-status").textContent, "Showing 51–100 of 120 bins.");
   assert.equal(ui.element("batch-bin-previous").disabled, false);
   assert.equal(ui.element("batch-bin-next").disabled, false);
+});
+
+test("knowledge over turns renders a line and paginated seat observations", () => {
+  const ui = frontend();
+  ui.element("batch-metric").value = "knowledge_learned";
+  ui.element("batch-chart-values").open = true;
+  ui.evaluate(`
+    lastBatchChart = {
+      title: "Solution learned over turns", details: "Matching seats", percent: true,
+      points: Array.from({ length: 60 }, (_, turn) =>
+        ({ turn, samples: 2, mean: .5, minimum: 0, maximum: 1 })),
+    };
+    renderBatchChart();
+  `);
+  const graph = ui.element("batch-chart-graph").children;
+  assert.equal(graph.filter((child) => child.class === "batch-chart-line").length, 59);
+  assert.match(graph.find((child) => child["aria-label"]?.includes("Turn 0"))["aria-label"], /50%.*range 0–100%/);
+  assert.equal(ui.element("batch-chart-empty").hidden, true);
+  assert.equal(ui.element("batch-bin-next").disabled, false);
+  ui.evaluate("batchBinOffset = 50; renderBatchBinTable()");
+  const rows = ui.element("batch-chart-table").children[0].children;
+  assert.equal(rows.length, 11);
+  assert.equal(rows[1].children[0].textContent, "50");
+  assert.equal(rows[1].children[2].textContent, "50");
+  assert.equal(ui.element("batch-bin-next").disabled, true);
+});
+
+test("player comparison renders exact values, units, zero and missing samples accessibly", () => {
+  const ui = frontend();
+  ui.element("batch-chart-values").open = true;
+  for (const [unit, firstValue, expected] of [["%", 100 / 3, "33.33%"], ["turns", 2.75, "2.75 turns"], ["actions", 8.5, "8.5 actions"]]) {
+    ui.evaluate(`lastBatchChart = {
+      title: "Players", details: "Matching appearances", unit: "${unit}",
+      seat_bars: [{ seat: 0, value: ${firstValue}, samples: 4 },
+        { seat: 2, value: 0, samples: 3 }, { seat: 3, value: null, samples: 0 }],
+    }; renderBatchChart()`);
+    const graph = ui.element("batch-chart-graph").children;
+    const bars = graph.filter((child) => child.class === "batch-chart-bin");
+    assert.equal(bars.length, 3);
+    assert.equal(bars[0].tabindex, "0");
+    assert.match(bars[0]["aria-label"], new RegExp(`Player 1: ${expected.replace(".", "\\.")} · 4 samples`));
+    assert.match(bars[1]["aria-label"], /Player 3: 0/);
+    assert.match(bars[2]["aria-label"], /Player 4: No samples · 0 samples/);
+    if (unit === "%") assert.ok(Math.abs(Number(bars[0].children[1].height) / 178 - 1 / 3) < 0.001);
+    bars[0].listeners.focus();
+    assert.equal(ui.element("batch-chart-inspection").textContent, bars[0]["aria-label"]);
+    assert.ok(graph.some((child) => child.textContent === "No data"));
+    assert.ok(graph.some((child) => child.textContent === "0"));
+    assert.equal(ui.element("batch-chart-details").textContent, "Matching appearances");
+    assert.equal(ui.element("batch-values-summary").textContent, "View player data");
+    assert.equal(ui.element("batch-chart-table").children[0]["aria-label"], "Player comparison data");
+    assert.deepEqual(ui.element("batch-chart-table").children[0].children[1].children.map(
+      (row) => row.children.map((cell) => cell.textContent),
+    ), [["Player 1", expected, "4"], ["Player 3", unit === "%" ? "0%" : `0 ${unit}`, "3"], ["Player 4", "No samples", "0"]]);
+    ui.evaluate('switchBatchTab("runs"); switchBatchTab("distribution")');
+    assert.equal(ui.element("batch-chart-graph").children.filter((child) => child.class === "batch-chart-bin").length, 3);
+  }
+  ui.evaluate(`lastBatchChart = { title: "Empty", details: "", unit: "%", seat_bars: [] }; renderBatchChart()`);
+  assert.equal(ui.element("batch-chart-empty").hidden, false);
+  assert.equal(ui.element("batch-chart-values").hidden, true);
+  assert.match(template, /id="batch-bin-previous"[^>]*>Previous rows/);
+  assert.match(template, /id="batch-bin-next"[^>]*>Next rows/);
+});
+
+test("small nonzero player values remain visible in labels, axes and data", () => {
+  const ui = frontend();
+  ui.element("batch-chart-values").open = true;
+  for (const unit of ["%", "turns"]) {
+    ui.evaluate(`lastBatchChart = {
+      title: "Players", details: "", unit: "${unit}",
+      seat_bars: [{ seat: 0, value: 0.000123456, samples: 1 }],
+    }; renderBatchChart()`);
+    const graph = ui.element("batch-chart-graph").children;
+    const bar = graph.find((child) => child.class === "batch-chart-bin");
+    const expected = unit === "%" ? "0.000123%" : "0.000123 turns";
+    assert.ok(bar["aria-label"].includes(expected));
+    assert.ok(Number(bar.children[1].height) >= 1);
+    bar.listeners.focus();
+    assert.ok(ui.element("batch-chart-inspection").textContent.includes(expected));
+    assert.equal(ui.element("batch-chart-table").children[0].children[1].children[0].children[1].textContent, expected);
+    if (unit === "turns") assert.ok(graph.some((child) => child.textContent === "0.000123"));
+  }
+  assert.equal(ui.evaluate("formatBatchSeatNumber(1e-12)"), "1e-12");
+});
+
+test("narrow player charts rotate full labels without overlap", () => {
+  const ui = frontend();
+  ui.element("batch-chart-graph").clientWidth = 240;
+  ui.evaluate(`lastBatchChart = {
+    title: "Players", details: "", unit: "%",
+    seat_bars: Array.from({ length: 8 }, (_, seat) => ({ seat, value: seat ? 0 : null, samples: seat ? 1 : 0 })),
+  }; renderBatchChart()`);
+  const graph = ui.element("batch-chart-graph").children;
+  const labels = graph.filter((child) => /^Player \d+$/.test(child.textContent));
+  assert.equal(labels.length, 8);
+  assert.deepEqual(labels.map((label) => label.textContent), Array.from({ length: 8 }, (_, i) => `Player ${i + 1}`));
+  assert.ok(labels.every((label) => label.transform?.startsWith("rotate(-90 ")));
+  assert.ok(labels.every((label, index) => !index || Number(label.x) - Number(labels[index - 1].x) >= 11));
+  assert.ok(graph.some((child) => child.textContent === "— = no data"));
+  ui.element("batch-chart-graph").clientWidth = 900;
+  ui.evaluate("drawBatchGraph(lastBatchChart)");
+  assert.ok(ui.element("batch-chart-graph").children.filter((child) => /^Player \d+$/.test(child.textContent))
+    .every((label) => !label.transform));
+  ui.element("batch-chart-graph").clientWidth = 240;
+  ui.evaluate(`lastBatchChart.seat_bars = Array.from({ length: 18 },
+    (_, seat) => ({ seat, value: 1, samples: 1 })); drawBatchGraph(lastBatchChart)`);
+  assert.equal(ui.element("batch-chart-graph").style.minWidth, "402px");
+  assert.match(ui.element("batch-chart-graph").viewBox, /^0 0 402 /);
+  const manyLabels = ui.element("batch-chart-graph").children.filter((child) => /^Player \d+$/.test(child.textContent));
+  assert.equal(manyLabels.length, 18);
+  assert.ok(manyLabels.every((label, index) => !index || Number(label.x) - Number(manyLabels[index - 1].x) >= 18));
+  assert.match(stylesheet, /\.batch-graph-frame\s*\{[^}]*overflow-x:\s*auto/);
+  ui.evaluate(`drawBatchGraph({ points: [] })`);
+  assert.equal(ui.element("batch-chart-graph").style.minWidth, "");
+});
+
+test("distribution categories preserve measures and disable unavailable options", () => {
+  const ui = frontend();
+  const metric = ui.element("batch-metric");
+  const selectHtml = template.match(/<select id="batch-metric">([\s\S]*?)<\/select>/)[1];
+  metric.options = [...selectHtml.matchAll(/<option value="([^"]+)" data-category="([^"]+)"([^>]*)>/g)]
+    .map(([, value, category, extra]) => ({ value, dataset: { category }, boardOnly: extra.includes("data-board-only") }));
+  assert.equal(metric.options.length, 19);
+  assert.equal(metric.options.find((item) => item.value === "deduction").dataset.category, "seat");
+  assert.equal(metric.options.find((item) => item.value === "solution_turn").dataset.category, "seat");
+  ui.element("batch-category").value = "game";
+  metric.value = "outcomes";
+  ui.evaluate("updateBatchMeasureOptions()");
+  assert.ok(metric.options.filter((item) => item.dataset.category !== "game").every((item) => item.hidden && item.disabled));
+  ui.element("batch-category").value = "compare";
+  ui.evaluate("updateBatchMeasureOptions()");
+  assert.equal(metric.value, "seat_compare_turns");
+  assert.equal(ui.element("batch-bin-width-control").hidden, true);
+  assert.equal(ui.element("batch-display-control").hidden, true);
+  metric.value = "seat_compare_learned_rate";
+  ui.evaluate('batchCategorySelections.compare = $("batch-metric").value');
+  ui.element("batch-category").value = "knowledge";
+  ui.evaluate("updateBatchMeasureOptions()");
+  assert.equal(metric.value, "knowledge_learned");
+  ui.element("batch-category").value = "compare";
+  ui.evaluate("updateBatchMeasureOptions()");
+  assert.equal(metric.value, "seat_compare_learned_rate");
+  ui.element("batch-category").value = "board";
+  ui.evaluate("updateBatchMeasureOptions()");
+  assert.equal(metric.value, "rolls");
+  assert.equal(ui.element("batch-bin-width-control").hidden, false);
+  ui.evaluate(`
+    $("batch-runs-sort").selectedOptions = [];
+    globalThis.boardCategory = { hidden: false, disabled: false };
+    document.querySelectorAll = () => [boardCategory];
+    updateBatchScreen({ status: "completed", requested_games: 1, finished_games: 1, game_type: "card" });
+  `);
+  assert.equal(ui.element("batch-category").value, "game");
+  assert.equal(metric.value, "outcomes");
+  assert.equal(ui.evaluate("boardCategory.hidden && boardCategory.disabled"), true);
+  ui.evaluate(`updateBatchScreen({ status: "completed", requested_games: 1, finished_games: 1, game_type: "board" })`);
+  assert.equal(ui.evaluate("boardCategory.hidden || boardCategory.disabled"), false);
+});
+
+test("seat and knowledge requests bypass hidden invalid width and ignore stale responses", async () => {
+  const ui = frontend();
+  ui.element("batch-bin-width").value = "0";
+  ui.element("batch-policy-filter").value = "deductive";
+  ui.element("batch-seat-filter").value = "2";
+  ui.element("batch-metric").value = "seat_compare_win_rate";
+  ui.evaluate(`
+    activeBatchId = "batch"; batchFinished = true;
+    globalThis.pending = [];
+    requestJson = (url) => new Promise((resolve) => pending.push({ url, resolve }));
+    globalThis.first = loadBatchChart();
+    $("batch-metric").value = "knowledge_learned";
+    globalThis.second = loadBatchChart();
+  `);
+  const urls = ui.evaluate("pending.map((request) => request.url)");
+  assert.match(urls[0], /metric=seat_compare_win_rate/);
+  assert.match(urls[0], /policy=deductive/);
+  assert.match(urls[0], /seat=2/);
+  assert.doesNotMatch(urls[0], /width=/);
+  assert.doesNotMatch(urls[1], /width=/);
+  ui.evaluate(`pending[1].resolve({ title: "new", details: "", points: [] })`);
+  await ui.evaluate("second");
+  ui.evaluate(`pending[0].resolve({ title: "old", details: "", unit: "%", seat_bars: [] })`);
+  await ui.evaluate("first");
+  assert.equal(ui.element("batch-distribution-title").textContent, "new");
 });
 
 test("batch workspace tabs switch visible panels without losing the selection", () => {
