@@ -7,6 +7,7 @@ from clue_engine.batch import (
     BatchConfig,
     BatchPolicyError,
     batch_config_from_setup,
+    format_summary,
     read_game_trace,
     run_batch,
 )
@@ -41,6 +42,69 @@ def test_seeded_batches_are_reproducible_and_rotate_same_deal(tmp_path):
     assert starts[1]["policies"] == ["random", "deductive"]
     assert summary["outcomes"]["timeout"] == 4
     assert summary["completed_games"] == 0
+
+
+def test_batch_summary_shows_effective_settings_in_full_detail(tmp_path):
+    config = BatchConfig(
+        games=1,
+        policies=(BotStrategy(candidate_rooms=True), "random"),
+        seed=13,
+        max_steps=0,
+        rotate=False,
+        game_rules=GameRules(reverse_refutation=True),
+        players=2,
+    )
+    summary = run_batch(config, tmp_path / "settings.jsonl")
+
+    assert summary["settings"] == {
+        "games": 1,
+        "policies": (
+            {
+                "candidate_suggestions": False,
+                "probe_suggestions": False,
+                "rank_suggestions": False,
+                "repeat_reveals": False,
+                "candidate_rooms": True,
+                "prefer_suggest": False,
+                "deal_analysis": False,
+                "risk_accusation": False,
+            },
+            "random",
+        ),
+        "seed": 13,
+        "max_steps": 0,
+        "rotate": False,
+        "game_type": "card_only",
+        "game_rules": {
+            "reverse_refutation": True,
+            "public_refutations": False,
+            "all_refute": False,
+            "face_up_card": False,
+        },
+        "board_rules": {
+            "move_suspect": True,
+            "move_weapon": True,
+            "summoned_suggestion": True,
+            "secret_passages": True,
+            "early_end": True,
+            "revisit_hallways": False,
+            "optional_suggestion": False,
+            "accuse_in_room": False,
+            "stay_to_suggest": False,
+            "randomize_rooms": False,
+            "procedural_map": False,
+            "randomize_doors": False,
+            "randomize_passages": False,
+            "passage_count": 2,
+        },
+        "seat_suspects": None,
+        "shuffle_bots": False,
+        "players": 2,
+    }
+    formatted = format_summary(summary)
+    assert formatted.startswith("Settings used:\n")
+    assert '"candidate_rooms": true' in formatted
+    assert '"reverse_refutation": true' in formatted
 
 
 def test_batch_accepts_rotated_advanced_profiles(tmp_path):

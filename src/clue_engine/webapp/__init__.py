@@ -103,6 +103,7 @@ class WebBatch:
     owner: str
     game_type: str
     requested_games: int
+    settings: dict[str, object]
     last_access: float = field(default_factory=time.monotonic)
     finished_games: int = 0
     status: str = "queued"
@@ -819,7 +820,8 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 owner = secrets.token_urlsafe(24)
                 browser_session["batch_owner"] = owner
             batch_id = secrets.token_urlsafe(24)
-            batch = WebBatch(owner, config.game_type, config.games)
+            settings = asdict(config) | {"players": config.player_count}
+            batch = WebBatch(owner, config.game_type, config.games, settings)
             batches[batch_id] = batch
         for expired_batch in expired_batches:
             if expired_batch.trace_directory is not None:
@@ -848,6 +850,7 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 status=batch.status,
                 game_type=batch.game_type,
                 requested_games=batch.requested_games,
+                settings=batch.settings,
                 finished_games=batch.finished_games,
                 cancel_requested=batch.cancel_requested,
                 summary=batch.summary,

@@ -257,6 +257,7 @@ class PolicyComparison(PolicySummary):
 
 class BatchSummary(TypedDict):
     game_type: str
+    settings: dict[str, object]
     requested_games: int
     started_games: int
     completed_games: int
@@ -593,6 +594,7 @@ class _Aggregate:
             }
         return {
             "game_type": self.config.game_type,
+            "settings": asdict(self.config) | {"players": self.config.player_count},
             "requested_games": self.config.games, "started_games": sum(self.outcomes.values()),
             "completed_games": completed,
             "outcomes": {kind: self.outcomes[kind] for kind in ("won", "all_eliminated", "timeout", "error", "cancelled")},
@@ -615,6 +617,9 @@ class _Aggregate:
 
 def format_summary(summary: BatchSummary) -> str:
     lines = [
+        "Settings used:",
+        json.dumps(summary["settings"], indent=2, sort_keys=True),
+        "",
         f"Games: {summary['started_games']} started / {summary['requested_games']} requested",
         f"Completed: {summary['completed_games']}",
         "Outcomes: " + ", ".join(f"{name}={count}" for name, count in summary["outcomes"].items()),

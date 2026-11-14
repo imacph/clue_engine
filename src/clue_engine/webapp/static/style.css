@@ -300,6 +300,7 @@ input, select {
 .main-menu-actions .button span { display: block; font-size: .8rem; font-weight: 400; opacity: .85; }
 .batch-actions { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
 .batch-summary-grid { display: grid; gap: 5px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.batch-settings { max-height: 360px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
 .batch-stat { background: var(--clauses-bg); border: 1px solid var(--line); display: grid; gap: 1px; padding: 5px 8px; }
 .batch-stat strong { color: var(--muted); font-size: .72rem; }
 .batch-stat span { overflow-wrap: anywhere; }

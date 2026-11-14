@@ -1008,6 +1008,22 @@ test("batch comparison and chart show meaningful rates and exact statistics", ()
   assert.equal(ui.element("batch-chart-graph").children.length, 0);
 });
 
+test("batch summary displays the complete settings before results are available", () => {
+  const ui = frontend();
+  ui.evaluate(`renderBatchSummary({
+    settings: {
+      games: 12, seed: 42, max_steps: 500,
+      policies: ["random", { candidate_rooms: true }],
+      game_rules: { reverse_refutation: true },
+    },
+    summary: null,
+  })`);
+  assert.equal(ui.element("batch-settings-disclosure").hidden, false);
+  assert.match(ui.element("batch-settings").textContent, /"games": 12/);
+  assert.match(ui.element("batch-settings").textContent, /"candidate_rooms": true/);
+  assert.match(ui.element("batch-settings").textContent, /"reverse_refutation": true/);
+});
+
 test("distribution graph preserves gaps and groups dense bins without losing counts", () => {
   const ui = frontend();
   const result = ui.evaluate(`(() => {
