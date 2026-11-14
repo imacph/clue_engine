@@ -503,6 +503,7 @@ button.playing-card:focus-visible { outline: 2px solid var(--focus); outline-off
 .notebook-mark:hover { background: var(--card-tint); }
 .clause-indicators { display: flex; height: 10px; justify-content: flex-end; left: 0; pointer-events: none; position: absolute; right: 0; top: 0; z-index: 1; }
 .clause-indicator { background: transparent; border: 0; border-radius: 50%; cursor: pointer; display: grid; flex: 0 1 10px; height: 10px; min-width: 0; padding: 0; place-items: center; pointer-events: auto; width: 10px; }
+.clause-indicator.clause-marker-dimmed { opacity: .35; }
 .clause-indicator::before { background: var(--clause-color); border-radius: 50%; box-shadow: 0 0 0 .5px var(--panel); content: ""; height: 9px; width: min(9px, 100%); }
 .clause-indicator[aria-pressed="true"] { outline: 1px solid var(--clause-color); outline-offset: 0; }
 .clause-indicator:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 2; }

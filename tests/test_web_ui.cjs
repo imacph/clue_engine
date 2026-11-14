@@ -99,6 +99,21 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
         }
         return null;
       },
+      querySelectorAll(selector) {
+        const result = [];
+        function visit(node) {
+          for (const child of node.children) {
+            const name = selector.startsWith(".") ? selector.slice(1) : "";
+            if (name && (child.classList.contains(name)
+              || String(child.className || "").split(/\s+/).includes(name))) {
+              result.push(child);
+            }
+            visit(child);
+          }
+        }
+        visit(this);
+        return result;
+      },
       get childElementCount() { return this.children.length; },
     };
   }
@@ -2121,16 +2136,78 @@ test("notebook renders overlapping clause references without replacing marks", (
   ui.renderNotebook(notebookState);
   const selected = descendants(ui.element("notebook"));
   const selectedLinks = selected.filter((node) => node.dataset.clauseCard);
+  assert.equal(selected.find((node) => node.tagName === "TABLE"), table);
+  assert.equal(selectedLinks[0], links[0]);
   assert.equal(selectedLinks[0]["aria-pressed"], "true");
   assert.equal(selectedLinks[1]["aria-pressed"], "false");
   assert.equal(selectedLinks[0].style["--clause-color"], links[0].style["--clause-color"]);
   assert.equal(selected.filter((node) => node.classList.contains("clause-linked-selected")).length, 2);
+  ui.evaluate("selectedClause = null");
+  ui.renderNotebook(notebookState);
+  assert.equal(links[0]["aria-pressed"], "false");
+  assert.equal(descendants(ui.element("notebook"))
+    .filter((node) => node.classList.contains("clause-linked-selected")).length, 0);
+  assert.equal(ui.element("notebook").children[0], table);
   notebookState.notebook_clauses[0].active_cards = [];
   ui.renderNotebook(notebookState);
   const remaining = descendants(ui.element("notebook")).filter((node) => node.dataset.clauseCard);
   assert.equal(remaining.length, 1);
   assert.match(remaining[0]["aria-label"], /clause 2/);
   assert.equal(remaining[0].style["--clause-color"], links[1].style["--clause-color"]);
+});
+
+test("manual notebook clause markers dim for negative and positive marks", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 3, hand_sizes: [9, 9, 9],
+    matrix: [
+      { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "-", "?", "?"], editable: [true, true, true, true] },
+      { id: 7, name: "Dagger", type: "weapon", marks: ["?", "?", "+", "?"], editable: [true, true, true, true] },
+      { id: 12, name: "Kitchen", type: "room", marks: ["?", "?", "?", "?"], editable: [true, true, true, true] },
+    ],
+    notebook_clauses: [
+      { id: 1, holder: 1, active_cards: [0, 7] },
+      { id: 2, holder: 2, active_cards: [7, 12] },
+    ],
+  };
+  ui.renderNotebook(state);
+  ui.evaluate("currentState = state");
+  const notebook = ui.element("notebook");
+  function descendants(node) {
+    return [node, ...node.children.flatMap(descendants)];
+  }
+  notebook.querySelector = (selector) => {
+    const match = selector.match(/data-notebook-card="(\d+)".*data-notebook-holder="(\d+)"/);
+    return match && descendants(notebook).find((node) =>
+      node.dataset.notebookCard === match[1] && node.dataset.notebookHolder === match[2]);
+  };
+  const findMarker = (card, clause) => descendants(notebook).find((node) =>
+    node.dataset.clauseCard === String(card) && node.dataset.clauseId === String(clause));
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), true);
+  assert.equal(findMarker(7, 1).classList.contains("clause-marker-dimmed"), false);
+  assert.equal(findMarker(7, 2).classList.contains("clause-marker-dimmed"), true);
+  assert.equal(findMarker(12, 2).classList.contains("clause-marker-dimmed"), true);
+
+  const table = notebook.children[0];
+  ui.evaluate('pendingNotebookEdits.push({ cardId: 0, holder: 1, mark: "?" })');
+  ui.renderNotebook(state);
+  assert.equal(notebook.children[0], table);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), false);
+  ui.evaluate("pendingNotebookEdits = []");
+  ui.renderNotebook(state);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), true);
+
+  state.matrix[0].marks[1] = "?";
+  state.matrix[1].marks[2] = "?";
+  ui.renderNotebook(state);
+  assert.equal(notebook.children[0], table);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), false);
+  assert.equal(findMarker(7, 2).classList.contains("clause-marker-dimmed"), false);
+  assert.equal(findMarker(12, 2).classList.contains("clause-marker-dimmed"), false);
+
+  state.notebook_mode = "automatic";
+  ui.renderNotebook(state);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), false);
 });
 
 test("clause indicators stay out of notebook row layout and remain separate when crowded", () => {

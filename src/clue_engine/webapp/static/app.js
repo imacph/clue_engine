@@ -2046,6 +2046,42 @@ function updateNotebookMark(button, card, holder, mark, state, draft, responses)
   button.title = label;
 }
 
+function updateNotebookClauseSelection(notebook) {
+  const indicators = notebook.querySelectorAll(".clause-indicator");
+  for (const cell of notebook.querySelectorAll(".clause-linked-selected")) {
+    cell.classList.remove("clause-linked-selected");
+  }
+  for (const indicator of indicators) {
+    const selected = Number(indicator.dataset.clauseId) === selectedClause;
+    indicator.setAttribute("aria-pressed", String(selected));
+    if (selected) indicator.parentElement.parentElement.classList.add("clause-linked-selected");
+  }
+}
+
+function updateNotebookClauseOpacity(notebook, state, matrix) {
+  const indicators = notebook.querySelectorAll(".clause-indicator");
+  if (state.notebook_mode !== "manual") {
+    for (const indicator of indicators) indicator.classList.remove("clause-marker-dimmed");
+    return;
+  }
+  const cards = new Map(matrix.map((card) => [card.id, card]));
+  const clauses = new Map((state.notebook_clauses || []).map((clause) => [clause.id, clause]));
+  const positivelyMarkedClauses = new Set();
+  for (const clause of clauses.values()) {
+    if (clause.active_cards.some((id) => cards.get(id)?.marks[clause.holder] === "+")) {
+      positivelyMarkedClauses.add(clause.id);
+    }
+  }
+  for (const indicator of indicators) {
+    const clause = clauses.get(Number(indicator.dataset.clauseId));
+    const card = cards.get(Number(indicator.dataset.clauseCard));
+    const mark = clause && card?.marks[clause.holder];
+    indicator.classList.toggle(
+      "clause-marker-dimmed", mark === "-" || positivelyMarkedClauses.has(clause?.id),
+    );
+  }
+}
+
 function renderNotebook(state) {
   const notebook = $("notebook");
   const focus = state.notebook_focus || { cards: [] };
@@ -2061,12 +2097,11 @@ function renderNotebook(state) {
   const structure = JSON.stringify([
     state.notebook_mode, state.num_players, state.hand_sizes,
     matrix.map(({ marks, ...card }) => card), state.notebook_clauses,
-    state.notebook_focus, responses, selectedClause, Boolean(clauseDraft),
+    state.notebook_focus, responses, Boolean(clauseDraft),
   ]);
   const marks = matrix.map((card) => card.marks.slice());
   const draft = clauseDraft ? { holder: clauseDraft.holder, cards: { ...clauseDraft.cards } } : null;
-  if (structure === lastNotebookStructureFingerprint && lastNotebookMarks
-      && state.notebook_mode === "manual") {
+  if (structure === lastNotebookStructureFingerprint && lastNotebookMarks) {
     const changes = [];
     let canUpdate = true;
     for (const [index, card] of matrix.entries()) {
@@ -2090,6 +2125,8 @@ function renderNotebook(state) {
       for (const [button, card, holder, mark] of changes) {
         updateNotebookMark(button, card, holder, mark, state, draft, responses);
       }
+      updateNotebookClauseSelection(notebook);
+      updateNotebookClauseOpacity(notebook, state, matrix);
       lastNotebookFingerprint = fingerprint;
       lastNotebookMarks = marks;
       lastNotebookDraft = draft;
@@ -2227,6 +2264,7 @@ function renderNotebook(state) {
     table.append(body);
   }
   notebook.append(table);
+  updateNotebookClauseOpacity(notebook, state, matrix);
   if (focusCard !== undefined) {
     notebook.querySelector(`[data-notebook-card="${focusCard}"][data-notebook-holder="${focusHolder}"]`)
       ?.focus({ preventScroll: true });
