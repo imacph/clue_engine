@@ -1460,10 +1460,14 @@ function positiveKnowledge(marks) {
 
 function notebookOverlayMarkers(cardId, notes, visibility) {
   const marks = notes.marks.get(cardId) || [];
+  const hasPositive = marks.includes("+");
   const conflict = positiveKnowledge(marks).conflict;
   const markers = marks.flatMap((mark, holder) => {
     const type = mark === "+" ? "positive" : mark === "-" ? "negative" : "unknown";
-    if (!visibility[type] || (mark === "+" && conflict)) return [];
+    if (!visibility[type]
+      || (type === "negative" && hasPositive)
+      || (holder === notes.player && notes.hand.has(cardId))
+      || (mark === "+" && conflict)) return [];
     const owner = holder === notes.players ? "Envelope" : `Player ${holder + 1}`;
     const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
     const shortOwner = holder === notes.players ? "E" : `P${holder + 1}`;

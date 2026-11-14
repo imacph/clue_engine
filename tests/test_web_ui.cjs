@@ -743,18 +743,30 @@ test("card overlay controls independently toggle marks and clause markers", () =
     setNotebookMarkerVisibility("card", "unknown", true);
     setNotebookMarkerVisibility("card", "clause", true);
     const all = snapshot();
+    state.matrix[0].marks = ["?", "-", "?"];
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    const noPositive = snapshot();
     setNotebookMarkerVisibility("card", "negative", false);
     setNotebookMarkerVisibility("card", "unknown", false);
     setNotebookMarkerVisibility("card", "clause", false);
-    return { defaults, negative, all, handOnly: snapshot(),
+    return { defaults, negative, all, noPositive, handOnly: snapshot(),
       cardVisibility: { ...cardMarkerVisibility }, roomVisibility: { ...roomMarkerVisibility } };
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    defaults: { label: "Miss Scarlet, suspect. In your hand. Notebook: Player 1: held",
-      badges: [["In hand", "card-hand-badge"], ["P1+", "card-note-mark card-note-positive card-note-own"]] },
-    negative: { label: "Miss Scarlet, suspect. In your hand. Notebook: Player 2: not held",
-      badges: [["In hand", "card-hand-badge"], ["P2-", "card-note-mark card-note-negative"]] },
+    defaults: { label: "Miss Scarlet, suspect. In your hand",
+      badges: [["In hand", "card-hand-badge"]] },
+    negative: { label: "Miss Scarlet, suspect. In your hand",
+      badges: [["In hand", "card-hand-badge"]] },
     all: {
+      label: "Miss Scarlet, suspect. In your hand. Notebook: Player 3: unknown, Clause 4, Clause 5",
+      badges: [
+        ["In hand", "card-hand-badge"],
+        ["P3?", "card-note-mark card-note-unknown"],
+        ["C4", "card-note-mark card-note-clause"],
+        ["C5", "card-note-mark card-note-clause"],
+      ],
+    },
+    noPositive: {
       label: "Miss Scarlet, suspect. In your hand. Notebook: Player 2: not held, Player 3: unknown, Clause 4, Clause 5",
       badges: [
         ["In hand", "card-hand-badge"],
@@ -788,7 +800,7 @@ test("card notes follow optimistic edits and revert in place after a failed save
       noteContainers: face.querySelector(".card-topline").children.filter((child) => child.className === "card-annotations").length,
       error: $("error-message").textContent };
   })()`);
-  assert.match(result.before, /In your hand.*Player 1: held/);
+  assert.equal(result.before, "Miss Scarlet, suspect. In your hand");
   assert.equal(result.immediate, "Miss Scarlet, suspect. In your hand");
   assert.equal(result.reverted, result.before);
   assert.equal(result.noteContainers, 1);
@@ -823,9 +835,7 @@ test("board room indicators use the selected notebook, suppress conflicts and to
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     normal: { groups: [
-      { label: "Kitchen: In your hand, Player 1: held", badges: [
-        { kind: "board-note-hand", text: "Hand" }, { kind: "board-note-own", text: "P1+" },
-      ] },
+      { label: "Kitchen: In your hand", badges: [{ kind: "board-note-hand", text: "Hand" }] },
       { label: "Ballroom: Envelope: held", badges: [{ kind: "board-note-envelope", text: "E+" }] },
     ], warning: "" },
     conflict: { groups: [
@@ -867,24 +877,36 @@ test("room overlay filters show selected mark types and active clauses without c
     const all = snapshot();
     setNotebookMarkerVisibility("room", "positive", false);
     const noPositive = snapshot();
-    return { defaults, all, noPositive, cardVisibility: { ...cardMarkerVisibility } };
+    state.matrix[0].marks = ["?", "-", "?"];
+    updateKnowledgeIndicators(state);
+    const withoutPositive = snapshot();
+    return { defaults, all, noPositive, withoutPositive,
+      cardVisibility: { ...cardMarkerVisibility } };
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     defaults: { label: "Kitchen: Player 1: held",
       badges: [{ kind: "board-note-own", text: "P1+" }] },
     all: {
-      label: "Kitchen: Player 1: held, Player 2: not held, Envelope: unknown, Clause 3, Clause 8",
+      label: "Kitchen: Player 1: held, Envelope: unknown, Clause 3, Clause 8",
       badges: [
         { kind: "board-note-own", text: "P1+" },
-        { kind: "board-note-negative", text: "P2-" },
         { kind: "board-note-unknown", text: "E?" },
         { kind: "board-note-clause", text: "C3" },
         { kind: "board-note-clause", text: "C8" },
       ],
     },
     noPositive: {
-      label: "Kitchen: Player 2: not held, Envelope: unknown, Clause 3, Clause 8",
+      label: "Kitchen: Envelope: unknown, Clause 3, Clause 8",
       badges: [
+        { kind: "board-note-unknown", text: "E?" },
+        { kind: "board-note-clause", text: "C3" },
+        { kind: "board-note-clause", text: "C8" },
+      ],
+    },
+    withoutPositive: {
+      label: "Kitchen: Player 1: unknown, Player 2: not held, Envelope: unknown, Clause 3, Clause 8",
+      badges: [
+        { kind: "board-note-unknown", text: "P1?" },
         { kind: "board-note-negative", text: "P2-" },
         { kind: "board-note-unknown", text: "E?" },
         { kind: "board-note-clause", text: "C3" },
