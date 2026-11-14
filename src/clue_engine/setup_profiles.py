@@ -50,8 +50,13 @@ def validate_setup_profile(value: object) -> None:
     if "shuffle_seat" in value and type(value["shuffle_seat"]) is not bool:
         raise ValueError("Profile human seat shuffle must be true or false.")
     bots = value["bots"]
-    if not isinstance(bots, list) or len(bots) != players:
-        raise ValueError("Profile requires one bot configuration per seat.")
+    if (
+        not isinstance(bots, list)
+        or (len(bots) != players and not (
+            value.get("shuffle_bots") is True and 2 <= len(bots) < players
+        ))
+    ):
+        raise ValueError("Profile requires one bot configuration per seat unless profile shuffling is enabled.")
     for bot in bots:
         if isinstance(bot, str):
             if bot == "learned" and game_type != "board":

@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     print("WARNING: trace contains private hands, shown cards, and solutions.", file=sys.stderr)
-    if config.rotate and config.games % len(config.policies):
+    if config.rotate and not config.shuffle_bots and config.games % len(config.policies):
         print("WARNING: the final rotation is incomplete; policy seat exposures may be unbalanced.",
               file=sys.stderr)
 

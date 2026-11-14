@@ -57,8 +57,12 @@ class BatchConfig:
     board_rules: BoardRules = DEFAULT_BOARD_RULES
     seat_suspects: tuple[int, ...] | None = None
     shuffle_bots: bool = False
+    players: int | None = None
 
     def validate(self) -> None:
+        if self.players is not None and (type(self.players) is not int or self.players < 2):
+            raise ValueError("players must be an integer of at least two")
+        players = self.player_count
         if type(self.games) is not int or self.games < 1:
             raise ValueError("games must be at least 1")
         if len(self.policies) < 2:
@@ -74,6 +78,10 @@ class BatchConfig:
             raise ValueError("max_steps must be non-negative")
         if type(self.rotate) is not bool or type(self.shuffle_bots) is not bool:
             raise TypeError("rotate and shuffle_bots must be true or false")
+        if len(self.policies) > players:
+            raise ValueError("there cannot be more bot profiles than player seats")
+        if len(self.policies) != players and not self.shuffle_bots:
+            raise ValueError("one bot profile per player is required unless profile shuffling is enabled")
         if not isinstance(self.game_type, str) or self.game_type not in GAME_TYPES:
             raise ValueError(f"game_type must be one of {', '.join(GAME_TYPES)}")
         if self.game_type != "board" and any(
@@ -84,7 +92,7 @@ class BatchConfig:
             raise TypeError("game_rules must be GameRules")
         if not isinstance(self.board_rules, BoardRules):
             raise TypeError("board_rules must be BoardRules")
-        if self.game_rules.face_up_card and len(self.policies) > len(CARDS_BY_ID) - 3:
+        if self.game_rules.face_up_card and players > len(CARDS_BY_ID) - 3:
             raise ValueError("face-up cards require at least one card per player")
         if self.game_type == "board":
             from .board_setup import BoardSetup
@@ -92,9 +100,13 @@ class BatchConfig:
 
             if self.seat_suspects is not None and not isinstance(self.seat_suspects, tuple):
                 raise TypeError("seat_suspects must be a tuple")
-            create_board(BoardSetup(len(self.policies)), seat_suspects=self.seat_suspects)
+            create_board(BoardSetup(players), seat_suspects=self.seat_suspects)
         elif self.seat_suspects is not None or self.board_rules != DEFAULT_BOARD_RULES:
             raise ValueError("board rules and character assignments require a board game")
+
+    @property
+    def player_count(self) -> int:
+        return self.players if self.players is not None else len(self.policies)
 
 
 def batch_config_from_setup(
@@ -118,11 +130,16 @@ def batch_config_from_setup(
     players = value.get("players", 4)
     if type(players) is not int or players < 2:
         raise ValueError("players must be an integer of at least two")
+    shuffle_bots = value.get("shuffle_bots", False)
+    if type(shuffle_bots) is not bool:
+        raise TypeError("shuffle_bots must be true or false")
 
     if "bots" in value:
         raw_bots = value["bots"]
-        if not isinstance(raw_bots, list) or len(raw_bots) != players:
-            raise ValueError("bots must contain one configuration per player")
+        if not isinstance(raw_bots, list) or not 2 <= len(raw_bots) <= players:
+            raise ValueError("bots must contain at least two and at most one configuration per player")
+        if len(raw_bots) != players and not shuffle_bots:
+            raise ValueError("bots must contain one configuration per player unless profile shuffling is enabled")
         policies: list[PolicySpec] = []
         for index, bot in enumerate(raw_bots):
             if isinstance(bot, str):
@@ -139,7 +156,7 @@ def batch_config_from_setup(
         policy_text = value.get("policies", value.get("policy", "deductive"))
         if not isinstance(policy_text, str):
             raise TypeError("policy or policies must be text when bots are omitted")
-        policy_specs = policies_for_players(policy_text, players)
+        policy_specs = policy_profiles(policy_text, players, shuffle_bots)
 
     game_type = value.get("game_type", "card_only")
     if not isinstance(game_type, str):
@@ -188,7 +205,8 @@ def batch_config_from_setup(
         game_rules=game_rules,
         board_rules=board_rules,
         seat_suspects=seat_suspects,
-        shuffle_bots=value.get("shuffle_bots", False),
+        shuffle_bots=shuffle_bots,
+        players=players,
     )
     config.validate()
     return config
@@ -282,7 +300,7 @@ def _make_game(
 ) -> tuple[Engine, tuple[Policy, ...]]:
     factory = create_board_game if config.game_type == "board" else create_game
     engine, _ = factory(
-        len(specs),
+        config.player_count,
         seed,
         "random",
         game_rules=config.game_rules,
@@ -315,6 +333,16 @@ def _validate_policy_models(config: BatchConfig) -> None:
 
 def policies_for_players(value: str, players: int) -> tuple[str, ...]:
     return _policies_for_players(value, players, additional=("learned",))
+
+
+def policy_profiles(value: str, players: int, shuffle_bots: bool) -> tuple[str, ...]:
+    names = tuple(name.strip().lower() for name in value.split(","))
+    if len(names) == 1:
+        return _policies_for_players(value, players)
+    if len(names) != players and (not shuffle_bots or not 2 <= len(names) < players):
+        raise ValueError("supply one policy or one policy per player")
+    validate_policy_names(names, additional=("learned",))
+    return names
 
 
 def _deductions(engine: Engine) -> list[Deduction]:
@@ -487,15 +515,15 @@ class _Aggregate:
     def __init__(self, config: BatchConfig):
         self.config = config
         self.outcomes: Counter[str] = Counter()
-        self.wins_by_seat = [0] * len(config.policies)
+        self.wins_by_seat = [0] * config.player_count
         self.actions: Counter[int] = Counter()
         self.suggestions = 0
         self.passes = 0
         self.refutations = 0
-        self.turns = [0] * len(config.policies)
+        self.turns = [0] * config.player_count
         self.board_metrics = Counter[str]()
         self.policy_stats = {
-            name: [self._empty_stats() for _ in range(len(config.policies) + 1)]
+            name: [self._empty_stats() for _ in range(config.player_count + 1)]
             for name in {_policy_label(spec) for spec in config.policies}
         }
 
@@ -649,8 +677,11 @@ def run_batch(
             seed = config.seed + (game // len(config.policies) if config.rotate else game)
             specs = list(config.policies)
             if config.shuffle_bots:
-                random.Random(f"{config.seed}:{game}:bot-shuffle").shuffle(specs)
-            if config.rotate:
+                shuffle_round = game // len(specs)
+                random.Random(f"{config.seed}:{shuffle_round}:bot-shuffle").shuffle(specs)
+                rotation = game % len(specs)
+                specs = [specs[(rotation + seat) % len(specs)] for seat in range(config.player_count)]
+            elif config.rotate:
                 rotation = game % len(specs)
                 specs = specs[rotation:] + specs[:rotation]
             result = _run_game(game, seed, tuple(specs), config, stream, should_cancel)

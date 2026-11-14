@@ -13,7 +13,7 @@ from ..batch import (
     BatchSummary,
     batch_config_from_setup,
     format_summary,
-    policies_for_players,
+    policy_profiles,
     read_game_trace,
     run_batch,
 )
@@ -39,6 +39,7 @@ class BatchWindow(tk.Toplevel):
         self.setup_json = tk.StringVar(master=self)
         self.trace = tk.StringVar(master=self)
         self.rotate = tk.BooleanVar(master=self, value=True)
+        self.shuffle_bots = tk.BooleanVar(master=self, value=False)
         self.game_number = tk.StringVar(master=self, value="0")
         self.status = tk.StringVar(master=self, value="Choose a new trace file to begin.")
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clue-batch")
@@ -80,12 +81,17 @@ class BatchWindow(tk.Toplevel):
         ttk.Checkbutton(setup, text="Rotate policies over seats", variable=self.rotate).grid(
             row=8, column=0, columnspan=2, sticky="w"
         )
+        ttk.Checkbutton(
+            setup,
+            text="Randomize bot profiles; balance assignments across complete seat rotations",
+            variable=self.shuffle_bots,
+        ).grid(row=9, column=0, columnspan=4, sticky="w")
         ttk.Label(
             setup, text="WARNING: traces contain private hands, shown cards, and solutions.",
             foreground="red",
-        ).grid(row=9, column=0, columnspan=4, sticky="w", pady=4)
+        ).grid(row=10, column=0, columnspan=4, sticky="w", pady=4)
         buttons = ttk.Frame(setup)
-        buttons.grid(row=10, column=0, columnspan=4, sticky="w")
+        buttons.grid(row=11, column=0, columnspan=4, sticky="w")
         self.start_button = ttk.Button(buttons, text="Start batch", command=self.start)
         self.start_button.pack(side="left", padx=3)
         self.cancel_button = ttk.Button(buttons, text="Cancel", command=self.cancel, state="disabled")
@@ -150,6 +156,8 @@ class BatchWindow(tk.Toplevel):
             setup_path = self.setup_json.get().strip()
             if setup_path:
                 setup = json.loads(Path(setup_path).read_text(encoding="utf-8"))
+                if self.shuffle_bots.get():
+                    setup["shuffle_bots"] = True
                 config = batch_config_from_setup(
                     setup, games=count, seed=seed, max_steps=limit, rotate=self.rotate.get(),
                 )
@@ -157,8 +165,11 @@ class BatchWindow(tk.Toplevel):
                 players = int(self.players.get())
                 if players < 2:
                     raise ValueError("players must be at least 2")
-                names = policies_for_players(self.policies.get(), players)
-                config = BatchConfig(count, names, seed, limit, self.rotate.get())
+                names = policy_profiles(self.policies.get(), players, self.shuffle_bots.get())
+                config = BatchConfig(
+                    count, names, seed, limit, self.rotate.get(),
+                    shuffle_bots=self.shuffle_bots.get(), players=players,
+                )
                 config.validate()
             path_text = self.trace.get().strip()
             if not path_text:
@@ -168,7 +179,7 @@ class BatchWindow(tk.Toplevel):
             messagebox.showerror("Invalid batch settings", str(exc), parent=self)
             return
         warning = "The trace contains private hands, shown cards, and solutions. Save it locally?"
-        if config.rotate and config.games % len(config.policies):
+        if config.rotate and not config.shuffle_bots and config.games % len(config.policies):
             warning += "\n\nThe final rotation is incomplete; policy seat exposures may be unbalanced."
         if not messagebox.askyesno("Private trace", warning, parent=self):
             return

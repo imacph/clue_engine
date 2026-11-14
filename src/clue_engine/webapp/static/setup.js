@@ -89,6 +89,7 @@ window.setupWizard = (() => {
   let highlightedSeat = 0;
   let lastSetup = null;
   let batchMode = false;
+  let shuffleBotProfileCount = 0;
   let profiles = Object.create(null);
   let profilesReady = false;
 
@@ -154,6 +155,7 @@ window.setupWizard = (() => {
   function syncSeats() {
     const count = Number($("players").value);
     if (!Number.isInteger(count) || count < 2 || (isBoard() && count > 6)) return;
+    renderShuffleBotCount();
     while (bots.length < count) bots.push("random");
     const oldSeat = Number($("seat").value || 0);
     const human = Math.min(oldSeat, count - 1);
@@ -265,13 +267,15 @@ window.setupWizard = (() => {
       ? sharedBots.querySelector('option[value="learned"]') : null;
     if (sharedLearnedOption) sharedLearnedOption.disabled = learnedUnavailable;
     const human = $("mode").value === "play" ? Number($("seat").value) : null;
+    const profileCount = batchMode && $("shuffle-bots").checked
+      ? shuffleBotProfileCount : count;
     const list = $("bot-list");
     const expanded = new Set(
       [...list.querySelectorAll("details[open]")].map((item) => item.dataset.botDetails),
     );
     list.replaceChildren();
-    list.dataset.botCount = String(count - (human === null ? 0 : 1));
-    for (let i = 0; i < count; i++) {
+    list.dataset.botCount = String(profileCount - (human === null ? 0 : 1));
+    for (let i = 0; i < profileCount; i++) {
       if (i === human) continue;
       const value = bots[i];
       const row = document.createElement("div");
@@ -412,7 +416,8 @@ window.setupWizard = (() => {
       game_type: isBoard() ? "board" : "card_only",
       notebook_mode: batchMode || $("mode").value === "spectate" ? "automatic" : $("notebook-mode").value,
       players: count, seat: batchMode ? 0 : Number($("seat").value), seed: Number($("seed").value),
-      bots: copy(bots.slice(0, count)), progress: $("progress").value,
+      bots: copy(bots.slice(0, batchMode && $("shuffle-bots").checked
+        ? shuffleBotProfileCount : count)), progress: $("progress").value,
       shuffle_bots: $("shuffle-bots").checked,
       shuffle_seat: !batchMode && $("mode").value === "play" && $("shuffle-seat").checked,
       max_steps: Number($("max-steps").value), debug: !batchMode && $("debug").checked,
@@ -472,7 +477,10 @@ window.setupWizard = (() => {
     if (data.shuffle_bots || (data.shuffle_seat && data.mode === "play")) {
       const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
         .map((bot) => isLearned(bot) ? "learned" : typeof bot === "string" ? bot : "custom");
-      add("Bot styles", `${styles.join(", ")}${data.shuffle_bots ? " · randomly assigned to bot seats" : ""}`);
+      const assignment = batchMode
+        ? " · balanced across full profile rotations; a partial final rotation can vary"
+        : " · randomly assigned to bot seats";
+      add("Bot styles", `${styles.join(", ")}${data.shuffle_bots ? assignment : ""}`);
     }
     if (data.bots.some((bot, i) => bot === "analytical" && (data.mode !== "play" || i !== data.seat))) {
       add("Analytical risk", "May accuse at 50% estimated confidence; a wrong accusation eliminates the bot");
@@ -507,6 +515,21 @@ window.setupWizard = (() => {
     if (data.debug) add("Warning", "Omniscient debug reveals hidden information.");
   }
 
+  function renderShuffleBotCount() {
+    const players = Number($("players").value);
+    const countField = $("shuffle-bot-count-field");
+    const select = $("shuffle-bot-count");
+    countField.hidden = !batchMode || !$("shuffle-bots").checked;
+    if (!Number.isInteger(players) || players < 2) return;
+    const selected = shuffleBotProfileCount || players;
+    shuffleBotProfileCount = Math.max(2, Math.min(players, selected));
+    select.replaceChildren(...Array.from({ length: players - 1 }, (_, index) => {
+      const count = index + 2;
+      return option(count, `${count} profiles`);
+    }));
+    select.value = String(shuffleBotProfileCount);
+  }
+
   function renderBatchMode() {
     const spectating = $("mode").value === "spectate";
     if (!spectating) {
@@ -525,6 +548,13 @@ window.setupWizard = (() => {
     $("progress-field").hidden = batchMode;
     $("debug-field").hidden = batchMode;
     $("spectator-warning").hidden = batchMode || $("mode").value !== "spectate";
+    $("shuffle-bots-label").textContent = batchMode
+      ? "Balance randomized bot profiles across seats"
+      : "Randomly assign bot styles to seats";
+    $("shuffle-bots-hint").textContent = batchMode
+      ? "Choose fewer profiles than players to distribute them as evenly as possible across seats in the batch."
+      : "Shuffle the configured bots among bot seats when the game starts.";
+    renderShuffleBotCount();
   }
 
   function showStep(next, focus = true) {
@@ -559,6 +589,7 @@ window.setupWizard = (() => {
     $("shuffle-seat").checked = data.shuffle_seat === true;
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
     bots = copy(data.bots);
+    shuffleBotProfileCount = bots.length;
     if (batchMode) {
       for (let i = 0; i < bots.length; i++) {
         if (bots[i] == null) bots[i] = $("all-bots").value || "random";
@@ -590,7 +621,9 @@ window.setupWizard = (() => {
       || !Number.isInteger(data.players) || data.players < 2
       || (data.game_type === "board" && (data.players < 3 || data.players > 6))
       || !Number.isInteger(data.seat) || data.seat < 0 || data.seat >= data.players
-      || !Array.isArray(data.bots) || data.bots.length !== data.players
+      || !Array.isArray(data.bots)
+      || (data.bots.length !== data.players
+        && !(data.shuffle_bots === true && data.bots.length >= 2 && data.bots.length < data.players))
       || !["auto", "turn", "step"].includes(data.progress)
       || !Number.isSafeInteger(data.max_steps) || data.max_steps < 0
       || typeof data.debug !== "boolean"
@@ -775,6 +808,16 @@ window.setupWizard = (() => {
   $("batch-enabled").addEventListener("change", () => {
     batchMode = $("mode").value === "spectate" && $("batch-enabled").checked;
     renderBatchMode();
+    syncSeats();
+  });
+  $("shuffle-bots").addEventListener("change", () => {
+    renderBatchMode();
+    renderBots();
+  });
+  $("shuffle-bot-count").addEventListener("change", () => {
+    shuffleBotProfileCount = Number($("shuffle-bot-count").value);
+    renderBots();
+    if (step === 4) renderReview();
   });
   $("shuffle-seat").addEventListener("change", renderSeats);
   $("seat-list").addEventListener("change", (event) => {
