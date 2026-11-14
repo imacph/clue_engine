@@ -127,10 +127,27 @@ class GameFrame(ttk.Frame):
         )
         history_filters = ttk.Frame(right)
         history_filters.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self.history_actor_choice, self.history_type_choice = self._filter_choices(
-            history_filters, num_players,
-            tuple(kind.name.replace("_", " ").capitalize() for kind in HISTORY_KINDS),
-            self._history_filter_selected,
+        self.history_actor_vars = {
+            player: tk.BooleanVar(self, value=True) for player in range(num_players)
+        }
+        self.history_type_vars = {
+            kind: tk.BooleanVar(self, value=True) for kind in HISTORY_KINDS
+        }
+        self.history_actor_choice = self._history_filter_menu(
+            history_filters,
+            "Actor",
+            [(player, f"Player {player}") for player in range(num_players)],
+            self.history_actor_vars,
+            "All players",
+            0,
+        )
+        self.history_type_choice = self._history_filter_menu(
+            history_filters,
+            "Type",
+            [(kind, kind.name.replace("_", " ").capitalize()) for kind in HISTORY_KINDS],
+            self.history_type_vars,
+            "All types",
+            1,
         )
         self.history = tk.Text(right, height=10, width=48, wrap="word", state="disabled")
         self.history.grid(row=2, column=0, sticky="nsew")
@@ -199,6 +216,37 @@ class GameFrame(ttk.Frame):
         clause_scroll.grid(row=1, column=1, sticky="ns")
         self.clauses.configure(yscrollcommand=clause_scroll.set)
 
+    def _history_filter_menu(
+        self,
+        parent: ttk.Frame,
+        title: str,
+        choices: list[tuple[object, str]],
+        variables: dict[object, tk.BooleanVar],
+        all_label: str,
+        column: int,
+    ) -> ttk.Menubutton:
+        button = ttk.Menubutton(parent, text=f"{title}: All")
+        menu = tk.Menu(button, tearoff=False)
+        button.configure(menu=menu)
+        menu.add_command(
+            label=all_label,
+            command=lambda: self._select_all_history_filter(variables),
+        )
+        menu.add_separator()
+        for value, label in choices:
+            menu.add_checkbutton(
+                label=label,
+                variable=variables[value],
+                command=self._history_filter_selected,
+            )
+        button.grid(row=0, column=column, sticky="w", padx=3)
+        return button
+
+    def _select_all_history_filter(self, variables: dict[object, tk.BooleanVar]) -> None:
+        for variable in variables.values():
+            variable.set(True)
+        self._history_filter_selected()
+
     @staticmethod
     def _filter_choices(
         parent: ttk.Frame,
@@ -255,32 +303,48 @@ class GameFrame(ttk.Frame):
         self._refresh_actions(snapshot)
 
     def _refresh_history(self, snapshot: SessionSnapshot) -> None:
-        actor_index = self.history_actor_choice.current() - 1
-        kind_index = self.history_type_choice.current() - 1
-        actor = actor_index if actor_index >= 0 else None
-        kind = HISTORY_KINDS[kind_index] if kind_index >= 0 else None
+        actors = {
+            actor for actor, variable in self.history_actor_vars.items() if variable.get()
+        }
+        kinds = {
+            kind for kind, variable in self.history_type_vars.items() if variable.get()
+        }
         self.history.configure(state="normal")
         if self._history_match_count == 0:
             self.history.delete("1.0", "end")
         for index in range(self._event_count, len(snapshot.events)):
             event = snapshot.events[index]
-            if (actor is not None and event.actor != actor) or (
-                kind is not None and event.kind is not kind
-            ):
+            if event.actor not in actors or event.kind not in kinds:
                 continue
             previous = snapshot.events[index - 1] if index else None
             self.history.insert("end", format_event(event, previous) + "\n")
             self._history_match_count += 1
-        if self._history_match_count == 0 and (actor is not None or kind is not None):
+        filtered = not all(variable.get() for variable in (
+            *self.history_actor_vars.values(), *self.history_type_vars.values()
+        ))
+        if self._history_match_count == 0 and filtered:
             self.history.insert("end", "No events match the current filters.\n")
         self._event_count = len(snapshot.events)
         self.history.see("end")
         self.history.configure(state="disabled")
 
-    def _history_filter_selected(self, _event: tk.Event) -> None:
+    def _history_filter_selected(self, _event: tk.Event | None = None) -> None:
+        self.history_actor_choice.configure(
+            text=self._history_filter_label("Actor", self.history_actor_vars)
+        )
+        self.history_type_choice.configure(
+            text=self._history_filter_label("Type", self.history_type_vars)
+        )
         self._event_count = 0
         self._history_match_count = 0
         self._refresh_history(self.session.snapshot())
+
+    @staticmethod
+    def _history_filter_label(title: str, variables: dict[object, tk.BooleanVar]) -> str:
+        selected = sum(variable.get() for variable in variables.values())
+        total = len(variables)
+        summary = "All" if selected == total else "None" if selected == 0 else f"{selected} selected"
+        return f"{title}: {summary}"
 
     def _clause_filter_selected(self, _event: tk.Event) -> None:
         self._refresh()

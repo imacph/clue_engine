@@ -18,6 +18,7 @@ from clue_engine.gui.batch_window import BatchWindow
 from clue_engine.gui.distribution_view import DistributionView
 from clue_engine.gui.widgets import GameFrame
 from clue_engine.models import Accuse, Combination, EndTurn, Pass, Reveal, Suggest
+from clue_engine.observations import EventKind
 from clue_engine.policies import ProbingPolicy, StrategicPolicy
 from clue_engine.session import GameSession
 from clue_engine.state import GameState
@@ -172,6 +173,15 @@ def select_filter(root, choice, value):
     root.update()
 
 
+def select_history_filters(root, frame, actors=None, kinds=None):
+    for actor, variable in frame.history_actor_vars.items():
+        variable.set(actors is None or actor in actors)
+    for kind, variable in frame.history_type_vars.items():
+        variable.set(kinds is None or kind in kinds)
+    frame._history_filter_selected()
+    root.update()
+
+
 def test_history_filters_update_live_and_preserve_unfiltered_context(root):
     engine = make_engine()
     session = GameSession(
@@ -182,8 +192,7 @@ def test_history_filters_update_live_and_preserve_unfiltered_context(root):
     frame = GameFrame(root, session, paused=True)
     frame.pack()
     root.update()
-    select_filter(root, frame.history_actor_choice, "Player 1")
-    select_filter(root, frame.history_type_choice, "Refute")
+    select_history_filters(root, frame, actors={1, 2}, kinds={EventKind.SUGGEST, EventKind.REFUTE})
     assert "No events match" in frame.history.get("1.0", "end")
     frame.next_button.invoke()
     assert "No events match" in frame.history.get("1.0", "end")
@@ -191,11 +200,10 @@ def test_history_filters_update_live_and_preserve_unfiltered_context(root):
     assert "Player 1 refuted" in frame.history.get("1.0", "end")
     assert "suggested" not in frame.history.get("1.0", "end")
     frame.next_button.invoke()
-    assert frame.history_actor_choice.get() == "Player 1"
-    assert frame.history_type_choice.get() == "Refute"
+    assert frame.history_actor_choice.cget("text") == "Actor: 2 selected"
+    assert frame.history_type_choice.cget("text") == "Type: 2 selected"
     assert frame.history.get("1.0", "end").count("refuted") == 1
-    select_filter(root, frame.history_actor_choice, "All players")
-    select_filter(root, frame.history_type_choice, "All types")
+    select_history_filters(root, frame)
     assert "Player 0 suggested" in frame.history.get("1.0", "end")
     assert "Player 0 ended their turn" in frame.history.get("1.0", "end")
 
@@ -204,7 +212,7 @@ def test_history_filters_update_live_and_preserve_unfiltered_context(root):
     frame = GameFrame(root, GameSession(engine, [ScriptedPolicy()] * 4), paused=True)
     frame.pack()
     root.update()
-    select_filter(root, frame.history_type_choice, "End turn")
+    select_history_filters(root, frame, kinds={EventKind.END_TURN})
     history = frame.history.get("1.0", "end")
     assert "was eliminated after an incorrect accusation" in history
     assert "accused:" not in history
@@ -257,13 +265,12 @@ def test_history_show_filter_respects_view_privacy(root, human_player, debug, ca
     )
     frame.pack()
     root.update()
-    select_filter(root, frame.history_actor_choice, "Player 1")
-    select_filter(root, frame.history_type_choice, "Show")
+    select_history_filters(root, frame, actors={1}, kinds={EventKind.SHOW})
     text = frame.history.get("1.0", "end")
     assert ("Player 1 showed Dagger to Player 0" in text) is can_see_show
     assert ("No events match" in text) is not can_see_show
     if can_see_show:
-        select_filter(root, frame.history_actor_choice, "Player 0")
+        select_history_filters(root, frame, actors={0}, kinds={EventKind.SHOW})
         assert "No events match" in frame.history.get("1.0", "end")
     if human_player is None and not debug:
         select_filter(root, frame.knowledge_player_choice, "Player 0")

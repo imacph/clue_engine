@@ -597,8 +597,16 @@
           <aside id="history-panel" class="panel history-panel" role="tabpanel"
                  aria-labelledby="history-tab">
             <div class="filter-row">
-              <label>Actor<select id="history-actor"></select></label>
-              <label>Type<select id="history-kind"></select></label>
+              <fieldset class="history-filter">
+                <legend>Actor</legend>
+                <div id="history-actor" class="history-filter-options"></div>
+                <button id="history-actor-all" type="button">All players</button>
+              </fieldset>
+              <fieldset class="history-filter">
+                <legend>Type</legend>
+                <div id="history-kind" class="history-filter-options"></div>
+                <button id="history-kind-all" type="button">All types</button>
+              </fieldset>
             </div>
             <ol id="history-list" class="history-list"></ol>
           </aside>
