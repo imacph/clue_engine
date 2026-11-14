@@ -2032,6 +2032,30 @@ function updateNotebookClauseSelection(notebook) {
   }
 }
 
+function updateNotebookClauseOpacity(notebook, state) {
+  const indicators = notebook.querySelectorAll(".clause-indicator");
+  if (state.notebook_mode !== "manual") {
+    for (const indicator of indicators) indicator.classList.remove("clause-marker-dimmed");
+    return;
+  }
+  const cards = new Map(state.matrix.map((card) => [card.id, card]));
+  const clauses = new Map((state.notebook_clauses || []).map((clause) => [clause.id, clause]));
+  const positivelyMarkedClauses = new Set();
+  for (const clause of clauses.values()) {
+    if (clause.active_cards.some((id) => cards.get(id)?.marks[clause.holder] === "+")) {
+      positivelyMarkedClauses.add(clause.id);
+    }
+  }
+  for (const indicator of indicators) {
+    const clause = clauses.get(Number(indicator.dataset.clauseId));
+    const card = cards.get(Number(indicator.dataset.clauseCard));
+    const mark = clause && card?.marks[clause.holder];
+    indicator.classList.toggle(
+      "clause-marker-dimmed", mark === "-" || positivelyMarkedClauses.has(clause?.id),
+    );
+  }
+}
+
 function renderNotebook(state) {
   const notebook = $("notebook");
   const focus = state.notebook_focus || { cards: [] };
@@ -2076,6 +2100,7 @@ function renderNotebook(state) {
         updateNotebookMark(button, card, holder, mark, state, draft, responses);
       }
       updateNotebookClauseSelection(notebook);
+      updateNotebookClauseOpacity(notebook, state);
       lastNotebookFingerprint = fingerprint;
       lastNotebookMarks = marks;
       lastNotebookDraft = draft;
@@ -2213,6 +2238,7 @@ function renderNotebook(state) {
     table.append(body);
   }
   notebook.append(table);
+  updateNotebookClauseOpacity(notebook, state);
   if (focusCard !== undefined) {
     notebook.querySelector(`[data-notebook-card="${focusCard}"][data-notebook-holder="${focusHolder}"]`)
       ?.focus({ preventScroll: true });

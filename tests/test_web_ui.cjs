@@ -2090,6 +2090,52 @@ test("notebook renders overlapping clause references without replacing marks", (
   assert.equal(remaining[0].style["--clause-color"], links[1].style["--clause-color"]);
 });
 
+test("manual notebook clause markers dim for negative and positive marks", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "manual", num_players: 3, hand_sizes: [9, 9, 9],
+    matrix: [
+      { id: 0, name: "Miss Scarlet", type: "suspect", marks: ["?", "-", "?", "?"], editable: [true, true, true, true] },
+      { id: 7, name: "Dagger", type: "weapon", marks: ["?", "?", "+", "?"], editable: [true, true, true, true] },
+      { id: 12, name: "Kitchen", type: "room", marks: ["?", "?", "?", "?"], editable: [true, true, true, true] },
+    ],
+    notebook_clauses: [
+      { id: 1, holder: 1, active_cards: [0, 7] },
+      { id: 2, holder: 2, active_cards: [7, 12] },
+    ],
+  };
+  ui.renderNotebook(state);
+  ui.evaluate("currentState = state");
+  const notebook = ui.element("notebook");
+  function descendants(node) {
+    return [node, ...node.children.flatMap(descendants)];
+  }
+  notebook.querySelector = (selector) => {
+    const match = selector.match(/data-notebook-card="(\d+)".*data-notebook-holder="(\d+)"/);
+    return match && descendants(notebook).find((node) =>
+      node.dataset.notebookCard === match[1] && node.dataset.notebookHolder === match[2]);
+  };
+  const findMarker = (card, clause) => descendants(notebook).find((node) =>
+    node.dataset.clauseCard === String(card) && node.dataset.clauseId === String(clause));
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), true);
+  assert.equal(findMarker(7, 1).classList.contains("clause-marker-dimmed"), false);
+  assert.equal(findMarker(7, 2).classList.contains("clause-marker-dimmed"), true);
+  assert.equal(findMarker(12, 2).classList.contains("clause-marker-dimmed"), true);
+
+  const table = notebook.children[0];
+  state.matrix[0].marks[1] = "?";
+  state.matrix[1].marks[2] = "?";
+  ui.renderNotebook(state);
+  assert.equal(notebook.children[0], table);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), false);
+  assert.equal(findMarker(7, 2).classList.contains("clause-marker-dimmed"), false);
+  assert.equal(findMarker(12, 2).classList.contains("clause-marker-dimmed"), false);
+
+  state.notebook_mode = "automatic";
+  ui.renderNotebook(state);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), false);
+});
+
 test("clause indicators stay out of notebook row layout and remain separate when crowded", () => {
   const containerRule = stylesheet.match(/\.clause-indicators\s*\{([^}]*)\}/);
   const indicatorRule = stylesheet.match(/\.clause-indicator\s*\{([^}]*)\}/);
