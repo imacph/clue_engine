@@ -108,11 +108,15 @@ blocked until the game's action limit. Passing remains mandatory only when no
 card matches.
 
 Three independent board-layout options shuffle room identities among existing
-locations, randomize each physical room's doors while preserving its door
-count, using at most one door per side, and keeping doors away from corners and
-outside walls, and replace the
-passages with 0–4 random disjoint room pairs. Layouts without enough
-eligible sides for their existing door count cannot randomize doors.
+locations, randomize each physical room's door count and positions using at
+most one door per side, and replace the passages with random disjoint room
+pairs. Randomized doors pair across a continuous hallway between adjacent
+rooms where possible; any remaining doors are placed independently. Doorways
+stay away from corners and outside walls. Randomized passages exclude
+physically adjacent rooms and use at most one passage per room. The requested
+passage count cannot exceed the maximum disjoint non-adjacent pairs available
+in the selected layout (up to four). Each room keeps at least one door, and its
+randomized door count cannot exceed its eligible sides.
 Without
 passage randomization, passages stay attached to their physical locations when
 rooms are shuffled. The layout is generated reproducibly from the game seed,

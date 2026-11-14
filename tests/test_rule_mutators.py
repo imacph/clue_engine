@@ -4,7 +4,15 @@ from dataclasses import replace
 
 import pytest
 
-from clue_engine.board import DEFAULT_BOARD, Door, Square, randomize_board_layout
+from clue_engine.board import (
+    DEFAULT_BOARD,
+    Square,
+    _adjacent_room_pairs,
+    _doors_pair,
+    _maximum_matching_size,
+    _random_passage_pairs,
+    randomize_board_layout,
+)
 from clue_engine.board_record import read_board_record, write_board_record
 from clue_engine.board_state import RoomPosition, SuspectToken
 from clue_engine.board_turn import Roll, UsePassage
@@ -174,8 +182,39 @@ def test_randomized_passages_are_distinct_seeded_pairs(count):
     for a, b in layout.passages:
         assert layout.passage_from(a) == b
         assert layout.passage_from(b) == a
+        assert frozenset((a, b)) not in _adjacent_room_pairs(layout.rooms, layout.hallways)
     assert first.state.solution == normal.state.solution
     assert first.state.player_hands == normal.state.player_hands
+
+
+def test_adjacent_rooms_reduce_the_maximum_disjoint_passage_count():
+    room_ids = tuple(room.card_id for room in DEFAULT_BOARD.rooms)
+    adjacent = _adjacent_room_pairs(DEFAULT_BOARD.rooms, DEFAULT_BOARD.hallways)
+    eligible = {
+        frozenset((first, second))
+        for first in room_ids
+        for second in room_ids
+        if first < second and frozenset((first, second)) not in adjacent
+    }
+    assert adjacent == {
+        frozenset(pair)
+        for pair in (
+            (12, 13), (12, 15), (13, 14), (14, 16), (15, 18),
+            (16, 17), (17, 20), (18, 19), (19, 20),
+        )
+    }
+    assert _maximum_matching_size(room_ids, eligible) == 4
+
+    all_pairs = {
+        frozenset((first, second))
+        for first in room_ids
+        for second in room_ids
+        if first < second
+    }
+    available_pair = {frozenset((12, 20))}
+    assert _maximum_matching_size(room_ids, available_pair) == 1
+    with pytest.raises(ValueError, match="non-adjacent"):
+        _random_passage_pairs(room_ids, all_pairs - available_pair, 2, random.Random(1))
 
 
 @pytest.mark.parametrize("value", [-1, 5, True, 2.5])
@@ -202,14 +241,13 @@ def test_room_shuffle_remaps_doors_and_passages_without_moving_geometry():
 
 
 @pytest.mark.parametrize("seed", range(20))
-def test_randomized_doors_preserve_each_location_count_and_valid_connections(seed):
+def test_randomized_doors_use_distinct_sides_and_valid_connections(seed):
     rules = BoardRules(randomize_rooms=True, randomize_doors=True)
     engine, _ = create_board_game(4, seed, "random", board_rules=rules)
     layout = engine.state.board.board.layout
-    original_by_squares = {room.squares: room.card_id for room in DEFAULT_BOARD.rooms}
     for room in layout.rooms:
         doors = layout.doors_for(room.card_id)
-        assert len(doors) == len(DEFAULT_BOARD.doors_for(original_by_squares[room.squares]))
+        assert 1 <= len(doors) <= 4
         sides = {
             (door.hallway_square.x - door.room_square.x, door.hallway_square.y - door.room_square.y)
             for door in doors
@@ -233,22 +271,25 @@ def test_randomized_doors_preserve_each_location_count_and_valid_connections(see
     }
 
 
-def test_door_randomization_rejects_layouts_with_too_few_sides():
-    room = DEFAULT_BOARD.rooms[0]
-    original_doors = set(DEFAULT_BOARD.doors)
-    extra = next(
-        door for square in sorted(room.squares)
-        for neighbor in (
-            Square(square.x, square.y - 1), Square(square.x + 1, square.y),
-            Square(square.x, square.y + 1), Square(square.x - 1, square.y),
-        )
-        if neighbor in DEFAULT_BOARD.hallways
-        for door in (Door(room.card_id, square, neighbor),)
-        if door not in original_doors
-    )
-    layout = replace(DEFAULT_BOARD, doors=(*DEFAULT_BOARD.doors, extra))
-    with pytest.raises(ValueError, match="too few eligible sides"):
-        randomize_board_layout(layout, random.Random(42), doors=True)
+def test_randomized_doors_vary_counts_pair_adjacent_rooms_and_allow_stranded_doors():
+    counts = set()
+    stranded_positions = set()
+    for seed in range(20):
+        layout = randomize_board_layout(DEFAULT_BOARD, random.Random(seed), doors=True)
+        counts.add(tuple(len(layout.doors_for(room.card_id)) for room in layout.rooms))
+        paired = {
+            door
+            for index, first in enumerate(layout.doors)
+            for second in layout.doors[index + 1:]
+            if _doors_pair(first, second, layout.hallways)
+            for door in (first, second)
+        }
+        assert paired
+        stranded = set(layout.doors) - paired
+        assert stranded
+        stranded_positions.update((door.room_square, door.hallway_square) for door in stranded)
+    assert len(counts) > 1
+    assert len(stranded_positions) > 1
 
 
 @pytest.mark.parametrize("seed", range(24))
@@ -274,7 +315,6 @@ def test_generated_board_is_reproducible_connected_and_has_no_dead_ends(seed, ra
         assert sum(neighbor in layout.hallways for neighbor in neighbors) >= 2
     for room, original_room in zip(layout.rooms, DEFAULT_BOARD.rooms, strict=True):
         doors = layout.doors_for(room.card_id)
-        assert len(doors) == len(DEFAULT_BOARD.doors_for(original_room.card_id))
         directions = set()
         for door in doors:
             dx = door.hallway_square.x - door.room_square.x
@@ -285,6 +325,10 @@ def test_generated_board_is_reproducible_connected_and_has_no_dead_ends(seed, ra
                 assert Square(
                     door.hallway_square.x - offset * dy, door.hallway_square.y + offset * dx
                 ) in layout.hallways
+        if randomize_doors:
+            assert 1 <= len(doors) <= 4
+        else:
+            assert len(doors) == len(DEFAULT_BOARD.doors_for(original_room.card_id))
         assert len(directions) == len(doors)
 
 
