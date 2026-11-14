@@ -30,31 +30,101 @@ window.setupWizard = (() => {
       deal_analysis: true, risk_accusation: true,
     },
   };
+  const legacyPresetNames = ["random", "deductive", "probing", "strategic", "analytical"];
   const presetDescriptions = {
     random: "Random decisions; shared deduction and movement.",
     deductive: "Favors possible solution cards and useful rooms.",
     probing: "Adds controlled probes and repeats previously shown cards.",
     strategic: "Ranks suggestions and analyzes possible deals when practical; never guesses.",
     analytical: "Adds deeper deal counting and opponent modeling; risks accusations at 50% estimated confidence.",
-    learned: "Uses the configured learned model for room goals, suggestions, and calculated accusations.",
+  };
+  const learnedProfiles = {
+    hard: {
+      label: "Hard",
+      description: "Deterministic choices with aggressive, threat-aware accusations.",
+      room_temperature: 0, suggestion_temperature: 0, accusation_temperature: 0,
+      accusation_threshold: 0.275, threat_sensitivity: 0.9,
+    },
+    focused: {
+      label: "Focused",
+      description: "Nearly deterministic play with confident, threat-aware accusations.",
+      room_temperature: 0.05, suggestion_temperature: 0.05, accusation_temperature: 0.05,
+      accusation_threshold: 0.35, threat_sensitivity: 0.7,
+    },
+    steady: {
+      label: "Steady",
+      description: "A measured mix of decisive play and cautious accusations.",
+      room_temperature: 0.1, suggestion_temperature: 0.1, accusation_temperature: 0.1,
+      accusation_threshold: 0.45, threat_sensitivity: 0.5,
+    },
+    cautious: {
+      label: "Cautious",
+      description: "More varied choices and a higher bar for making an accusation.",
+      room_temperature: 0.2, suggestion_temperature: 0.2, accusation_temperature: 0.2,
+      accusation_threshold: 0.6, threat_sensitivity: 0.35,
+    },
+    gentle: {
+      label: "Gentle",
+      description: "The most exploratory profile, with conservative accusations.",
+      room_temperature: 0.3, suggestion_temperature: 0.3, accusation_temperature: 0.3,
+      accusation_threshold: 0.75, threat_sensitivity: 0.2,
+    },
   };
   const learnedDefaults = {
     type: "learned", room_temperature: 0, suggestion_temperature: 0,
-    accusation_temperature: 0, accusation_threshold: 0.5, opponent_model: false,
-    threat_sensitivity: 0,
+    accusation_temperature: 0, accusation_threshold: 0.275, opponent_model: true,
+    threat_sensitivity: 0.9,
   };
   const learnedControls = {
-    room_temperature: ["Room exploration", 5, 0.1],
-    suggestion_temperature: ["Suggestion exploration", 5, 0.1],
-    accusation_temperature: ["Accusation exploration", 5, 0.1],
-    accusation_threshold: ["Accusation confidence threshold (1 = sound only)", 1, 0.05],
-    threat_sensitivity: ["Opponent threat sensitivity", 1, 0.1],
+    room_temperature: ["Room exploration", 5, 0.05],
+    suggestion_temperature: ["Suggestion exploration", 5, 0.05],
+    accusation_temperature: ["Accusation exploration", 5, 0.05],
+    accusation_threshold: ["Accusation confidence threshold (higher is safer)", 1, 0.05],
+    threat_sensitivity: ["Risk sensitivity to opponent threats", 1, 0.05],
   };
   function isLearned(value) {
     return value === "learned" || (value && typeof value === "object" && value.type === "learned");
   }
   function learnedSettings(value) {
-    return { ...learnedDefaults, ...(typeof value === "object" ? value : {}) };
+    return {
+      ...learnedDefaults, ...(value && typeof value === "object" ? value : {}), opponent_model: true,
+    };
+  }
+  function learnedProfile(name) {
+    return {
+      type: "learned", opponent_model: true,
+      ...Object.fromEntries(Object.keys(learnedControls).map((key) => [key, learnedProfiles[name][key]])),
+    };
+  }
+  function learnedProfileName(value) {
+    if (!isLearned(value)) return null;
+    const settings = learnedSettings(value);
+    return Object.keys(learnedProfiles).find((name) =>
+      Object.keys(learnedControls).every((key) => settings[key] === learnedProfiles[name][key])
+    ) || null;
+  }
+  function defaultLearnedProfile(index) {
+    const names = Object.keys(learnedProfiles);
+    return learnedProfile(names[Math.min(index, names.length - 1)]);
+  }
+  function isLegacyBot(value) {
+    return !isLearned(value);
+  }
+  function botChoice(value) {
+    if (isLearned(value)) return learnedProfileName(value) || "learned-custom";
+    return typeof value === "string" ? value : "custom";
+  }
+  function botChoiceLabel(name) {
+    if (learnedProfiles[name]) return learnedProfiles[name].label;
+    if (name === "learned-custom") return "Custom learned";
+    if (name === "custom") return "Custom";
+    return name[0].toUpperCase() + name.slice(1);
+  }
+  function botFromChoice(name, current) {
+    if (learnedProfiles[name]) return learnedProfile(name);
+    if (name === "learned-custom") return isLearned(current) ? learnedSettings(current) : learnedProfile("steady");
+    if (name === "custom") return strategy(current);
+    return name;
   }
   const weights = {
     candidate_suggestions: 20, probe_suggestions: 15, rank_suggestions: 15,
@@ -145,8 +215,14 @@ window.setupWizard = (() => {
       showError(missingBoardSetup);
       return false;
     }
-    if (!isBoard() && bots.some(isLearned)) {
-      showError("The learned policy supports board games only.");
+    if (!isBoard() && !$("enable-legacy-bots").checked) {
+      showError("Enable legacy bots to play a card-only game.");
+      return false;
+    }
+    if (!isBoard() && bots.some(
+      (bot, i) => ($("mode").value !== "play" || i !== Number($("seat").value)) && isLearned(bot),
+    )) {
+      showError("Choose a legacy bot for each bot seat in a card-only game.");
       return false;
     }
     return true;
@@ -155,8 +231,13 @@ window.setupWizard = (() => {
   function syncSeats() {
     const count = Number($("players").value);
     if (!Number.isInteger(count) || count < 2 || (isBoard() && count > 6)) return;
+    if (isBoard() && !$("enable-legacy-bots").checked) {
+      bots = bots.map((bot, i) => isLegacyBot(bot) ? defaultLearnedProfile(i) : bot);
+    }
     renderShuffleBotCount();
-    while (bots.length < count) bots.push("random");
+    while (bots.length < count) bots.push(
+      isBoard() && !$("enable-legacy-bots").checked ? defaultLearnedProfile(bots.length) : "random",
+    );
     const oldSeat = Number($("seat").value || 0);
     const human = Math.min(oldSeat, count - 1);
     if (oldSeat !== human) $("seat-notice").textContent = `Your seat moved to Player ${human + 1}.`;
@@ -261,53 +342,78 @@ window.setupWizard = (() => {
   function renderBots() {
     const count = Number($("players").value);
     if (!Number.isInteger(count) || count < 2 || (isBoard() && count > 6)) return;
-    const learnedUnavailable = !isBoard();
-    const sharedBots = $("all-bots");
-    const sharedLearnedOption = sharedBots
-      ? sharedBots.querySelector('option[value="learned"]') : null;
-    if (sharedLearnedOption) sharedLearnedOption.disabled = learnedUnavailable;
-    const human = $("mode").value === "play" ? Number($("seat").value) : null;
-    const profileCount = batchMode && $("shuffle-bots").checked
-      ? shuffleBotProfileCount : count;
     const list = $("bot-list");
     const expanded = new Set(
       [...list.querySelectorAll("details[open]")].map((item) => item.dataset.botDetails),
     );
+    const legacyEnabled = $("enable-legacy-bots").checked;
+    const learnedUnavailable = !isBoard();
+    const blocked = learnedUnavailable && !legacyEnabled;
+    const sharedBots = $("all-bots");
+    const sharedChoices = blocked ? [] : learnedUnavailable
+      ? [...legacyPresetNames] : [
+        ...Object.keys(learnedProfiles), ...(legacyEnabled ? legacyPresetNames : []),
+      ];
+    const sharedValue = sharedBots.value;
+    sharedBots.replaceChildren(...sharedChoices.map((name) => option(name, botChoiceLabel(name))));
+    sharedBots.value = sharedChoices.includes(sharedValue) ? sharedValue : sharedChoices[0] || "";
+    sharedBots.disabled = blocked;
+    $("apply-bots").disabled = blocked;
+    const human = $("mode").value === "play" ? Number($("seat").value) : null;
+    const profileCount = batchMode && $("shuffle-bots").checked
+      ? shuffleBotProfileCount : count;
+    const message = $("bot-setup-message");
+    const needsLegacyBots = learnedUnavailable && bots.some(
+      (bot, i) => (human === null || i !== human) && isLearned(bot),
+    );
+    message.hidden = !blocked && !needsLegacyBots;
+    message.textContent = blocked
+      ? "Learned profiles require a board game. Enable legacy bots to configure bots for a card-only game."
+      : needsLegacyBots ? "Choose a legacy bot for each seat to use this card-only game." : "";
     list.replaceChildren();
+    if (blocked) return;
     list.dataset.botCount = String(profileCount - (human === null ? 0 : 1));
     for (let i = 0; i < profileCount; i++) {
       if (i === human) continue;
       const value = bots[i];
+      const choices = learnedUnavailable ? [...legacyPresetNames, "custom"] : [
+        ...Object.keys(learnedProfiles),
+        ...(legacyEnabled ? [...legacyPresetNames, "custom"] : []),
+        "learned-custom",
+      ];
       const row = document.createElement("div");
-      row.className = "setup-seat";
+      row.className = "setup-seat bot-seat-card";
       const label = document.createElement("label");
+      label.className = "bot-choice-label";
       label.textContent = `Player ${i + 1} bot`;
       const select = document.createElement("select");
+      select.className = "bot-profile-select";
       select.dataset.botSeat = String(i);
-      for (const name of Object.keys(presets)) {
-        const preset = option(name, name[0].toUpperCase() + name.slice(1));
-        if (name === "learned") preset.disabled = learnedUnavailable;
-        select.append(preset);
-      }
-      select.append(option("custom", "Custom"));
-      select.value = isLearned(value) ? "learned" : typeof value === "string" ? value : "custom";
+      select.append(option("", "Choose a bot profile"));
+      for (const name of choices) select.append(option(name, botChoiceLabel(name)));
+      const selectedChoice = botChoice(value);
+      select.value = choices.includes(selectedChoice) ? selectedChoice : "";
       label.append(select);
       const summary = document.createElement("p");
       summary.className = "hint bot-score";
       summary.dataset.botScore = String(i);
-      summary.textContent = isLearned(value) ? "Learned model · board only · may risk elimination"
+      const profileName = learnedProfileName(value);
+      summary.textContent = isLearned(value) ? `Learned · ${profileName ? learnedProfiles[profileName].label : "custom"} · opponent model on`
+        : learnedUnavailable ? "Legacy bot · card-only compatible"
         : `Toolkit: ${score(value)}/100${value === "analytical" ? " · may accuse at 50%" : ""}`;
       const description = document.createElement("p");
       description.className = "hint";
-      description.textContent = isLearned(value) ? presetDescriptions.learned
+      description.textContent = isLearned(value)
+        ? profileName ? learnedProfiles[profileName].description
+          : "Custom learned settings use the experimental opponent model."
         : typeof value === "string" ? presetDescriptions[value]
         : "Custom choices use probes first, then candidate filtering, followed by optional ranking; they do not include analytical opponent modeling.";
       const details = document.createElement("details");
       details.dataset.botDetails = String(i);
       details.open = expanded.has(String(i));
       const detailsTitle = document.createElement("summary");
-      detailsTitle.textContent = isLearned(value) ? "Configure learned bot"
-        : typeof value === "string" ? "Strategy details" : "Edit strategy";
+      detailsTitle.textContent = isLearned(value) ? "Profile settings"
+        : typeof value === "string" ? "Legacy bot details" : "Edit custom strategy";
       details.append(detailsTitle, description);
       const copyLabel = document.createElement("label");
       copyLabel.className = "bot-copy";
@@ -325,11 +431,12 @@ window.setupWizard = (() => {
       if (isLearned(value)) {
         const settings = learnedSettings(value);
         const hint = document.createElement("p");
-        hint.className = "hint";
-        hint.textContent = "Zero temperature chooses the highest-scoring action; higher values add randomness. Confidence is estimated from bounded deal counts, not guaranteed.";
+        hint.className = "hint bot-settings-hint";
+        hint.textContent = "Temperature 0 is deterministic; higher values add randomness. The experimental opponent model is always on for learned setup bots. Confidence is estimated from bounded deal counts, not guaranteed.";
         details.append(hint);
         for (const [key, [text, max, increment]] of Object.entries(learnedControls)) {
           const item = document.createElement("label");
+          item.className = "bot-range-control";
           const output = document.createElement("span");
           output.textContent = `${text}: ${settings[key]}`;
           const input = document.createElement("input");
@@ -344,16 +451,6 @@ window.setupWizard = (() => {
           item.append(output, input);
           details.append(item);
         }
-        const modelLabel = document.createElement("label");
-        modelLabel.className = "check-row";
-        const modelInput = document.createElement("input");
-        modelInput.type = "checkbox";
-        modelInput.checked = settings.opponent_model;
-        modelInput.dataset.learnedModel = String(i);
-        const modelText = document.createElement("span");
-        modelText.textContent = "Use trained opponent behavior model (experimental)";
-        modelLabel.append(modelInput, modelText);
-        details.append(modelLabel);
       } else if (typeof value !== "string") {
         const options = document.createElement("fieldset");
         const legend = document.createElement("legend");
@@ -417,7 +514,13 @@ window.setupWizard = (() => {
       notebook_mode: batchMode || $("mode").value === "spectate" ? "automatic" : $("notebook-mode").value,
       players: count, seat: batchMode ? 0 : Number($("seat").value), seed: Number($("seed").value),
       bots: copy(bots.slice(0, batchMode && $("shuffle-bots").checked
-        ? shuffleBotProfileCount : count)), progress: $("progress").value,
+        ? shuffleBotProfileCount : count)).map((bot, i) => {
+        if (!isBoard() && $("mode").value === "play" && i === Number($("seat").value) && isLearned(bot)) {
+          return "deductive";
+        }
+        return isLearned(bot) ? learnedSettings(bot) : bot;
+      }),
+      progress: $("progress").value,
       shuffle_bots: $("shuffle-bots").checked,
       shuffle_seat: !batchMode && $("mode").value === "play" && $("shuffle-seat").checked,
       max_steps: Number($("max-steps").value), debug: !batchMode && $("debug").checked,
@@ -476,7 +579,9 @@ window.setupWizard = (() => {
     if (data.shuffle_seat && data.mode === "play") add("Your seat", "Randomly assigned at startup");
     if (data.shuffle_bots || (data.shuffle_seat && data.mode === "play")) {
       const styles = data.bots.filter((_, i) => data.mode !== "play" || i !== data.seat)
-        .map((bot) => isLearned(bot) ? "learned" : typeof bot === "string" ? bot : "custom");
+        .map((bot) => isLearned(bot)
+          ? learnedProfiles[learnedProfileName(bot)]?.label || "Custom learned"
+          : typeof bot === "string" ? bot : "Custom");
       const assignment = batchMode
         ? " · balanced across full profile rotations; a partial final rotation can vary"
         : " · randomly assigned to bot seats";
@@ -490,8 +595,7 @@ window.setupWizard = (() => {
       const human = data.mode === "play" && i === data.seat && !randomHuman;
       const character = data.seat_suspects ? ` · ${cardName(data.seat_suspects[i])}` : "";
       const bot = randomHuman ? "You or bot" : human ? "You" : data.shuffle_bots ? "Bot (random style)"
-        : isLearned(data.bots[i]) ? `Bot: learned (${Object.entries(learnedSettings(data.bots[i]))
-          .filter(([key]) => key !== "type").map(([key, value]) => `${key.replaceAll("_", " ")} ${value}`).join(", ")})`
+        : isLearned(data.bots[i]) ? `Bot: ${learnedProfiles[learnedProfileName(data.bots[i])]?.label || "Custom learned"} · experimental opponent model on`
           : `Bot: ${typeof data.bots[i] === "string" ? data.bots[i] : "custom"} (${score(data.bots[i])}/100)`;
       add(`Player ${i + 1}`, `${bot}${character}${data.seat_suspects && data.seat_suspects[i] === 0 ? " · starts" : ""}`);
     }
@@ -588,7 +692,8 @@ window.setupWizard = (() => {
     $("shuffle-bots").checked = data.shuffle_bots === true;
     $("shuffle-seat").checked = data.shuffle_seat === true;
     characters = data.seat_suspects ? [...data.seat_suspects] : [0, 1, 2, 3, 4, 5];
-    bots = copy(data.bots);
+    bots = copy(data.bots).map((bot) => isLearned(bot) ? learnedSettings(bot) : bot);
+    $("enable-legacy-bots").checked = bots.some(isLegacyBot);
     shuffleBotProfileCount = bots.length;
     if (batchMode) {
       for (let i = 0; i < bots.length; i++) {
@@ -749,7 +854,7 @@ window.setupWizard = (() => {
   function defaultQuickplay() {
     return {
       mode: "play", game_type: "board", notebook_mode: "manual", players: 4, seat: 0,
-      bots: ["random", "deductive", "probing", "strategic"], shuffle_bots: true,
+      bots: ["hard", "focused", "steady", "cautious"].map(learnedProfile), shuffle_bots: true,
       seat_suspects: [0, 1, 2, 3], board_rules: { ...standardRules },
       game_rules: Object.fromEntries(Object.keys(gameRuleIds).map((key) => [key, false])),
       progress: "turn", max_steps: 10000, debug: false,
@@ -763,12 +868,7 @@ window.setupWizard = (() => {
     loadSetup(data, false);
   }
 
-  for (const name of Object.keys(presets)) {
-    const preset = option(name, name[0].toUpperCase() + name.slice(1));
-    if (name === "learned") preset.disabled = !isBoard();
-    $("all-bots").append(preset);
-  }
-  $("all-bots").value = "random";
+  $("all-bots").value = "hard";
   $("roll-seed").addEventListener("click", () => {
     try { rollSeed(); showError(""); } catch (error) { showError(error.message); }
   });
@@ -814,6 +914,27 @@ window.setupWizard = (() => {
     renderBatchMode();
     renderBots();
   });
+  $("enable-legacy-bots").addEventListener("change", async () => {
+    if (!$("enable-legacy-bots").checked && !isBoard()) {
+      $("enable-legacy-bots").checked = true;
+      showError("Card-only games require legacy bots.");
+      return;
+    }
+    if (!$("enable-legacy-bots").checked) {
+      const legacySeats = bots.map((_, i) => i).filter((i) => isLegacyBot(bots[i]));
+      if (legacySeats.length && !await confirmAction(
+        "Replace the selected legacy bots with the Steady learned profile?",
+        { title: "Disable legacy bots", confirmLabel: "Use learned profiles" },
+      )) {
+        $("enable-legacy-bots").checked = true;
+        return;
+      }
+      for (const i of legacySeats) bots[i] = learnedProfile("steady");
+    }
+    showError("");
+    renderBots();
+    if (step === 4) renderReview();
+  });
   $("shuffle-bot-count").addEventListener("change", () => {
     shuffleBotProfileCount = Number($("shuffle-bot-count").value);
     renderBots();
@@ -838,14 +959,16 @@ window.setupWizard = (() => {
       && !await confirmAction("Replace custom settings for all bots?", {
         title: "Replace bot settings", confirmLabel: "Replace settings",
       })) return;
-    for (let i = 0; i < count; i++) if (i !== human) bots[i] = $("all-bots").value;
+    for (let i = 0; i < count; i++) {
+      if (i !== human) bots[i] = botFromChoice($("all-bots").value, bots[i]);
+    }
     renderBots();
   });
   $("bot-list").addEventListener("change", async (event) => {
     const target = event.target;
     if (target.dataset.botSeat !== undefined) {
       const i = Number(target.dataset.botSeat);
-      bots[i] = target.value === "custom" ? strategy(bots[i]) : target.value;
+      bots[i] = botFromChoice(target.value, bots[i]);
       renderBots();
       document.querySelector(`[data-bot-seat="${i}"]`).focus();
     } else if (target.dataset.botSetting) {
@@ -856,9 +979,8 @@ window.setupWizard = (() => {
     } else if (target.dataset.learnedSetting) {
       const i = Number(target.dataset.botIndex);
       bots[i] = { ...learnedSettings(bots[i]), [target.dataset.learnedSetting]: Number(target.value) };
-    } else if (target.dataset.learnedModel !== undefined) {
-      const i = Number(target.dataset.learnedModel);
-      bots[i] = { ...learnedSettings(bots[i]), opponent_model: target.checked };
+      renderBots();
+      document.querySelector(`[data-bot-seat="${i}"]`).focus();
     } else if (target.dataset.copySeat !== undefined && target.value !== "") {
       const i = Number(target.dataset.copySeat);
       if (typeof bots[i] !== "string" && !await confirmAction("Replace this bot's custom settings?", {

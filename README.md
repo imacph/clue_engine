@@ -255,8 +255,8 @@ part of the browser interface.
 
 The browser and Windows app open to a main menu. **Quick play** shows the
 current profile before starting; its default is a four-player board game with a
-manual notebook and deductive, probing, and strategic bots randomly assigned to
-the three bot seats. To change these defaults, select **Edit quickplay defaults**
+manual notebook and learned profiles randomly assigned to the three bot seats.
+To change these defaults, select **Edit quickplay defaults**
 in the quickplay dialog, adjust the settings, and choose
 **Save as quickplay defaults** in the setup navigation bar. Defaults are stored with
 setup profiles and use a fresh seed for every game. The menu also offers
@@ -268,6 +268,11 @@ The five-step new-game wizard covers game type, seats, bots, rules, and review.
 Use **Start game** at any step or **Next** to customize and review them.
 On the bots step, **Randomly assign bot styles to seats** shuffles the
 configured bot styles among bot seats while keeping the human seat fixed.
+Board games offer five learned profiles: Hard, Focused, Steady, Cautious, and
+Gentle. Their experimental opponent model is always enabled in the setup
+wizard. Turn on **Enable legacy bots** to reveal the classic toolkit presets
+and the **Custom** strategy editor. Card-only games require that opt-in because
+learned bots currently support board games only.
 The seed determines the shuffle, and **Replay previous setup** restores the
 actual assignments used. Wizard navigation stays at the bottom of
 the window as you move between steps. Board character selection includes a preview of
@@ -622,8 +627,8 @@ named profile or a custom strategy object), plus `game_rules`, `board_rules`,
 
 The experimental `learned` policy is available for normal board-game play and
 board batches, for example `"bots": ["learned", "deductive", "probing", "strategic"]`.
-Select **Learned** in the board-game setup wizard, or use the same policy name
-in a board batch configuration. It is rejected for card-only games. By default
+Use the named profiles in the setup wizard, or use the policy name in a board
+batch configuration. It is rejected for card-only games. By default
 the policy uses the packaged model to choose suggestions and room goals from the player's
 visible hand, deductions, event history, and public board. It also chooses
 whether to accuse using bounded counts of deals consistent with that player's
@@ -631,12 +636,13 @@ knowledge. A wrong accusation eliminates the bot. Room goals persist across
 turns until reached or no longer reachable. This experimental model has not
 been established to outperform the existing bots.
 
-Open **Configure learned bot** for independent room, suggestion, and accusation
-temperatures (0–5), plus an accusation confidence threshold (0–1). Temperature
-0 picks the highest-scoring choice; higher values sample more broadly. With the
-packaged model and zero accusation temperature, the default threshold of 0.5
-allows an accusation at 50% estimated confidence. Set it to 1 for sound-only
-accusations. Nonzero accusation temperature can choose either action above or
+Expand **Profile settings** to adjust room, suggestion, and accusation
+temperatures (0–5), the accusation confidence threshold (0–1), and risk
+sensitivity to opponent threats. The five named profiles start with
+temperatures at or below 0.3. Temperature 0 picks the highest-scoring choice;
+higher values sample more broadly. With zero accusation temperature, the
+confidence threshold controls when a calculated accusation is considered.
+Set it to 1 for sound-only accusations. Nonzero accusation temperature can choose either action above or
 below the threshold, and a trained accusation head can shift the effective
 threshold; 1 always disables risky accusations. To avoid repeated chances to
 gamble on unchanged evidence, a declined accusation is reconsidered only if
@@ -754,7 +760,8 @@ using visible suggestions and cards revealed to that player. It never uses
 another player's private reveal; the actual hands and solution are used only
 to generate training labels, not supplied to the playing bot.
 
-This model is **off by default**. Its likelihoods are tempered and bounded so
+The setup wizard enables this model for every learned profile. Direct API and
+CLI learned-bot configurations remain opt-in. Its likelihoods are tempered and bounded so
 behavioral guesses cannot rule out a legal deal. They influence suggestion
 certainty and risky accusation confidence only when the existing bounded
 search can enumerate all consistent deals (at most 128); otherwise the

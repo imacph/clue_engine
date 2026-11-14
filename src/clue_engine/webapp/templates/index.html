@@ -199,10 +199,18 @@
         </section>
         <section class="setup-step" data-step="2" aria-labelledby="setup-bots-title" hidden>
           <h3 id="setup-bots-title" tabindex="-1">Bot players</h3>
+          <div class="bot-setup-intro">
+            <p class="hint">Choose a learned profile for each bot. Custom profile settings stay editable below.</p>
+            <label class="check-row legacy-bots-toggle">
+              <input id="enable-legacy-bots" type="checkbox">
+              <span><strong>Enable legacy bots</strong><small>Off by default. Adds the classic toolkit and custom strategy controls.</small></span>
+            </label>
+          </div>
           <div class="form-actions setup-bots-toolbar">
-            <label>Apply preset to all bots <select id="all-bots"></select></label>
+            <label>Apply profile to all bots <select id="all-bots"></select></label>
             <button type="button" class="button button-secondary" id="apply-bots">Apply to all</button>
           </div>
+          <p id="bot-setup-message" class="notice notice-warning" role="status" aria-live="polite" hidden></p>
           <label class="check-row">
             <input id="shuffle-bots" type="checkbox">
             <span><strong id="shuffle-bots-label">Randomly assign bot styles to seats</strong><small id="shuffle-bots-hint">Shuffle the configured bots among bot seats when the game starts.</small></span>
@@ -211,10 +219,10 @@
             <select id="shuffle-bot-count"></select>
           </label>
           <div class="setup-bots-intro">
-            <p class="hint">Toolkit scores describe enabled techniques, not win probability.</p>
+            <p class="hint">Profile names indicate play style, not a guaranteed win rate.</p>
             <details>
-              <summary>How the toolkit score works</summary>
-              <p class="hint">Possible-card suggestions count 20 points; probes, ranking, repeat reveals, possible-room preference, and deal analysis each count 15. Card-only suggestion priority counts 10. Applicable options are scaled to 100. Risky accusations are not scored. All bots share deduction and legal movement.</p>
+              <summary>About learned and legacy bots</summary>
+              <p class="hint">Learned profiles use the experimental opponent model and can make risky accusations; a wrong accusation eliminates the bot. Temperatures of 0 are deterministic, while higher values add randomness. Legacy toolkit scores describe enabled techniques, not win probability.</p>
             </details>
           </div>
           <div id="bot-list" class="setup-seat-list"></div>
