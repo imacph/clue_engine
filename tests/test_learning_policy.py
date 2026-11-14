@@ -117,6 +117,35 @@ def test_board_factory_loads_packaged_model_and_card_factory_rejects_policy():
         })
 
 
+@pytest.mark.parametrize("players", (3, 4, 5, 6))
+def test_learned_policy_selects_the_model_for_its_player_count(players):
+    from clue_engine.game_settings import BOARD_PLAYER_COUNTS
+
+    models = {
+        count: LinearModel((float(count),) * FEATURE_COUNT, (0.0,) * FEATURE_COUNT)
+        for count in BOARD_PLAYER_COUNTS
+    }
+    engine, _ = create_board_game(players, players, "random")
+    policy = LearningPolicy(
+        random.Random(players), models[4], models_by_player_count=models,
+    )
+    view = engine.view(engine.to_move)
+    policy.choose(view, players, engine.legal_actions())
+    assert policy.model is models[players]
+
+
+@pytest.mark.parametrize("players", (3, 4, 5, 6))
+def test_factory_policy_uses_packaged_model_for_player_count(players):
+    from clue_engine.learning import load_default_models
+
+    engine, policies = create_board_game(players, players, "learned")
+    policy = policies[0]
+    view = engine.view(engine.to_move)
+    policy.choose(view, players, engine.legal_actions())
+    assert isinstance(policy, LearningPolicy)
+    assert policy.model == load_default_models()[players]
+
+
 def test_setup_profile_accepts_configured_learned_bot_only_on_board():
     profile = {
         "mode": "spectate", "game_type": "board", "players": 3, "seat": 0,

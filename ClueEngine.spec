@@ -8,6 +8,10 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(root / "src" / "clue_engine" / "learned_model.json"), "clue_engine"),
+        (str(root / "src" / "clue_engine" / "learned_model_3.json"), "clue_engine"),
+        (str(root / "src" / "clue_engine" / "learned_model_4.json"), "clue_engine"),
+        (str(root / "src" / "clue_engine" / "learned_model_5.json"), "clue_engine"),
+        (str(root / "src" / "clue_engine" / "learned_model_6.json"), "clue_engine"),
         (str(root / "src" / "clue_engine" / "opponent_model.json"), "clue_engine"),
         (str(root / "src" / "clue_engine" / "threat_model.json"), "clue_engine"),
         (str(root / "src" / "clue_engine" / "webapp" / "templates"), "clue_engine/webapp/templates"),

@@ -169,7 +169,7 @@ def test_policy_training_can_use_and_record_opponent_model(monkeypatch):
     opponent = OpponentModel((1.0, 0, 0, 0, 0), (0, 0))
     seen = []
 
-    def fake_game(policy, seat, seed, opponents, max_steps):
+    def fake_game(policy, seat, seed, opponents, max_steps, *, players):
         seen.append(policy.opponent_model)
         return seat, 10, False
 

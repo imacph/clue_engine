@@ -2,13 +2,18 @@
 
 import math
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypeVar
 
 from .board_state import RoomPosition
 from .board_turn import BoardPhase, Move, Roll, UsePassage, suspect_location
 from .deal_analysis import consistent_deals
-from .game_settings import DEFAULT_LEARNED_STRATEGY, LearnedStrategy
+from .game_settings import (
+    BOARD_PLAYER_COUNTS,
+    DEFAULT_LEARNED_STRATEGY,
+    LearnedStrategy,
+)
 from .knowledge import Knowledge, Mark, knowledge_for, known_solution
 from .models import Accuse, Action, Combination, Reveal, Suggest
 from .observations import EventKind, PlayerView
@@ -107,9 +112,15 @@ class LearningPolicy(StrategicPolicy):
         strategy: LearnedStrategy = DEFAULT_LEARNED_STRATEGY,
         opponent_model: OpponentModel | None = None,
         threat_model: ThreatModel | None = None,
+        models_by_player_count: Mapping[int, LinearModel] | None = None,
     ) -> None:
         super().__init__(rng)
+        if models_by_player_count is not None and set(models_by_player_count) != set(BOARD_PLAYER_COUNTS):
+            raise ValueError("player-count models are required for 3, 4, 5, and 6 players")
+        if models_by_player_count is not None:
+            model = models_by_player_count[4]
         self.model = model
+        self.models_by_player_count = models_by_player_count
         self.explore = explore
         self.strategy = strategy
         self.opponent_model = opponent_model
@@ -168,6 +179,11 @@ class LearningPolicy(StrategicPolicy):
     def choose(self, view: PlayerView, num_players: int, legal: tuple[Action, ...]) -> Action:
         if view.board is None:
             raise ValueError("learned policy supports board games only")
+        if self.models_by_player_count is not None:
+            try:
+                self.model = self.models_by_player_count[num_players]
+            except KeyError as exc:
+                raise ValueError("player-count models support games with 3 to 6 players") from exc
         if self.opponent_model is not None:
             self.opponent_model_choices += 1
         if self.threat_model is not None and view.board.phase is BoardPhase.START:
