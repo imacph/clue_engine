@@ -412,9 +412,10 @@ stack vertically and the page scrolls as needed. The cards tab opens when a room
 or response needs your attention. Card choices appear above the combination
 and action controls; longer lists scroll within the card area. Cards show an
 **In hand** badge for the viewed player's actual hand and at most one positive
-player or envelope notebook mark. Board rooms show the same indicators.
-Game options can independently hide hand badges, notebook markers on cards, and
-board indicators. Conflicting
+player or envelope notebook mark. Board rooms show selected notebook marks and
+active clause markers. Game options independently control positive, negative,
+unknown, and clause markers for cards and rooms, as well as card hand badges and
+room overlays. Conflicting
 positive marks are reported in the status area and not shown on the affected
 card or room. Manual marks update immediately and can differ from the actual hand.
 On your turn, roll the
