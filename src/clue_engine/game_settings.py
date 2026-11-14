@@ -38,12 +38,15 @@ class BoardRules:
 
 
 DEFAULT_BOARD_RULES = BoardRules()
+BOARD_PLAYER_COUNTS = (3, 4, 5, 6)
 
 
-def training_board_rules(mode: str, game: int) -> BoardRules:
+def training_board_rules(mode: str, game: int, players: int = 4) -> BoardRules:
     if mode not in ("standard", "random", "mixed"):
         raise ValueError("boards must be standard, random, or mixed")
-    randomized = mode == "random" or (mode == "mixed" and (game // 4) % 2 == 1)
+    if type(players) is not int or players not in BOARD_PLAYER_COUNTS:
+        raise ValueError("players must be between 3 and 6")
+    randomized = mode == "random" or (mode == "mixed" and (game // players) % 2 == 1)
     return BoardRules(randomize_rooms=randomized)
 
 

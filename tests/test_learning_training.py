@@ -37,6 +37,12 @@ def test_legacy_model_is_padded_with_zero_weights(tmp_path):
     assert model.accusation_weights == (0.0, 0.0)
 
 
+def test_packaged_models_cover_each_player_count_and_are_distinct():
+    models = learning.load_default_models()
+    assert set(models) == {3, 4, 5, 6}
+    assert len(set(models.values())) == 4
+
+
 def test_schema_two_model_defaults_accusation_weights(tmp_path):
     path = tmp_path / "schema-two.json"
     path.write_text(json.dumps({
@@ -52,6 +58,7 @@ def test_default_model_override_loads_explicit_file_and_reports_errors(tmp_path,
     save_model(path, model, {})
     monkeypatch.setenv("CLUE_LEARNED_MODEL", str(path))
     assert learning.load_default_model() == model
+    assert set(learning.load_default_models().values()) == {model}
     monkeypatch.setenv("CLUE_LEARNED_MODEL", "")
     with pytest.raises(ValueError, match="CLUE_LEARNED_MODEL"):
         learning.load_default_model()
@@ -91,6 +98,26 @@ def test_training_can_continue_from_an_existing_model():
     assert summary["initial_suggestion_weights"] == list(initial.suggestion_weights)
 
 
+@pytest.mark.parametrize("players", (3, 4, 5, 6))
+def test_training_and_evaluation_support_each_board_player_count(players):
+    opponents = ("random",) * (players - 1)
+    model, summary = train(
+        games=players, seed=3, opponents=opponents, players=players, max_steps=3000,
+    )
+    assert summary["players"] == players
+    result = evaluate(
+        model, games=players, seed=23, opponents=opponents, players=players, max_steps=3000,
+    )
+    assert [seat["games"] for seat in result["seats"]] == [1] * players
+    assert result["players"] == players
+
+
+@pytest.mark.parametrize("players", (2, 7, True))
+def test_training_rejects_unsupported_player_counts(players):
+    with pytest.raises(ValueError, match="players"):
+        train(games=1, seed=1, players=players)
+
+
 def test_evaluation_balances_seats_and_is_reproducible():
     result = evaluate(LinearModel.zeros(), games=4, seed=23, opponents=("random",) * 3)
     assert result == evaluate(LinearModel.zeros(), games=4, seed=23, opponents=("random",) * 3)
@@ -106,7 +133,7 @@ def test_evaluation_balances_seats_and_is_reproducible():
 def test_mixed_board_evaluation_balances_seats(monkeypatch):
     seen = []
 
-    def fake_game(policy, seat, seed, opponents, max_steps, *, board_rules):
+    def fake_game(policy, seat, seed, opponents, max_steps, *, players, board_rules):
         seen.append((seat, board_rules.randomize_rooms))
         return seat, 10, False
 
@@ -128,11 +155,12 @@ def test_tune_cli_passes_board_and_opponent_options(tmp_path, monkeypatch):
     monkeypatch.setattr(learning, "tune", fake_tune)
     assert learning.main([
         "tune", "--initial", str(initial), "--output", str(output),
-        "--seed", "1", "--games-per-pool", "8", "--boards", "mixed",
-        "--opponents", "analytical,analytical,analytical",
+        "--seed", "1", "--games-per-pool", "9", "--players", "3", "--boards", "mixed",
+        "--opponents", "analytical,analytical",
     ]) == 0
     assert seen["boards"] == "mixed"
-    assert seen["pools"] == (("analytical",) * 3,)
+    assert seen["pools"] == (("analytical",) * 2,)
+    assert seen["players"] == 3
 
 
 def test_tuning_is_reproducible_and_keeps_best_observed_candidate():
@@ -188,7 +216,7 @@ def test_benchmark_pairs_candidate_with_incumbent_on_same_games():
 
 
 def test_benchmark_excludes_timed_out_pairs(monkeypatch):
-    def fake_game(policy, seat, seed, opponents, max_steps):
+    def fake_game(policy, seat, seed, opponents, max_steps, *, players):
         if isinstance(policy, learning.LearningPolicy) and seed % 4 == 0:
             return None, max_steps, True
         return seat, 10, False
@@ -201,7 +229,7 @@ def test_benchmark_excludes_timed_out_pairs(monkeypatch):
     assert comparison["ties"] == 3
     assert comparison["win_rate_delta"] == 0
 
-    def always_timeout(policy, seat, seed, opponents, max_steps):
+    def always_timeout(policy, seat, seed, opponents, max_steps, *, players):
         return None, max_steps, True
 
     monkeypatch.setattr(learning, "_game", always_timeout)
@@ -217,7 +245,7 @@ def test_training_reward_favors_fast_wins():
 
 
 def test_training_updates_accusation_weights_with_terminal_outcome(monkeypatch):
-    def fake_game(policy, seat, seed, opponents, max_steps):
+    def fake_game(policy, seat, seed, opponents, max_steps, *, players):
         policy.decisions.append(("accusation", (1.0, 0.6)))
         return seat, 10, False
 
@@ -281,9 +309,11 @@ def test_benchmark_cli_dispatches_without_opponents_argument(tmp_path, monkeypat
 
     monkeypatch.setattr(learning, "benchmark", fake_benchmark)
     assert learning.main([
-        "benchmark", "--model", str(model_path), "--games", "4", "--seed", "2",
+        "benchmark", "--model", str(model_path), "--games", "3", "--players", "3", "--seed", "2",
     ]) == 0
-    assert calls == [{"games": 4, "seed": 2, "max_steps": 10_000, "incumbent": None}]
+    assert calls == [{
+        "games": 3, "seed": 2, "max_steps": 10_000, "incumbent": None, "players": 3,
+    }]
     assert '"seed": 2' in capsys.readouterr().out
 
 
@@ -298,11 +328,12 @@ def test_evaluate_cli_passes_learned_controls(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(learning, "evaluate", fake_evaluate)
     assert learning.main([
-        "evaluate", "--model", str(model_path), "--games", "4", "--seed", "2",
+        "evaluate", "--model", str(model_path), "--games", "5", "--players", "5", "--seed", "2",
         "--room-temperature", "0.5", "--suggestion-temperature", "1",
         "--accusation-temperature", "0.2", "--accusation-threshold", "0.75",
     ]) == 0
     strategy = calls[0]["strategy"]
     assert (strategy.room_temperature, strategy.suggestion_temperature,
             strategy.accusation_temperature, strategy.accusation_threshold) == (0.5, 1, 0.2, 0.75)
+    assert calls[0]["players"] == 5
     assert '"ok": true' in capsys.readouterr().out

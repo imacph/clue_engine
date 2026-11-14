@@ -143,6 +143,10 @@ def test_wheel_verification_requires_version_and_web_assets(tmp_path):
     wheel = tmp_path / "test.whl"
     assets = (
         "clue_engine/learned_model.json",
+        "clue_engine/learned_model_3.json",
+        "clue_engine/learned_model_4.json",
+        "clue_engine/learned_model_5.json",
+        "clue_engine/learned_model_6.json",
         "clue_engine/opponent_model.json",
         "clue_engine/threat_model.json",
         "clue_engine/webapp/templates/index.html",

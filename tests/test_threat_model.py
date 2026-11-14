@@ -27,6 +27,12 @@ def test_mixed_boards_balance_each_set_of_four_seats():
         training_board_rules("unknown", 0)
 
 
+@pytest.mark.parametrize("players", (3, 5, 6))
+def test_mixed_boards_flip_after_a_full_player_round(players):
+    assert [training_board_rules("mixed", game, players).randomize_rooms
+            for game in range(players * 2)] == [False] * players + [True] * players
+
+
 def test_threat_features_cannot_see_other_players_private_reveals():
     combo = Combination(0, 6, 12)
     events = (Event(EventKind.SUGGEST, 1, combo=combo),)

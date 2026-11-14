@@ -670,28 +670,43 @@ weights for newer features and the accusation head. To fine-tune the packaged
 model, then evaluate the candidate:
 
 ```powershell
-python -m clue_engine.learning tune --initial src\clue_engine\learned_model.json --games-per-pool 16 --population 8 --generations 4 --seed 42000 --output model.json
-python -m clue_engine.learning tune --initial src\clue_engine\learned_model.json --games-per-pool 16 --population 8 --generations 4 --seed 43000 --boards mixed --opponents analytical,analytical,analytical --output analytical-model.json
-python -m clue_engine.learning benchmark --games 128 --seed 110000 --model model.json --incumbent src\clue_engine\learned_model.json
+python -m clue_engine.learning tune --initial src\clue_engine\learned_model_4.json --games-per-pool 16 --population 8 --generations 4 --seed 42000 --output model.json
+python -m clue_engine.learning tune --initial src\clue_engine\learned_model_4.json --games-per-pool 16 --population 8 --generations 4 --seed 43000 --boards mixed --opponents analytical,analytical,analytical --output analytical-model.json
+python -m clue_engine.learning benchmark --games 128 --seed 110000 --model model.json --incumbent src\clue_engine\learned_model_4.json
 python -m clue_engine.learning evaluate --games 64 --seed 120000 --model model.json --room-temperature 0.5 --suggestion-temperature 1 --accusation-threshold 0.75
 ```
+
+The packaged learned policy selects separate weights for 3, 4, 5, or 6
+players (`learned_model_3.json`, `learned_model_4.json`, `learned_model_5.json`,
+and `learned_model_6.json`). Train each variant with `--players`; training,
+evaluation, tuning, and benchmarking all use that player count. The older
+`learned_model.json` remains available for compatibility. For example:
+
+```powershell
+python -m clue_engine.learning train --players 3 --games 501 --seed 45003 --initial src\clue_engine\learned_model_4.json --output learned_model_3.json
+python -m clue_engine.learning evaluate --players 3 --games 128 --seed 46003 --model learned_model_3.json
+```
+
+`CLUE_LEARNED_MODEL` remains a single-file override and applies that model to
+all player counts. The packaged opponent and threat models remain shared.
 
 `tune` uses a common-random-number cross-entropy search: every candidate is
 evaluated on the same deals and seats against both the standard
 `deductive,probing,strategic` pool and a pool containing `analytical`. All
 generations use the same search seeds so their scores are comparable. The
-optional `--opponents` replaces those pools with the three specified opponents;
-training only against analytical risks overfitting. It tunes
-all three heads and writes the best observed candidate, not necessarily the
+optional `--opponents` replaces those pools with the specified opponents (one
+per non-learner seat). Training only against analytical risks overfitting. It
+tunes all three heads and writes the best observed candidate, not necessarily the
 final population center. Increase `--games-per-pool`, `--population`, and
 `--generations` for more search budget.
 
 Policy `train`, `tune`, `evaluate`, and `benchmark` default to the standard
 board, as did the packaged policy's original training. Pass `--boards random`
-to shuffle room identities, or `--boards mixed` to alternate four standard
-games and four shuffled games, balancing the four seats over every eight games.
-This keeps the board geometry, doors, and passages rather than generating
-arbitrary maps. Evaluate on fresh seeds and both board types.
+to shuffle room identities, or `--boards mixed` to alternate standard and
+randomized layouts in complete rounds of `--players` games, balancing the seats
+within each round. Randomized boards keep the board geometry, doors, and
+passages rather than generating arbitrary maps. Evaluate on fresh seeds and
+both board types.
 
 Both tuning and experimental REINFORCE training optimize wins with a speed
 preference: a completed win after `steps` actions earns `1 / (1 + 0.001 *
