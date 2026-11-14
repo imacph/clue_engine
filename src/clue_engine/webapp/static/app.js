@@ -2556,6 +2556,15 @@ function selectAllHistoryFilter(id) {
   if (currentState) renderHistory(currentState.events);
 }
 
+function selectCardInfoHistoryTypes() {
+  const cardInfoTypes = new Set(["suggest", "pass", "refute", "show", "expose", "accuse"]);
+  for (const label of $("history-kind").children) {
+    const input = label.children[0];
+    input.checked = cardInfoTypes.has(input.value);
+  }
+  if (currentState) renderHistory(currentState.events);
+}
+
 function renderHistoryList(list, visible, total) {
   list.replaceChildren();
   if (!visible.length) {
@@ -3868,6 +3877,7 @@ for (const [button, filter] of [
 ]) {
   $(button).addEventListener("click", () => selectAllHistoryFilter(filter));
 }
+$("history-kind-card-info").addEventListener("click", selectCardInfoHistoryTypes);
 for (const name of insightsTabs) {
   $(`${name}-tab`).addEventListener("click", () => switchInsightsTab(name));
 }

@@ -218,6 +218,25 @@ def test_history_filters_update_live_and_preserve_unfiltered_context(root):
     assert "accused:" not in history
 
 
+def test_history_card_information_preset_excludes_non_card_events(root):
+    frame = GameFrame(root, GameSession(make_engine(), [ScriptedPolicy()] * 4), paused=True)
+    frame.pack()
+    expected = {
+        EventKind.SUGGEST, EventKind.PASS, EventKind.REFUTE,
+        EventKind.SHOW, EventKind.EXPOSE, EventKind.ACCUSE,
+    }
+
+    frame._select_history_filter_values(frame.history_type_vars, tuple(expected))
+
+    assert {
+        kind for kind, variable in frame.history_type_vars.items() if variable.get()
+    } == expected
+    assert frame.history_type_choice.cget("text") == "Type: 6 selected"
+    frame._select_all_history_filter(frame.history_type_vars)
+    assert all(variable.get() for variable in frame.history_type_vars.values())
+    assert frame.history_type_choice.cget("text") == "Type: All"
+
+
 def test_clause_filters_do_not_change_matrix_and_follow_selected_view(root):
     engine = make_engine()
     engine.step(Suggest(SUGGESTION))

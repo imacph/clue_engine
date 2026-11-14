@@ -148,6 +148,10 @@ class GameFrame(ttk.Frame):
             self.history_type_vars,
             "All types",
             1,
+            preset=("Card info only", (
+                EventKind.SUGGEST, EventKind.PASS, EventKind.REFUTE,
+                EventKind.SHOW, EventKind.EXPOSE, EventKind.ACCUSE,
+            )),
         )
         self.history = tk.Text(right, height=10, width=48, wrap="word", state="disabled")
         self.history.grid(row=2, column=0, sticky="nsew")
@@ -224,6 +228,7 @@ class GameFrame(ttk.Frame):
         variables: dict[object, tk.BooleanVar],
         all_label: str,
         column: int,
+        preset: tuple[str, tuple[object, ...]] | None = None,
     ) -> ttk.Menubutton:
         button = ttk.Menubutton(parent, text=f"{title}: All")
         menu = tk.Menu(button, tearoff=False)
@@ -232,6 +237,12 @@ class GameFrame(ttk.Frame):
             label=all_label,
             command=lambda: self._select_all_history_filter(variables),
         )
+        if preset is not None:
+            label, values = preset
+            menu.add_command(
+                label=label,
+                command=lambda: self._select_history_filter_values(variables, values),
+            )
         menu.add_separator()
         for value, label in choices:
             menu.add_checkbutton(
@@ -245,6 +256,14 @@ class GameFrame(ttk.Frame):
     def _select_all_history_filter(self, variables: dict[object, tk.BooleanVar]) -> None:
         for variable in variables.values():
             variable.set(True)
+        self._history_filter_selected()
+
+    def _select_history_filter_values(
+        self, variables: dict[object, tk.BooleanVar], selected: tuple[object, ...]
+    ) -> None:
+        selected_values = set(selected)
+        for value, variable in variables.items():
+            variable.set(value in selected_values)
         self._history_filter_selected()
 
     @staticmethod

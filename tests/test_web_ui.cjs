@@ -174,7 +174,11 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       vm.runInContext("switchBoardTab(boardTab)", context);
     },
     renderHistory(events, actors, kinds) {
-      context.state = { num_players: Math.max(...events.map((event) => event.actor)) + 1 };
+      context.state = {
+        num_players: Math.max(...events.map((event) => event.actor)) + 1,
+        board: events.some((event) => ["roll", "move", "passage", "suspect_moved", "weapon_moved"]
+          .includes(event.kind)) ? {} : null,
+      };
       vm.runInContext("buildPlayerFilters(state)", context);
       for (const [id, selected] of [
         ["history-actor", actors],
@@ -2035,6 +2039,30 @@ test("history filters match multiple actors and event types in both lists", () =
   assert.equal(ui.element("history-list").children.length, 1);
   ui.evaluate("selectAllHistoryFilter('history-actor')");
   assert.equal(ui.element("history-list").children.length, 3);
+});
+
+test("card-information preset excludes movement and other non-card events", () => {
+  const ui = frontend({ history: true });
+  const kinds = [
+    "suggest", "pass", "refute", "show", "expose", "accuse",
+    "end_turn", "roll", "move", "passage", "suspect_moved", "weapon_moved",
+  ];
+  const events = kinds.map((kind, index) => ({
+    number: kinds.length - index, actor: 0, kind, text: kind,
+  }));
+  ui.renderHistory(events);
+  ui.evaluate("selectCardInfoHistoryTypes()");
+  const checkedKinds = ui.evaluate(`
+    Array.from($("history-kind").children)
+      .filter((label) => label.children[0].checked)
+      .map((label) => label.children[0].value)
+  `);
+  assert.deepEqual(Array.from(checkedKinds), [
+    "suggest", "pass", "refute", "show", "expose", "accuse",
+  ]);
+  assert.equal(ui.element("history-list").children.length, 6);
+  ui.evaluate("selectAllHistoryFilter('history-kind')");
+  assert.equal(ui.element("history-list").children.length, kinds.length);
 });
 
 test("notebook renders overlapping clause references without replacing marks", () => {

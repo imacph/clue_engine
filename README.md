@@ -401,7 +401,10 @@ has one set of player columns and stacked card categories. The right workspace
 has vertically arranged cards and actions, full history, clauses, locations, and help
 tabs. Cards and actions also show the latest eight history events matching the
 selected Actor and Type filters. Both history filters allow multiple selections;
-an event is shown when its actor and type are each selected. On smaller screens these areas
+an event is shown when its actor and type are each selected. The **Card info only**
+preset keeps suggestions, passes, refutations, shown and exposed cards, and
+accusations while excluding movement, dice, and other non-card events. On smaller
+screens these areas
 stack vertically and the page scrolls as needed. The cards tab opens when a room suggestion
 or response needs your attention. Card choices appear above the combination
 and action controls; longer lists scroll within the card area. Cards show an
