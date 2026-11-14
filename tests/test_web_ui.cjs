@@ -173,11 +173,25 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
       context.boardTab = name;
       vm.runInContext("switchBoardTab(boardTab)", context);
     },
-    renderHistory(events, actor, kind) {
-      document.getElementById("history-actor").value = actor;
-      document.getElementById("history-kind").value = kind;
+    renderHistory(events, actors, kinds) {
+      context.state = {
+        num_players: Math.max(...events.map((event) => event.actor)) + 1,
+        board: events.some((event) => ["roll", "move", "passage", "suspect_moved", "weapon_moved"]
+          .includes(event.kind)) ? {} : null,
+      };
+      vm.runInContext("buildPlayerFilters(state)", context);
+      for (const [id, selected] of [
+        ["history-actor", actors],
+        ["history-kind", kinds],
+      ]) {
+        const filter = document.getElementById(id);
+        for (const label of filter.children) {
+          const input = label.children[0];
+          input.checked = selected === undefined || selected.map(String).includes(input.value);
+        }
+      }
       context.events = events;
-      vm.runInContext("renderHistory(events)", context);
+      vm.runInContext("currentState = { events }; renderHistory(events)", context);
     },
     evaluate(code) {
       return vm.runInContext(code, context);
@@ -2000,15 +2014,55 @@ test("a failed clause save leaves the draft available for retry or cancellation"
   assert.equal(result.cancelled, true);
 });
 
-test("action history remains unfiltered and shows only the latest eight events", () => {
+test("history filters match multiple actors and event types in both lists", () => {
   const ui = frontend({ history: true });
-  const events = Array.from({ length: 10 }, (_, index) => ({
-    number: 10 - index, actor: index % 2, kind: "suggest", text: "Suggestion",
+  const events = [
+    { number: 8, actor: 1, kind: "suggest", text: "Suggestion" },
+    { number: 7, actor: 2, kind: "refute", text: "Refutation" },
+    { number: 6, actor: 1, kind: "pass", text: "Pass" },
+    { number: 5, actor: 3, kind: "suggest", text: "Suggestion" },
+    { number: 4, actor: 2, kind: "suggest", text: "Suggestion" },
+    { number: 3, actor: 1, kind: "refute", text: "Refutation" },
+    { number: 2, actor: 0, kind: "refute", text: "Refutation" },
+    { number: 1, actor: 2, kind: "pass", text: "Pass" },
+  ];
+  ui.renderHistory(events, [1, 2], ["suggest", "refute"]);
+  const matchingNumbers = (list) => list.children.map((item) => item.children[0].textContent);
+  assert.deepEqual(matchingNumbers(ui.element("history-list")), ["#8", "#7", "#4", "#3"]);
+  assert.deepEqual(matchingNumbers(ui.element("action-history-list")), ["#8", "#7", "#4", "#3"]);
+
+  ui.renderHistory(events, [], ["suggest", "refute"]);
+  assert.equal(ui.element("history-list").children[0].textContent, "No events match these filters.");
+  assert.equal(ui.element("action-history-list").children[0].textContent, "No events match these filters.");
+
+  ui.renderHistory(events, [1], ["suggest"]);
+  assert.equal(ui.element("history-list").children.length, 1);
+  ui.evaluate("selectAllHistoryFilter('history-actor')");
+  assert.equal(ui.element("history-list").children.length, 3);
+});
+
+test("card-information preset excludes movement and other non-card events", () => {
+  const ui = frontend({ history: true });
+  const kinds = [
+    "suggest", "pass", "refute", "show", "expose", "accuse",
+    "end_turn", "roll", "move", "passage", "suspect_moved", "weapon_moved",
+  ];
+  const events = kinds.map((kind, index) => ({
+    number: kinds.length - index, actor: 0, kind, text: kind,
   }));
-  ui.renderHistory(events, "1", "suggest");
-  assert.equal(ui.element("history-list").children.length, 5);
-  assert.equal(ui.element("action-history-list").children.length, 8);
-  assert.equal(ui.element("action-history-list").children[0].children[0].textContent, "#10");
+  ui.renderHistory(events);
+  ui.evaluate("selectCardInfoHistoryTypes()");
+  const checkedKinds = ui.evaluate(`
+    Array.from($("history-kind").children)
+      .filter((label) => label.children[0].checked)
+      .map((label) => label.children[0].value)
+  `);
+  assert.deepEqual(Array.from(checkedKinds), [
+    "suggest", "pass", "refute", "show", "expose", "accuse",
+  ]);
+  assert.equal(ui.element("history-list").children.length, 6);
+  ui.evaluate("selectAllHistoryFilter('history-kind')");
+  assert.equal(ui.element("history-list").children.length, kinds.length);
 });
 
 test("notebook renders overlapping clause references without replacing marks", () => {

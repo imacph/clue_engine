@@ -207,8 +207,9 @@ history remains public unless omniscient debug is enabled. The console and
 Tkinter interfaces show the recorded refutation and incorrect-accusation
 clauses, distinguishing unresolved constraints from those already satisfied.
 
-In the desktop game window, the history and clause panels each have independent
-**Actor** and **Type** filters. History actors are the players who performed
+In the game window, history and clause panels have independent **Actor** and
+**Type** filters. History filters support multiple selections: matching any
+selected actor and any selected event type. History actors are the players who performed
 the events (for a shown card, the player who showed it). Clause actors are the
 refuting player or the player who made the incorrect accusation. The selected
 filters affect only the display, not the knowledge matrix or deductions.
@@ -398,8 +399,12 @@ Choose **Board game** at setup to play or spectate a 3–6 player board game;
 left, the board in the center, and cards and actions on the right. The notebook
 has one set of player columns and stacked card categories. The right workspace
 has vertically arranged cards and actions, full history, clauses, locations, and help
-tabs. Cards and actions also
-show the latest eight unfiltered history events. On smaller screens these areas
+tabs. Cards and actions also show the latest eight history events matching the
+selected Actor and Type filters. Both history filters allow multiple selections;
+an event is shown when its actor and type are each selected. The **Card info only**
+preset keeps suggestions, passes, refutations, shown and exposed cards, and
+accusations while excluding movement, dice, and other non-card events. On smaller
+screens these areas
 stack vertically and the page scrolls as needed. The cards tab opens when a room suggestion
 or response needs your attention. Card choices appear above the combination
 and action controls; longer lists scroll within the card area. Cards show an

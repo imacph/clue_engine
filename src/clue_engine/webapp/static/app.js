@@ -822,7 +822,7 @@ async function restoreGame() {
 
 function buildPlayerFilters(state) {
   const numPlayers = state.num_players;
-  const selectors = ["viewer-select", "history-actor", "clause-actor"];
+  const selectors = ["viewer-select", "clause-actor"];
   for (const id of selectors) {
     const select = $(id);
     select.replaceChildren();
@@ -831,17 +831,41 @@ function buildPlayerFilters(state) {
       select.append(option(seat, `Player ${seat + 1}`));
     }
   }
-  const historyKind = $("history-kind");
-  historyKind.replaceChildren(option("all", "All types"));
-  for (const [value, label] of [
+  buildHistoryFilter("history-actor",
+    Array.from({ length: numPlayers }, (_, player) => [player, `Player ${player + 1}`]));
+  const historyTypes = [
     ["suggest", "Suggestion"], ["pass", "Pass"], ["refute", "Refutation"],
     ["show", "Shown card"], ["expose", "Face-up card"], ["accuse", "Accusation"], ["end_turn", "End turn"],
     ...(state.board ? [
       ["roll", "Dice roll"], ["move", "Movement"], ["passage", "Passage"],
       ["suspect_moved", "Suspect moved"], ["weapon_moved", "Weapon moved"],
     ] : []),
-  ]) historyKind.append(option(value, label));
+  ];
+  buildHistoryFilter("history-kind", historyTypes);
   $("viewer-select").value = String(currentState?.selected_player ?? 0);
+}
+
+function buildHistoryFilter(id, choices) {
+  const filter = $(id);
+  filter.replaceChildren();
+  for (const [value, text] of choices) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = String(value);
+    input.checked = true;
+    input.addEventListener("change", () => currentState && renderHistory(currentState.events));
+    const name = document.createElement("span");
+    name.textContent = text;
+    label.append(input, name);
+    filter.append(label);
+  }
+}
+
+function historyFilterValues(id) {
+  return Array.from($(id).children, (label) => label.children[0])
+    .filter((input) => input.checked)
+    .map((input) => input.value);
 }
 
 function selectedFilters() {
@@ -2519,13 +2543,26 @@ function changeClause(clauseId, change) {
 }
 
 function renderHistory(events) {
-  const actor = $("history-actor").value;
-  const kind = $("history-kind").value;
+  const actors = new Set(historyFilterValues("history-actor"));
+  const kinds = new Set(historyFilterValues("history-kind"));
   const visible = events.filter((event) =>
-    (actor === "all" || Number(actor) === event.actor)
-    && (kind === "all" || kind === event.kind));
+    actors.has(String(event.actor)) && kinds.has(event.kind));
   renderHistoryList($("history-list"), visible, events.length);
-  renderHistoryList($("action-history-list"), events.slice(0, 8), events.length);
+  renderHistoryList($("action-history-list"), visible.slice(0, 8), events.length);
+}
+
+function selectAllHistoryFilter(id) {
+  for (const label of $(id).children) label.children[0].checked = true;
+  if (currentState) renderHistory(currentState.events);
+}
+
+function selectCardInfoHistoryTypes() {
+  const cardInfoTypes = new Set(["suggest", "pass", "refute", "show", "expose", "accuse"]);
+  for (const label of $("history-kind").children) {
+    const input = label.children[0];
+    input.checked = cardInfoTypes.has(input.value);
+  }
+  if (currentState) renderHistory(currentState.events);
 }
 
 function renderHistoryList(list, visible, total) {
@@ -3835,9 +3872,12 @@ for (const id of ["viewer-select", "clause-actor", "clause-kind"]) {
     refreshState();
   });
 }
-for (const id of ["history-actor", "history-kind"]) {
-  $(id).addEventListener("change", () => currentState && renderHistory(currentState.events));
+for (const [button, filter] of [
+  ["history-actor-all", "history-actor"], ["history-kind-all", "history-kind"],
+]) {
+  $(button).addEventListener("click", () => selectAllHistoryFilter(filter));
 }
+$("history-kind-card-info").addEventListener("click", selectCardInfoHistoryTypes);
 for (const name of insightsTabs) {
   $(`${name}-tab`).addEventListener("click", () => switchInsightsTab(name));
 }

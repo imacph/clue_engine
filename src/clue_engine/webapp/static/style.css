@@ -535,6 +535,12 @@ button.playing-card:focus-visible { outline: 2px solid var(--focus); outline-off
 .filter-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .filter-row label { font-size: .76rem; min-width: 100px; }
 .filter-row select { min-height: 32px; padding: 4px 7px; }
+.history-filter { border: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; padding: 0; }
+.history-filter legend { font-size: .76rem; font-weight: 700; }
+.history-filter-options { display: flex; flex-wrap: wrap; gap: 3px 8px; }
+.history-filter-options label { align-items: center; display: inline-flex; gap: 3px; min-width: 0; }
+.history-filter-options input { margin: 0; min-height: 0; width: auto; }
+.history-filter button { background: transparent; border: 0; color: var(--blue-dark); cursor: pointer; font-size: .72rem; padding: 0; text-decoration: underline; }
 .history-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
 .history-panel .filter-row { margin-bottom: 6px; }
 .history-list { border-top: 1px solid var(--line); list-style: none; margin: 0; min-height: 0; overflow: auto; padding: 0; }
