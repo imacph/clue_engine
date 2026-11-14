@@ -2525,7 +2525,7 @@ function renderHistory(events) {
     (actor === "all" || Number(actor) === event.actor)
     && (kind === "all" || kind === event.kind));
   renderHistoryList($("history-list"), visible, events.length);
-  renderHistoryList($("action-history-list"), events.slice(0, 8), events.length);
+  renderHistoryList($("action-history-list"), visible.slice(0, 8), events.length);
 }
 
 function renderHistoryList(list, visible, total) {

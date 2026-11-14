@@ -2000,15 +2000,20 @@ test("a failed clause save leaves the draft available for retry or cancellation"
   assert.equal(result.cancelled, true);
 });
 
-test("action history remains unfiltered and shows only the latest eight events", () => {
+test("history filters also apply to the latest eight events in the action panel", () => {
   const ui = frontend({ history: true });
-  const events = Array.from({ length: 10 }, (_, index) => ({
-    number: 10 - index, actor: index % 2, kind: "suggest", text: "Suggestion",
+  const events = Array.from({ length: 20 }, (_, index) => ({
+    number: 20 - index, actor: index % 2, kind: "suggest", text: "Suggestion",
   }));
   ui.renderHistory(events, "1", "suggest");
-  assert.equal(ui.element("history-list").children.length, 5);
+  assert.equal(ui.element("history-list").children.length, 10);
   assert.equal(ui.element("action-history-list").children.length, 8);
-  assert.equal(ui.element("action-history-list").children[0].children[0].textContent, "#10");
+  assert.equal(ui.element("action-history-list").children[0].children[0].textContent, "#19");
+  assert.equal(ui.element("action-history-list").children[7].children[0].textContent, "#5");
+
+  ui.renderHistory(events, "1", "pass");
+  assert.equal(ui.element("history-list").children[0].textContent, "No events match these filters.");
+  assert.equal(ui.element("action-history-list").children[0].textContent, "No events match these filters.");
 });
 
 test("notebook renders overlapping clause references without replacing marks", () => {

@@ -398,8 +398,8 @@ Choose **Board game** at setup to play or spectate a 3–6 player board game;
 left, the board in the center, and cards and actions on the right. The notebook
 has one set of player columns and stacked card categories. The right workspace
 has vertically arranged cards and actions, full history, clauses, locations, and help
-tabs. Cards and actions also
-show the latest eight unfiltered history events. On smaller screens these areas
+tabs. Cards and actions also show the latest eight history events matching the
+selected Actor and Type filters. On smaller screens these areas
 stack vertically and the page scrolls as needed. The cards tab opens when a room suggestion
 or response needs your attention. Card choices appear above the combination
 and action controls; longer lists scroll within the card area. Cards show an
