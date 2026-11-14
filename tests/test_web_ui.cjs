@@ -99,6 +99,21 @@ function frontend({ notebook = false, workspace = false, history = false, debug 
         }
         return null;
       },
+      querySelectorAll(selector) {
+        const result = [];
+        function visit(node) {
+          for (const child of node.children) {
+            const name = selector.startsWith(".") ? selector.slice(1) : "";
+            if (name && (child.classList.contains(name)
+              || String(child.className || "").split(/\s+/).includes(name))) {
+              result.push(child);
+            }
+            visit(child);
+          }
+        }
+        visit(this);
+        return result;
+      },
       get childElementCount() { return this.children.length; },
     };
   }
@@ -2055,10 +2070,18 @@ test("notebook renders overlapping clause references without replacing marks", (
   ui.renderNotebook(notebookState);
   const selected = descendants(ui.element("notebook"));
   const selectedLinks = selected.filter((node) => node.dataset.clauseCard);
+  assert.equal(selected.find((node) => node.tagName === "TABLE"), table);
+  assert.equal(selectedLinks[0], links[0]);
   assert.equal(selectedLinks[0]["aria-pressed"], "true");
   assert.equal(selectedLinks[1]["aria-pressed"], "false");
   assert.equal(selectedLinks[0].style["--clause-color"], links[0].style["--clause-color"]);
   assert.equal(selected.filter((node) => node.classList.contains("clause-linked-selected")).length, 2);
+  ui.evaluate("selectedClause = null");
+  ui.renderNotebook(notebookState);
+  assert.equal(links[0]["aria-pressed"], "false");
+  assert.equal(descendants(ui.element("notebook"))
+    .filter((node) => node.classList.contains("clause-linked-selected")).length, 0);
+  assert.equal(ui.element("notebook").children[0], table);
   notebookState.notebook_clauses[0].active_cards = [];
   ui.renderNotebook(notebookState);
   const remaining = descendants(ui.element("notebook")).filter((node) => node.dataset.clauseCard);
