@@ -45,8 +45,11 @@ let lastError = "";
 let desktopThemeWrite = Promise.resolve();
 let desktopFullscreen = false;
 let fullscreenBusy = false;
-let showCardIndicators = true;
+let showCardHandIndicators = true;
 let showBoardIndicators = true;
+let hideOwnNegativeMarkers = true;
+let cardMarkerVisibility = { positive: true, negative: false, unknown: false, clause: false };
+let roomMarkerVisibility = { positive: true, negative: false, unknown: false, clause: false };
 let cardView = "hand";
 let lastActivityKey = null;
 let lastRenderedState = null;
@@ -1660,6 +1663,7 @@ function cardNoteContext(state) {
   return {
     hand: new Set(state.hand),
     marks: new Map(notebookDisplayMatrix(state).map((card) => [card.id, card.marks])),
+    clauses: state.notebook_clauses || [],
     player: state.selected_player,
     human: state.mode === "play" && !state.is_replay && state.selected_player === state.human_player,
     players: state.num_players,
@@ -1669,6 +1673,41 @@ function cardNoteContext(state) {
 function positiveKnowledge(marks) {
   const holders = marks ? marks.flatMap((mark, holder) => mark === "+" ? [holder] : []) : [];
   return { holder: holders.length === 1 ? holders[0] : null, conflict: holders.length > 1 };
+}
+
+function notebookOverlayMarkers(cardId, notes, visibility) {
+  const marks = notes.marks.get(cardId) || [];
+  const hasPositive = marks.includes("+");
+  const conflict = positiveKnowledge(marks).conflict;
+  const markers = marks.flatMap((mark, holder) => {
+    const type = mark === "+" ? "positive" : mark === "-" ? "negative" : "unknown";
+    if (!visibility[type]
+      || (type === "negative" && hasPositive)
+      || (type === "negative" && hideOwnNegativeMarkers && holder === notes.player)
+      || (holder === notes.player && notes.hand.has(cardId))
+      || (mark === "+" && conflict)) return [];
+    const owner = holder === notes.players ? "Envelope" : `Player ${holder + 1}`;
+    const meaning = mark === "+" ? "held" : mark === "-" ? "not held" : "unknown";
+    const shortOwner = holder === notes.players ? "E" : `P${holder + 1}`;
+    return [{
+      type,
+      holder,
+      text: `${shortOwner}${mark}`,
+      description: `${owner}: ${meaning}`,
+    }];
+  });
+  if (visibility.clause) {
+    for (const clause of notes.clauses) {
+      if (!clause.active_cards?.includes(cardId)) continue;
+      markers.push({
+        type: "clause",
+        text: `C${clause.id}`,
+        description: `Clause ${clause.id}`,
+        color: clauseColor(clause, notes.clauses),
+      });
+    }
+  }
+  return markers;
 }
 
 function updateKnowledgeIndicators(state) {
@@ -1686,17 +1725,20 @@ function updateKnowledgeIndicators(state) {
   layer.replaceChildren();
   if (!showBoardIndicators) return;
   for (const room of state.board.layout.rooms) {
-    const knowledge = positiveKnowledge(notes.marks.get(room.id));
     const badges = [];
     if (notes.hand.has(room.id)) badges.push({
       text: "Hand", kind: "hand", description: notes.human ? "In your hand" : `In Player ${notes.player + 1}'s hand`,
     });
-    if (knowledge.holder !== null) {
-      const envelope = knowledge.holder === notes.players;
+    for (const marker of notebookOverlayMarkers(room.id, notes, roomMarkerVisibility)) {
+      const envelope = marker.holder === notes.players;
+      const kind = marker.type === "positive"
+        ? envelope ? "envelope" : marker.holder === notes.player ? "own" : "player"
+        : marker.type;
       badges.push({
-        text: envelope ? "E+" : `P${knowledge.holder + 1}+`,
-        kind: envelope ? "envelope" : knowledge.holder === notes.player ? "own" : "player",
-        description: envelope ? "Envelope: held" : `Player ${knowledge.holder + 1}: held`,
+        text: marker.text,
+        kind,
+        description: marker.description,
+        color: marker.color,
       });
     }
     if (!badges.length) continue;
@@ -1706,12 +1748,19 @@ function updateKnowledgeIndicators(state) {
       class: "board-room-notes", role: "img", "aria-label": `${room.name}: ${badges.map((badge) => badge.description).join(", ")}`,
     });
     group.append(svgElement("title", {}, `${room.name}: ${badges.map((badge) => badge.description).join(", ")}`));
+    const columns = Math.max(1, Math.floor((bounds.maxX - bounds.minX + 1) / .95));
     badges.forEach((badge, index) => {
-      const x = center + (index - (badges.length - 1) / 2) * 1.3;
-      const y = bounds.minY + 1.3;
-      const item = svgElement("g", { class: `board-note-${badge.kind}` });
-      item.append(svgElement("rect", { x: x - .6, y, width: 1.2, height: .58, rx: .12 }));
-      item.append(svgElement("text", { x, y: y + .42 }, badge.text));
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const rowLength = Math.min(columns, badges.length - row * columns);
+      const x = center + (column - (rowLength - 1) / 2) * .95;
+      const y = bounds.minY + 1.3 + row * .55;
+      const item = svgElement("g", {
+        class: `board-note-${badge.kind}`,
+        ...(badge.color ? { style: `--clause-color:${badge.color}` } : {}),
+      });
+      item.append(svgElement("rect", { x: x - .44, y, width: .88, height: .48, rx: .1 }));
+      item.append(svgElement("text", { x, y: y + .34 }, badge.text));
       group.append(item);
     });
     layer.append(group);
@@ -1719,8 +1768,8 @@ function updateKnowledgeIndicators(state) {
 }
 
 function renderCardNotes(face, card, notes) {
-  const knowledge = positiveKnowledge(notes.marks.get(card.id));
-  const inHand = showCardIndicators && notes.hand.has(card.id);
+  const markers = notebookOverlayMarkers(card.id, notes, cardMarkerVisibility);
+  const inHand = showCardHandIndicators && notes.hand.has(card.id);
   const handDescription = notes.human ? "In your hand" : `In Player ${notes.player + 1}'s hand`;
   const annotations = document.createElement("div");
   annotations.className = "card-annotations";
@@ -1731,17 +1780,16 @@ function renderCardNotes(face, card, notes) {
     badge.textContent = notes.human ? "In hand" : `P${notes.player + 1} hand`;
     annotations.append(badge);
   }
-  let description = "";
-  if (showCardIndicators && knowledge.holder !== null) {
-    const holder = knowledge.holder;
-    const envelope = holder === notes.players;
-    const owner = envelope ? "Envelope" : `Player ${holder + 1}`;
-    description = `${owner}: held`;
+  for (const marker of markers) {
     const badge = document.createElement("span");
-    badge.className = `card-note-mark ${envelope ? "card-note-envelope"
-      : holder === notes.player ? "card-note-own" : "card-note-player"}`;
-    badge.textContent = `${envelope ? "E" : `P${holder + 1}`}+`;
-    badge.title = description;
+    const envelope = marker.holder === notes.players;
+    const ownerClass = marker.type === "positive"
+      ? envelope ? "card-note-envelope" : marker.holder === notes.player ? "card-note-own" : "card-note-player"
+      : "";
+    badge.className = `card-note-mark card-note-${marker.type} ${ownerClass}`.trim();
+    badge.textContent = marker.text;
+    badge.title = marker.description;
+    if (marker.color) badge.style.setProperty("--clause-color", marker.color);
     annotations.append(badge);
   }
   const previous = face.querySelector(".card-annotations");
@@ -1749,7 +1797,7 @@ function renderCardNotes(face, card, notes) {
   face.querySelector(".card-topline").prepend(annotations);
   face.dataset.cardNoteId = String(card.id);
   const label = [`${card.name}, ${card.type}`, ...(inHand ? [handDescription] : []),
-    ...(description ? [`Notebook: ${description}`] : [])].join(". ");
+    ...(markers.length ? [`Notebook: ${markers.map((marker) => marker.description).join(", ")}`] : [])].join(". ");
   face.setAttribute("aria-label", label);
   face.title = label;
 }
@@ -1762,6 +1810,12 @@ function updateCardNotes(state, cardId = null) {
     renderCardNotes(face, cardsById.get(Number(face.dataset.cardNoteId)), notes);
   }
   updateKnowledgeIndicators(state);
+}
+
+function setNotebookMarkerVisibility(target, type, visible) {
+  const visibility = target === "card" ? cardMarkerVisibility : roomMarkerVisibility;
+  visibility[type] = visible;
+  if (currentState) updateCardNotes(currentState);
 }
 
 function createCardFace(card, { button = false, mini = false, disabled = false, pressed = false, notes } = {}) {
@@ -3828,14 +3882,25 @@ $("game-options-open").addEventListener("click", () => {
   $("game-options-dialog").showModal();
 });
 $("game-options-close").addEventListener("click", () => $("game-options-dialog").close());
-$("show-card-indicators").addEventListener("change", (event) => {
-  showCardIndicators = event.target.checked;
+$("show-card-hand-indicators").addEventListener("change", (event) => {
+  showCardHandIndicators = event.target.checked;
   if (currentState) updateCardNotes(currentState);
 });
 $("show-board-indicators").addEventListener("change", (event) => {
   showBoardIndicators = event.target.checked;
   if (currentState) updateKnowledgeIndicators(currentState);
 });
+$("hide-own-negative-markers").addEventListener("change", (event) => {
+  hideOwnNegativeMarkers = event.target.checked;
+  if (currentState) updateCardNotes(currentState);
+});
+for (const target of ["card", "room"]) {
+  for (const type of ["positive", "negative", "unknown", "clause"]) {
+    $(`show-${target}-${type}-markers`).addEventListener("change", (event) => {
+      setNotebookMarkerVisibility(target, type, event.target.checked);
+    });
+  }
+}
 $("mode").addEventListener("change", updateMode);
 for (const choice of document.querySelectorAll('input[name="game-type"]')) {
   choice.addEventListener("change", updateGameType);

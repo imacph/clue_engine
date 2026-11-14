@@ -291,8 +291,17 @@ input, select {
 .confirm-dialog h2 { font-size: 1.2rem; margin-bottom: 12px; }
 .confirm-dialog p { margin-bottom: 20px; }
 .confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.game-options-dialog { width: min(440px, calc(100vw - 32px)); }
+.game-options-dialog { max-width: min(560px, calc(100vw - 32px)); width: min(560px, calc(100vw - 32px)); }
 .game-options-actions { display: grid; gap: 8px; }
+.overlay-option-groups { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+.overlay-shared-option { border-bottom: 1px solid var(--line); grid-column: 1 / -1; margin: 0; padding: 0 0 8px; }
+.overlay-option-group { border: 1px solid var(--line); border-radius: 8px; margin: 0; min-width: 0; padding: 8px 12px; }
+.overlay-option-group legend { font-weight: 750; padding: 0 4px; }
+.overlay-option-group .check-row { font-size: .88rem; margin: 7px 0; }
+.overlay-option-group .check-row input { flex: 0 0 18px; }
+@media (max-width: 480px) {
+  .overlay-option-groups { grid-template-columns: 1fr; }
+}
 .quickplay-dialog { max-height: calc(100vh - 32px); width: min(620px, calc(100vw - 32px)); max-width: none; }
 .quickplay-summary { background: var(--blue-pale); border: 1px solid var(--secondary-border); border-radius: 9px; margin: 0 0 20px; max-height: min(50vh, 400px); overflow: auto; padding: 12px 16px; }
 .quickplay-summary p { font-size: .9rem; margin: 4px 0; }
@@ -401,6 +410,9 @@ button.playing-card:focus-visible { outline: 2px solid var(--focus); outline-off
 }
 .card-note-own { background: var(--blue-pale); border-color: var(--secondary-border); color: var(--secondary-ink); }
 .card-note-envelope { background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-ink); }
+.card-note-negative { color: var(--mark-negative); }
+.card-note-unknown { color: var(--mark-unknown); }
+.card-note-clause { background: var(--clause-color); border-color: var(--clause-color); color: #fff; }
 .playing-card[data-card-note-id] { min-height: 146px; }
 .playing-card.mini-card { min-height: 128px; }
 .playing-card.shown-card { box-shadow: 0 0 0 2px var(--focus); }
@@ -830,11 +842,15 @@ body.game-active .insights-column { grid-column: 2; grid-row: 2; }
 .board-room-contents { fill: var(--board-ink); font-size: .4px; font-weight: 700; pointer-events: none; text-anchor: middle; }
 .board-room-notes { pointer-events: none; }
 .board-room-notes rect { fill: var(--panel); stroke: var(--quiet-border); stroke-width: .035; }
-.board-room-notes text { fill: var(--quiet-ink); font-size: .38px; font-weight: 800; text-anchor: middle; }
+.board-room-notes text { fill: var(--quiet-ink); font-size: .29px; font-weight: 800; text-anchor: middle; }
 .board-room-notes .board-note-hand rect, .board-room-notes .board-note-own rect { fill: var(--blue-pale); stroke: var(--secondary-border); }
 .board-room-notes .board-note-hand text, .board-room-notes .board-note-own text { fill: var(--secondary-ink); }
 .board-room-notes .board-note-envelope rect { fill: var(--warning-bg); stroke: var(--warning-border); }
 .board-room-notes .board-note-envelope text { fill: var(--warning-ink); }
+.board-room-notes .board-note-negative text { fill: var(--mark-negative); }
+.board-room-notes .board-note-unknown text { fill: var(--mark-unknown); }
+.board-room-notes .board-note-clause rect { fill: var(--clause-color); stroke: var(--clause-color); }
+.board-room-notes .board-note-clause text { fill: #fff; }
 .board-passage-mark { font-size: .5px; font-weight: 800; pointer-events: none; text-anchor: middle; }
 .board-passage-mark circle { fill: var(--board-ink); }
 .board-passage-mark text { fill: var(--panel); }

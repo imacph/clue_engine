@@ -718,46 +718,86 @@ test("the human player's suggestion animates while a bot is responding", () => {
   ]);
 });
 
-test("card indicators show the actual hand and at most one positive notebook mark", () => {
+test("card overlay controls independently toggle marks and clause markers", () => {
   const ui = frontend({ cards: true });
+  for (const type of ["positive", "negative", "unknown", "clause"]) {
+    assert.match(template, new RegExp(`id="show-card-${type}-markers"`));
+    assert.match(template, new RegExp(`id="show-room-${type}-markers"`));
+  }
+  assert.match(template, /id="hide-own-negative-markers" type="checkbox" checked/);
+  assert.match(template, /Hide viewed player's negative marks/);
+  assert.match(template, /id="show-card-hand-indicators"/);
   const result = ui.evaluate(`(() => {
     const state = { mode: "play", human_player: 0, selected_player: 0, num_players: 3,
-      hand: [0], notebook_mode: "manual", matrix: [{ id: 0, marks: ["+", "-", "?", "-"] }] };
+      hand: [0], notebook_mode: "manual", matrix: [{ id: 0, marks: ["+", "-", "?"] }],
+      notebook_clauses: [
+        { id: 4, holder: 1, active_cards: [0] },
+        { id: 5, holder: 2, active_cards: [0] },
+      ] };
     const face = createCardFace(cardsById.get(0), { button: true, notes: cardNoteContext(state) });
     const snapshot = () => ({ label: face["aria-label"],
       badges: face.querySelector(".card-annotations").children.map((badge) => [badge.textContent, badge.className]) });
-    const own = snapshot();
-    state.matrix[0].marks = ["-", "?", "?", "+"];
+    const defaults = snapshot();
+    currentState = state;
+    document.querySelectorAll = () => [face];
+    state.hand = [];
+    setNotebookMarkerVisibility("card", "negative", true);
+    state.matrix[0].marks = ["-", "?", "?"];
     renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
-    const envelope = snapshot();
-    state.mode = "spectate";
-    state.selected_player = 1;
-    state.matrix[0].marks = ["-", "+", "?", "-"];
+    const ownNegativeHidden = snapshot();
+    hideOwnNegativeMarkers = false;
     renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
-    const viewed = snapshot();
-    state.matrix[0].marks = ["-", "+", "?", "+"];
+    const ownNegativeShown = snapshot();
+    hideOwnNegativeMarkers = true;
+    setNotebookMarkerVisibility("card", "negative", false);
+    state.hand = [0];
+    state.matrix[0].marks = ["+", "-", "?"];
+    setNotebookMarkerVisibility("card", "positive", false);
+    setNotebookMarkerVisibility("card", "negative", true);
+    const negative = snapshot();
+    setNotebookMarkerVisibility("card", "unknown", true);
+    setNotebookMarkerVisibility("card", "clause", true);
+    const all = snapshot();
+    state.matrix[0].marks = ["?", "-", "?"];
     renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
-    const conflict = snapshot();
-    showCardIndicators = false;
-    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
-    return { own, envelope, viewed, conflict, hidden: snapshot() };
+    const noPositive = snapshot();
+    setNotebookMarkerVisibility("card", "negative", false);
+    setNotebookMarkerVisibility("card", "unknown", false);
+    setNotebookMarkerVisibility("card", "clause", false);
+    return { defaults, ownNegativeHidden, ownNegativeShown, negative, all, noPositive, handOnly: snapshot(),
+      cardVisibility: { ...cardMarkerVisibility }, roomVisibility: { ...roomMarkerVisibility } };
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    own: {
-      label: "Miss Scarlet, suspect. In your hand. Notebook: Player 1: held",
-      badges: [["In hand", "card-hand-badge"], ["P1+", "card-note-mark card-note-own"]],
+    defaults: { label: "Miss Scarlet, suspect. In your hand",
+      badges: [["In hand", "card-hand-badge"]] },
+    ownNegativeHidden: { label: "Miss Scarlet, suspect", badges: [] },
+    ownNegativeShown: { label: "Miss Scarlet, suspect. Notebook: Player 1: not held",
+      badges: [["P1-", "card-note-mark card-note-negative"]] },
+    negative: { label: "Miss Scarlet, suspect. In your hand",
+      badges: [["In hand", "card-hand-badge"]] },
+    all: {
+      label: "Miss Scarlet, suspect. In your hand. Notebook: Player 3: unknown, Clause 4, Clause 5",
+      badges: [
+        ["In hand", "card-hand-badge"],
+        ["P3?", "card-note-mark card-note-unknown"],
+        ["C4", "card-note-mark card-note-clause"],
+        ["C5", "card-note-mark card-note-clause"],
+      ],
     },
-    envelope: {
-      label: "Miss Scarlet, suspect. In your hand. Notebook: Envelope: held",
-      badges: [["In hand", "card-hand-badge"], ["E+", "card-note-mark card-note-envelope"]],
+    noPositive: {
+      label: "Miss Scarlet, suspect. In your hand. Notebook: Player 2: not held, Player 3: unknown, Clause 4, Clause 5",
+      badges: [
+        ["In hand", "card-hand-badge"],
+        ["P2-", "card-note-mark card-note-negative"],
+        ["P3?", "card-note-mark card-note-unknown"],
+        ["C4", "card-note-mark card-note-clause"],
+        ["C5", "card-note-mark card-note-clause"],
+      ],
     },
-    viewed: {
-      label: "Miss Scarlet, suspect. In Player 2's hand. Notebook: Player 2: held",
-      badges: [["P2 hand", "card-hand-badge"], ["P2+", "card-note-mark card-note-own"]],
-    },
-    conflict: { label: "Miss Scarlet, suspect. In Player 2's hand",
-      badges: [["P2 hand", "card-hand-badge"]] },
-    hidden: { label: "Miss Scarlet, suspect", badges: [] },
+    handOnly: { label: "Miss Scarlet, suspect. In your hand",
+      badges: [["In hand", "card-hand-badge"]] },
+    cardVisibility: { positive: false, negative: false, unknown: false, clause: false },
+    roomVisibility: { positive: true, negative: false, unknown: false, clause: false },
   });
 });
 
@@ -778,7 +818,7 @@ test("card notes follow optimistic edits and revert in place after a failed save
       noteContainers: face.querySelector(".card-topline").children.filter((child) => child.className === "card-annotations").length,
       error: $("error-message").textContent };
   })()`);
-  assert.match(result.before, /In your hand.*Player 1: held/);
+  assert.equal(result.before, "Miss Scarlet, suspect. In your hand");
   assert.equal(result.immediate, "Miss Scarlet, suspect. In your hand");
   assert.equal(result.reverted, result.before);
   assert.equal(result.noteContainers, 1);
@@ -813,9 +853,7 @@ test("board room indicators use the selected notebook, suppress conflicts and to
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     normal: { groups: [
-      { label: "Kitchen: In your hand, Player 1: held", badges: [
-        { kind: "board-note-hand", text: "Hand" }, { kind: "board-note-own", text: "P1+" },
-      ] },
+      { label: "Kitchen: In your hand", badges: [{ kind: "board-note-hand", text: "Hand" }] },
       { label: "Ballroom: Envelope: held", badges: [{ kind: "board-note-envelope", text: "E+" }] },
     ], warning: "" },
     conflict: { groups: [
@@ -823,6 +861,103 @@ test("board room indicators use the selected notebook, suppress conflicts and to
       { label: "Ballroom: Envelope: held", badges: [{ kind: "board-note-envelope", text: "E+" }] },
     ], warning: "Conflicting + marks — check notebook: Kitchen · " },
     hidden: { groups: [], warning: "Conflicting + marks — check notebook: Kitchen · " },
+  });
+});
+
+test("room overlay filters show selected mark types and active clauses without changing card filters", () => {
+  const ui = frontend({ board: true, cards: true });
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    document.querySelectorAll = () => [];
+    const state = { mode: "play", human_player: 0, selected_player: 0, num_players: 2,
+      hand: [], notebook_mode: "manual", board: { layout: { rooms: [
+        { id: 12, name: "Kitchen", squares: [{ x: 0, y: 0 }, { x: 7, y: 6 }] },
+      ] } }, matrix: [{ id: 12, name: "Kitchen", marks: ["+", "-", "?"] }],
+      notebook_clauses: [
+        { id: 3, holder: 0, active_cards: [12] },
+        { id: 8, holder: 2, active_cards: [12] },
+      ] };
+    currentState = state;
+    const snapshot = () => {
+      const group = $("board-room-notes").children[0];
+      return group ? {
+        label: group["aria-label"],
+        badges: group.children.slice(1).map((badge) => ({
+          kind: badge.class, text: badge.children[1].textContent,
+        })),
+      } : null;
+    };
+    updateKnowledgeIndicators(state);
+    const defaults = snapshot();
+    setNotebookMarkerVisibility("room", "negative", true);
+    setNotebookMarkerVisibility("room", "unknown", true);
+    setNotebookMarkerVisibility("room", "clause", true);
+    const all = snapshot();
+    setNotebookMarkerVisibility("room", "positive", false);
+    const noPositive = snapshot();
+    state.matrix[0].marks = ["?", "-", "?"];
+    updateKnowledgeIndicators(state);
+    const withoutPositive = snapshot();
+    state.matrix[0].marks = ["-", "?", "?"];
+    updateKnowledgeIndicators(state);
+    const ownNegativeHidden = snapshot();
+    hideOwnNegativeMarkers = false;
+    updateKnowledgeIndicators(state);
+    const ownNegativeShown = snapshot();
+    return { defaults, all, noPositive, withoutPositive,
+      ownNegativeHidden, ownNegativeShown,
+      cardVisibility: { ...cardMarkerVisibility } };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    defaults: { label: "Kitchen: Player 1: held",
+      badges: [{ kind: "board-note-own", text: "P1+" }] },
+    all: {
+      label: "Kitchen: Player 1: held, Envelope: unknown, Clause 3, Clause 8",
+      badges: [
+        { kind: "board-note-own", text: "P1+" },
+        { kind: "board-note-unknown", text: "E?" },
+        { kind: "board-note-clause", text: "C3" },
+        { kind: "board-note-clause", text: "C8" },
+      ],
+    },
+    noPositive: {
+      label: "Kitchen: Envelope: unknown, Clause 3, Clause 8",
+      badges: [
+        { kind: "board-note-unknown", text: "E?" },
+        { kind: "board-note-clause", text: "C3" },
+        { kind: "board-note-clause", text: "C8" },
+      ],
+    },
+    withoutPositive: {
+      label: "Kitchen: Player 1: unknown, Player 2: not held, Envelope: unknown, Clause 3, Clause 8",
+      badges: [
+        { kind: "board-note-unknown", text: "P1?" },
+        { kind: "board-note-negative", text: "P2-" },
+        { kind: "board-note-unknown", text: "E?" },
+        { kind: "board-note-clause", text: "C3" },
+        { kind: "board-note-clause", text: "C8" },
+      ],
+    },
+    ownNegativeHidden: {
+      label: "Kitchen: Player 2: unknown, Envelope: unknown, Clause 3, Clause 8",
+      badges: [
+        { kind: "board-note-unknown", text: "P2?" },
+        { kind: "board-note-unknown", text: "E?" },
+        { kind: "board-note-clause", text: "C3" },
+        { kind: "board-note-clause", text: "C8" },
+      ],
+    },
+    ownNegativeShown: {
+      label: "Kitchen: Player 1: not held, Player 2: unknown, Envelope: unknown, Clause 3, Clause 8",
+      badges: [
+        { kind: "board-note-negative", text: "P1-" },
+        { kind: "board-note-unknown", text: "P2?" },
+        { kind: "board-note-unknown", text: "E?" },
+        { kind: "board-note-clause", text: "C3" },
+        { kind: "board-note-clause", text: "C8" },
+      ],
+    },
+    cardVisibility: { positive: true, negative: false, unknown: false, clause: false },
   });
 });
 
