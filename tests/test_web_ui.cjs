@@ -717,8 +717,10 @@ test("the human player's suggestion animates while a bot is responding", () => {
   ]);
 });
 
-test("card indicators show the actual hand and at most one positive notebook mark", () => {
+test("card hand and notebook indicators toggle independently", () => {
   const ui = frontend({ cards: true });
+  assert.match(template, /id="show-card-hand-indicators"[^>]*><span>Show hand badges on cards<\/span>/);
+  assert.match(template, /id="show-card-notebook-indicators"[^>]*><span>Show notebook markers on cards<\/span>/);
   const result = ui.evaluate(`(() => {
     const state = { mode: "play", human_player: 0, selected_player: 0, num_players: 3,
       hand: [0], notebook_mode: "manual", matrix: [{ id: 0, marks: ["+", "-", "?", "-"] }] };
@@ -737,9 +739,16 @@ test("card indicators show the actual hand and at most one positive notebook mar
     state.matrix[0].marks = ["-", "+", "?", "+"];
     renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
     const conflict = snapshot();
-    showCardIndicators = false;
+    state.matrix[0].marks = ["-", "+", "?", "-"];
+    showCardHandIndicators = false;
     renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
-    return { own, envelope, viewed, conflict, hidden: snapshot() };
+    const notebookOnly = snapshot();
+    showCardNotebookIndicators = false;
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    const hidden = snapshot();
+    showCardHandIndicators = true;
+    renderCardNotes(face, cardsById.get(0), cardNoteContext(state));
+    return { own, envelope, viewed, conflict, notebookOnly, hidden, handOnly: snapshot() };
   })()`);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     own: {
@@ -756,7 +765,15 @@ test("card indicators show the actual hand and at most one positive notebook mar
     },
     conflict: { label: "Miss Scarlet, suspect. In Player 2's hand",
       badges: [["P2 hand", "card-hand-badge"]] },
+    notebookOnly: {
+      label: "Miss Scarlet, suspect. Notebook: Player 2: held",
+      badges: [["P2+", "card-note-mark card-note-own"]],
+    },
     hidden: { label: "Miss Scarlet, suspect", badges: [] },
+    handOnly: {
+      label: "Miss Scarlet, suspect. In Player 2's hand",
+      badges: [["P2 hand", "card-hand-badge"]],
+    },
   });
 });
 

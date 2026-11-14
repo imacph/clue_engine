@@ -413,7 +413,8 @@ or response needs your attention. Card choices appear above the combination
 and action controls; longer lists scroll within the card area. Cards show an
 **In hand** badge for the viewed player's actual hand and at most one positive
 player or envelope notebook mark. Board rooms show the same indicators.
-Game options can independently hide card and board indicators. Conflicting
+Game options can independently hide hand badges, notebook markers on cards, and
+board indicators. Conflicting
 positive marks are reported in the status area and not shown on the affected
 card or room. Manual marks update immediately and can differ from the actual hand.
 On your turn, roll the

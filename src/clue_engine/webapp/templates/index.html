@@ -639,7 +639,7 @@
             <h3>Actions help</h3>
             <p>Choose one suspect, weapon, and room from the card views, then select Suggest or Accuse. Board suggestions must name the room you occupy; accusations may name any room. Use current room restores it for a suggestion.</p>
             <p>When responding to a suggestion, select a matching card from your hand to reveal it. If you have no matching card, select Pass.</p>
-            <p>Cards and board rooms can show the viewed player's hand and a positive notebook mark. If a card has multiple positive marks, correct the conflicting notebook entries. Toggle these indicators in Game options.</p>
+            <p>Cards can show the viewed player's hand and a positive notebook mark. Toggle each card indicator independently in Game options. Board room indicators have a separate control. If a card has multiple positive marks, correct the conflicting notebook entries.</p>
             <h3>Notebook help</h3>
             <p>Columns show what each player may hold; E is the envelope. A plus means held, a minus means not held, and a question mark means unknown.</p>
             <p>In a manual notebook, activate any cell to cycle its mark. Hand facts are filled in initially, but you can change them. Use arrow keys to move between cells.</p>
@@ -714,7 +714,8 @@
     <h2 id="game-options-title">Game options</h2>
     <p id="game-options-error" class="error-message" role="alert" hidden></p>
     <div class="game-options-actions">
-      <label class="check-row"><input id="show-card-indicators" type="checkbox" checked><span>Show card indicators</span></label>
+      <label class="check-row"><input id="show-card-hand-indicators" type="checkbox" checked><span>Show hand badges on cards</span></label>
+      <label class="check-row"><input id="show-card-notebook-indicators" type="checkbox" checked><span>Show notebook markers on cards</span></label>
       <label class="check-row" id="board-indicators-option"><input id="show-board-indicators" type="checkbox" checked><span>Show board room indicators</span></label>
       <button id="game-fullscreen" class="button button-secondary" type="button" disabled>Full screen</button>
       <button id="game-theme-toggle" class="button button-secondary" type="button">Dark mode</button>

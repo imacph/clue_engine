@@ -45,7 +45,8 @@ let lastError = "";
 let desktopThemeWrite = Promise.resolve();
 let desktopFullscreen = false;
 let fullscreenBusy = false;
-let showCardIndicators = true;
+let showCardHandIndicators = true;
+let showCardNotebookIndicators = true;
 let showBoardIndicators = true;
 let cardView = "hand";
 let lastActivityKey = null;
@@ -1504,7 +1505,7 @@ function updateKnowledgeIndicators(state) {
 
 function renderCardNotes(face, card, notes) {
   const knowledge = positiveKnowledge(notes.marks.get(card.id));
-  const inHand = showCardIndicators && notes.hand.has(card.id);
+  const inHand = showCardHandIndicators && notes.hand.has(card.id);
   const handDescription = notes.human ? "In your hand" : `In Player ${notes.player + 1}'s hand`;
   const annotations = document.createElement("div");
   annotations.className = "card-annotations";
@@ -1516,7 +1517,7 @@ function renderCardNotes(face, card, notes) {
     annotations.append(badge);
   }
   let description = "";
-  if (showCardIndicators && knowledge.holder !== null) {
+  if (showCardNotebookIndicators && knowledge.holder !== null) {
     const holder = knowledge.holder;
     const envelope = holder === notes.players;
     const owner = envelope ? "Envelope" : `Player ${holder + 1}`;
@@ -3605,8 +3606,12 @@ $("game-options-open").addEventListener("click", () => {
   $("game-options-dialog").showModal();
 });
 $("game-options-close").addEventListener("click", () => $("game-options-dialog").close());
-$("show-card-indicators").addEventListener("change", (event) => {
-  showCardIndicators = event.target.checked;
+$("show-card-hand-indicators").addEventListener("change", (event) => {
+  showCardHandIndicators = event.target.checked;
+  if (currentState) updateCardNotes(currentState);
+});
+$("show-card-notebook-indicators").addEventListener("change", (event) => {
+  showCardNotebookIndicators = event.target.checked;
   if (currentState) updateCardNotes(currentState);
 });
 $("show-board-indicators").addEventListener("change", (event) => {
