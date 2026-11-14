@@ -415,7 +415,9 @@ and action controls; longer lists scroll within the card area. Cards show an
 player or envelope notebook mark. Board rooms show selected notebook marks and
 active clause markers. Game options independently control positive, negative,
 unknown, and clause markers for cards and rooms, as well as card hand badges and
-room overlays. Conflicting
+room overlays. The default **Hide viewed player's negative marks** option
+applies to both cards and rooms; uncheck it to show those marks.
+Conflicting
 positive marks are reported in the status area and not shown on the affected
 card or room. Manual marks update immediately and can differ from the actual hand.
 On your turn, roll the
