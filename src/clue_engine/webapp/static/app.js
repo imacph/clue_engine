@@ -2032,13 +2032,13 @@ function updateNotebookClauseSelection(notebook) {
   }
 }
 
-function updateNotebookClauseOpacity(notebook, state) {
+function updateNotebookClauseOpacity(notebook, state, matrix) {
   const indicators = notebook.querySelectorAll(".clause-indicator");
   if (state.notebook_mode !== "manual") {
     for (const indicator of indicators) indicator.classList.remove("clause-marker-dimmed");
     return;
   }
-  const cards = new Map(state.matrix.map((card) => [card.id, card]));
+  const cards = new Map(matrix.map((card) => [card.id, card]));
   const clauses = new Map((state.notebook_clauses || []).map((clause) => [clause.id, clause]));
   const positivelyMarkedClauses = new Set();
   for (const clause of clauses.values()) {
@@ -2100,7 +2100,7 @@ function renderNotebook(state) {
         updateNotebookMark(button, card, holder, mark, state, draft, responses);
       }
       updateNotebookClauseSelection(notebook);
-      updateNotebookClauseOpacity(notebook, state);
+      updateNotebookClauseOpacity(notebook, state, matrix);
       lastNotebookFingerprint = fingerprint;
       lastNotebookMarks = marks;
       lastNotebookDraft = draft;
@@ -2238,7 +2238,7 @@ function renderNotebook(state) {
     table.append(body);
   }
   notebook.append(table);
-  updateNotebookClauseOpacity(notebook, state);
+  updateNotebookClauseOpacity(notebook, state, matrix);
   if (focusCard !== undefined) {
     notebook.querySelector(`[data-notebook-card="${focusCard}"][data-notebook-holder="${focusHolder}"]`)
       ?.focus({ preventScroll: true });

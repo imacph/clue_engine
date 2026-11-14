@@ -2123,6 +2123,14 @@ test("manual notebook clause markers dim for negative and positive marks", () =>
   assert.equal(findMarker(12, 2).classList.contains("clause-marker-dimmed"), true);
 
   const table = notebook.children[0];
+  ui.evaluate('pendingNotebookEdits.push({ cardId: 0, holder: 1, mark: "?" })');
+  ui.renderNotebook(state);
+  assert.equal(notebook.children[0], table);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), false);
+  ui.evaluate("pendingNotebookEdits = []");
+  ui.renderNotebook(state);
+  assert.equal(findMarker(0, 1).classList.contains("clause-marker-dimmed"), true);
+
   state.matrix[0].marks[1] = "?";
   state.matrix[1].marks[2] = "?";
   ui.renderNotebook(state);
