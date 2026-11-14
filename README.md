@@ -871,6 +871,13 @@ include only seats still observed; the exact data lists sample counts and
 ranges. Game-length and
 board-event measures exclude incomplete games; outcomes include them. Numeric
 statistics are calculated from the original observations, not histogram bins.
+The distribution selector groups measures by subject and includes per-seat
+comparisons of mean turns, win rate, learned-solution rate, and mean first
+solution action. Each bar shows its sample count; seat and profile filters
+apply to the underlying seat appearances. Turns and win rate use completed
+appearances, learned-solution rate includes incomplete appearances, and first
+solution action uses only appearances recorded as learned. An unavailable value
+is distinct from a measured zero.
 The fixed-height distribution graph plots numeric bins on a continuous axis,
 including gaps. Hover or focus a bar for its count, percentage, and cumulative
 share. When bins are too numerous to display individually, adjacent bins are

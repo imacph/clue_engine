@@ -292,6 +292,105 @@ def test_filtered_distributions_count_games_and_seat_exposures(client, monkeypat
     assert client.get(path, query_string={"metric": "seat_outcomes", "width": 0}).status_code == 400
 
 
+def test_seat_comparison_api_uses_matching_appearances_and_metric_denominators(client, monkeypatch):
+    def fake_run(config, trace_path, *, progress, cancelled, on_game):
+        aggregate = _Aggregate(config)
+        for index, (policies, outcome, winner, turns, first) in enumerate([
+            (("random", "random", "deductive"), "won", 0, [1, 2, 3], [0, None, None]),
+            (("deductive", "random", "random"), "all_eliminated", None, [2, 4, 6], [1, 4, 5]),
+            (("deductive", "deductive", "random"), "timeout", None, [3, 5, 7], [None, None, 9]),
+            (("deductive", "deductive", "probing"), "error", None, [0, 0, 0], [None, None, None]),
+        ]):
+            result = GameResult(
+                game=index, seed=index, policies=policies, outcome=outcome, winner=winner,
+                steps=20, turns=turns, suggestions=0, passes=0, refutations=0,
+                first_solution_step=first, final_knowledge=[],
+            )
+            aggregate.add(result)
+            on_game(result)
+        return aggregate.summary(False)
+
+    monkeypatch.setattr("clue_engine.webapp.run_batch", fake_run)
+    token = csrf_token(client)
+    started = post(client, token, "/api/batch", {
+        "setup": {"game_type": "card_only", "players": 3,
+                  "bots": ["random", "deductive", "probing"]},
+        "games": 4,
+    })
+    batch_id = started.get_json()["batch_id"]
+    assert wait_for_batch(client, batch_id)["status"] == "completed"
+    path = f"/api/batch/{batch_id}/distribution"
+
+    def chart(metric, **filters):
+        response = client.get(path, query_string={"metric": metric, **filters})
+        assert response.status_code == 200
+        data = response.get_json()
+        assert set(data) == {"title", "details", "seat_bars", "unit"}
+        return data
+
+    turns = chart("seat_compare_turns", policy="random")
+    assert turns["unit"] == "turns"
+    assert turns["seat_bars"] == [
+        {"seat": 0, "value": 1, "samples": 1},
+        {"seat": 1, "value": 3, "samples": 2},
+        {"seat": 2, "value": 6, "samples": 1},
+    ]
+    assert "1 incomplete matching appearances excluded" in turns["details"]
+    wins = chart("seat_compare_win_rate", policy="random")
+    assert wins["unit"] == "%"
+    assert wins["seat_bars"] == [
+        {"seat": 0, "value": 100, "samples": 1},
+        {"seat": 1, "value": 0, "samples": 2},
+        {"seat": 2, "value": 0, "samples": 1},
+    ]
+    learned = chart("seat_compare_learned_rate", policy="random")
+    assert learned["unit"] == "%"
+    assert learned["seat_bars"] == [
+        {"seat": 0, "value": 100, "samples": 1},
+        {"seat": 1, "value": 50, "samples": 2},
+        {"seat": 2, "value": 100, "samples": 2},
+    ]
+    assert "including incomplete games" in learned["details"]
+    first = chart("seat_compare_first_action", policy="random")
+    assert first["unit"] == "actions"
+    assert first["seat_bars"] == [
+        {"seat": 0, "value": 0, "samples": 1},
+        {"seat": 1, "value": 4, "samples": 1},
+        {"seat": 2, "value": 7, "samples": 2},
+    ]
+    assert "1 appearances not recorded as learned are excluded" in first["details"]
+    assert chart("seat_compare_win_rate", seat=2)["seat_bars"] == [
+        {"seat": 2, "value": 0, "samples": 2},
+    ]
+    assert chart("seat_compare_turns", policy="random", seat=2)["seat_bars"] == [
+        {"seat": 2, "value": 6, "samples": 1},
+    ]
+    assert chart("seat_compare_win_rate", policy="random", seat=0)["seat_bars"][0]["value"] == 100
+    for metric in ("seat_compare_turns", "seat_compare_win_rate", "seat_compare_learned_rate",
+                   "seat_compare_first_action"):
+        assert chart(metric, policy="random", seat=9)["seat_bars"] == []
+        assert chart(metric, policy="absent")["seat_bars"] == []
+    unavailable_turns = chart("seat_compare_turns", policy="probing")
+    assert "unavailable" in unavailable_turns["details"]
+    assert unavailable_turns["seat_bars"] == [
+        {"seat": 2, "value": None, "samples": 0},
+    ]
+    assert chart("seat_compare_win_rate", policy="probing")["seat_bars"] == [
+        {"seat": 2, "value": None, "samples": 0},
+    ]
+    assert chart("seat_compare_learned_rate", policy="probing")["seat_bars"] == [
+        {"seat": 2, "value": 0, "samples": 1},
+    ]
+    unavailable_action = chart("seat_compare_first_action", policy="probing")
+    assert "unavailable" in unavailable_action["details"]
+    assert unavailable_action["seat_bars"] == [
+        {"seat": 2, "value": None, "samples": 0},
+    ]
+    assert chart("seat_compare_turns", policy="probing", seat=1)["seat_bars"] == []
+    assert client.get(path, query_string={"metric": "seat_compare_turns", "seat": -1}).status_code == 400
+    assert client.get(path, query_string={"metric": "seat_compare_turns", "width": 0}).status_code == 400
+
+
 def test_knowledge_charts_use_filtered_seat_turns_and_last_snapshots(tmp_path):
     solution = {"suspect_id": 1, "weapon_id": 2, "room_id": 3}
 

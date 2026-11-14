@@ -287,6 +287,31 @@ function renderBatchSummary(data) {
 }
 
 const batchTabs = ["distribution", "summary", "runs"];
+const batchCategorySelections = {};
+
+function updateBatchMeasureOptions() {
+  const category = $("batch-category").value;
+  const select = $("batch-metric");
+  const options = Array.from(select.options);
+  for (const option of options) {
+    const available = option.dataset.category === category;
+    option.hidden = !available;
+    option.disabled = !available;
+  }
+  const selected = options.find((option) => option.value === select.value && !option.disabled);
+  if (!selected) {
+    const remembered = options.find((option) => option.value === batchCategorySelections[category] && !option.disabled);
+    select.value = (remembered || options.find((option) => !option.disabled))?.value || "";
+  }
+  batchCategorySelections[category] = select.value;
+  updateBatchChartControls();
+}
+
+function updateBatchChartControls() {
+  const special = /^(seat_compare_|knowledge_)/.test($("batch-metric").value);
+  $("batch-bin-width-control").hidden = special;
+  $("batch-display-control").hidden = special;
+}
 
 function switchBatchTab(name) {
   for (const tab of batchTabs) {
@@ -342,6 +367,10 @@ function drawBatchGraph(chart) {
   $("batch-chart-grouping").textContent = "";
   if (chart?.points) {
     drawBatchKnowledgeGraph(chart);
+    return;
+  }
+  if (chart?.seat_bars) {
+    drawBatchSeatGraph(chart);
     return;
   }
   if (!chart || !chart.samples) return;
@@ -422,6 +451,57 @@ function drawBatchGraph(chart) {
   }
 }
 
+function batchSeatValue(bar, unit) {
+  if (bar.value === null || bar.samples === 0) return "No samples";
+  return `${formatBatchNumber(bar.value)}${unit === "%" ? "%" : ` ${unit}`}`;
+}
+
+function drawBatchSeatGraph(chart) {
+  const graph = $("batch-chart-graph");
+  if (!chart.seat_bars.length) return;
+  const width = Math.max(240, graph.clientWidth || 900);
+  const height = Math.max(190, graph.clientHeight || 240);
+  graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const left = 60, right = width - 18, top = 24, bottom = height - 38;
+  const maximum = chart.unit === "%" ? 100 : Math.max(1,
+    ...chart.seat_bars.map((bar) => bar.samples && bar.value !== null ? bar.value : 0));
+  graph.append(svgElement("text", { x: 5, y: 13, class: "batch-chart-axis" },
+    chart.unit === "%" ? "Percent (%)" : chart.unit === "turns" ? "Mean turns" : "Mean actions"));
+  for (let index = 0; index <= 4; index++) {
+    const fraction = index / 4;
+    const y = bottom - fraction * (bottom - top);
+    graph.append(svgElement("line", { x1: left, y1: y, x2: right, y2: y, class: "batch-chart-grid" }));
+    graph.append(svgElement("text", { x: left - 6, y: y + 4, "text-anchor": "end", class: "batch-chart-axis" },
+      formatBatchNumber(fraction * maximum)));
+  }
+  const slot = (right - left) / chart.seat_bars.length;
+  for (const [index, bar] of chart.seat_bars.entries()) {
+    const x = left + index * slot;
+    const barHeight = bar.value !== null && bar.samples > 0 ? bar.value / maximum * (bottom - top) : 0;
+    const description = `Player ${bar.seat + 1}: ${batchSeatValue(bar, chart.unit)} · ${bar.samples} samples`;
+    const group = svgElement("g", { class: "batch-chart-bin", tabindex: 0, role: "img", "aria-label": description });
+    group.append(
+      svgElement("title", {}, description),
+      svgElement("rect", { x: x + slot * .15, y: bottom - barHeight, width: slot * .7,
+        height: barHeight, class: "batch-chart-bar" }),
+      svgElement("rect", { x, y: top, width: slot, height: bottom - top, class: "batch-chart-hit" }),
+    );
+    const inspect = () => { $("batch-chart-inspection").textContent = description; };
+    group.addEventListener("mouseenter", inspect);
+    group.addEventListener("focus", inspect);
+    graph.append(group);
+    if (bar.value === null || bar.samples === 0) {
+      graph.append(svgElement("text", { x: x + slot / 2, y: bottom - 6, "text-anchor": "middle",
+        class: "batch-chart-axis" }, "No data"));
+    } else if (bar.value === 0) {
+      graph.append(svgElement("text", { x: x + slot / 2, y: bottom - 6, "text-anchor": "middle",
+        class: "batch-chart-axis" }, "0"));
+    }
+    graph.append(svgElement("text", { x: x + slot / 2, y: bottom + 17, "text-anchor": "middle",
+      class: "batch-chart-axis" }, `Player ${bar.seat + 1}`));
+  }
+}
+
 function drawBatchKnowledgeGraph(chart) {
   const graph = $("batch-chart-graph");
   if (!chart.points.length) return;
@@ -469,6 +549,38 @@ function renderBatchBinTable() {
   const container = $("batch-chart-table");
   container.replaceChildren();
   const chart = lastBatchChart;
+  if (chart?.seat_bars) {
+    if (!$("batch-chart-values").open || !chart.seat_bars.length) return;
+    const table = document.createElement("table");
+    table.className = "batch-policy-table";
+    table.setAttribute("aria-label", "Player comparison data");
+    const head = document.createElement("thead");
+    const header = document.createElement("tr");
+    for (const label of ["Player", `Value (${chart.unit})`, "Samples"]) {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      cell.textContent = label;
+      header.append(cell);
+    }
+    head.append(header);
+    const body = document.createElement("tbody");
+    const end = Math.min(batchBinOffset + 50, chart.seat_bars.length);
+    for (const bar of chart.seat_bars.slice(batchBinOffset, end)) {
+      const row = document.createElement("tr");
+      for (const value of [`Player ${bar.seat + 1}`, batchSeatValue(bar, chart.unit), String(bar.samples)]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(head, body);
+    container.append(table);
+    $("batch-bin-status").textContent = `Showing ${batchBinOffset + 1}–${end} of ${chart.seat_bars.length} players.`;
+    $("batch-bin-previous").disabled = batchBinOffset === 0;
+    $("batch-bin-next").disabled = end >= chart.seat_bars.length;
+    return;
+  }
   if (chart?.points) {
     if (!$("batch-chart-values").open) return;
     const table = document.createElement("table");
@@ -537,15 +649,20 @@ function renderBatchChart() {
   stats.replaceChildren();
   $("batch-chart-graph").replaceChildren();
   $("batch-chart-table").replaceChildren();
-  const hasData = chart && (chart.points ? chart.points.length : chart.samples);
+  const hasData = chart && (chart.seat_bars ? chart.seat_bars.length : chart.points ? chart.points.length : chart.samples);
   $("batch-chart-empty").hidden = !chart || Boolean(hasData);
   $("batch-chart-values").hidden = !hasData;
   $("batch-chart-grouping").textContent = "";
-  $("batch-chart-inspection").textContent = "Hover or focus a bar to inspect its count and share.";
+  $("batch-chart-inspection").textContent = chart?.seat_bars
+    ? "Hover or focus a player to inspect its value and samples."
+    : chart?.points ? "Hover or focus a point to inspect its value and samples."
+      : "Hover or focus a bar to inspect its count and share.";
+  $("batch-values-summary").textContent = chart?.seat_bars ? "View player data"
+    : chart?.points ? "View exact turn data" : "View exact bin data";
   if (!chart) return;
   $("batch-distribution-title").textContent =
     $("batch-metric").value === "deduction" ? "First solution action" : displayPlayerText(chart.title);
-  $("batch-chart-details").textContent = chart.points ? chart.details :
+  $("batch-chart-details").textContent = chart.points || chart.seat_bars ? chart.details :
     `${chart.samples} samples · ${chart.denominator}. ${chart.details}`;
   if (chart.numeric_summary) {
     for (const [label, key] of [
@@ -565,15 +682,15 @@ async function loadBatchChart() {
   lastBatchChart = null;
   renderBatchChart();
   $("batch-chart-details").textContent = "Loading distribution…";
+  const metric = $("batch-metric").value;
+  const special = /^(seat_compare_|knowledge_)/.test(metric);
   const width = Number($("batch-bin-width").value);
-  if (!Number.isSafeInteger(width) || width < 1) {
+  if (!special && (!Number.isSafeInteger(width) || width < 1)) {
     $("batch-chart-details").textContent = "Histogram bin width must be a positive whole number.";
     throw new Error("Histogram bin width must be a positive whole number.");
   }
-  const query = new URLSearchParams({
-    metric: $("batch-metric").value,
-    width: String(width),
-  });
+  const query = new URLSearchParams({ metric });
+  if (!special) query.set("width", String(width));
   if ($("batch-policy-filter").value) query.set("policy", $("batch-policy-filter").value);
   if ($("batch-seat-filter").value !== "") query.set("seat", $("batch-seat-filter").value);
   let chart;
@@ -721,6 +838,7 @@ function updateBatchScreen(data) {
   $("batch-cancel").disabled = data.cancel_requested;
   $("batch-new-run").hidden = running;
   $("batch-main-menu").hidden = running;
+  $("batch-category").disabled = running;
   $("batch-metric").disabled = running;
   $("batch-bin-width").disabled = running;
   $("batch-policy-filter").disabled = running;
@@ -728,16 +846,21 @@ function updateBatchScreen(data) {
   batchFinished = !running;
   if (data.summary) renderBatchSummary(data);
   if (data.game_type === "board") {
-    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = false;
-  } else {
-    for (const option of document.querySelectorAll("[data-board-only]")) option.hidden = true;
-    if ($("batch-metric").selectedOptions[0]?.hasAttribute("data-board-only")) {
-      $("batch-metric").value = "outcomes";
+    for (const option of document.querySelectorAll("[data-board-only]")) {
+      option.hidden = false;
+      option.disabled = false;
     }
+  } else {
+    for (const option of document.querySelectorAll("[data-board-only]")) {
+      option.hidden = true;
+      option.disabled = true;
+    }
+    if ($("batch-category").value === "board") $("batch-category").value = "game";
     if ($("batch-runs-sort").selectedOptions[0]?.hasAttribute("data-board-only")) {
       $("batch-runs-sort").value = "game";
     }
   }
+  updateBatchMeasureOptions();
 }
 
 async function pollBatch() {
@@ -3594,7 +3717,14 @@ $("batch-main-menu").addEventListener("click", () => {
   activeBatchId = null;
   showMainMenu();
 });
+$("batch-category").addEventListener("change", () => {
+  updateBatchMeasureOptions();
+  loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
+});
+updateBatchMeasureOptions();
 $("batch-metric").addEventListener("change", () => {
+  batchCategorySelections[$("batch-category").value] = $("batch-metric").value;
+  updateBatchChartControls();
   loadBatchChart().catch((error) => showError(`Could not load distribution: ${error.message}`));
 });
 $("batch-bin-width").addEventListener("change", () => {
@@ -3651,7 +3781,7 @@ $("batch-bin-previous").addEventListener("click", () => {
   renderBatchBinTable();
 });
 $("batch-bin-next").addEventListener("click", () => {
-  if (!lastBatchChart || batchBinOffset + 50 >= (lastBatchChart.points || lastBatchChart.bins).length) return;
+  if (!lastBatchChart || batchBinOffset + 50 >= (lastBatchChart.seat_bars || lastBatchChart.points || lastBatchChart.bins).length) return;
   batchBinOffset += 50;
   renderBatchBinTable();
 });
