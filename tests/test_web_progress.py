@@ -91,7 +91,7 @@ def test_play_waits_for_suggestion_review_before_bot_turn_end(monkeypatch, progr
     assert resumed["waiting_for_turn"] is False
     state = post(client, token, "/api/advance", step).get_json()
     assert state["to_move"] == 2 and state["waiting_for_turn"] is False
-    assert state["notebook_focus"]["turn"] == 1
+    assert state["notebook_focus"]["turn"] == 2
     assert state["notebook_focus"]["cards"] == []
     assert state["steps"] == resumed["steps"] + 1
     assert post(client, token, "/api/next-turn").status_code == 409
@@ -121,7 +121,8 @@ def test_human_can_review_before_suggester_continues(monkeypatch):
     state = post(client, token, "/api/next-turn").get_json()
     assert state["waiting_for_turn"] is False
     assert state["notebook_focus"]["cards"] == [1, 6, 12]
-    assert post(client, token, "/api/advance", {"step": False}).get_json()["waiting_for_turn"]
+    state = post(client, token, "/api/advance", {"step": False}).get_json()
+    assert state["to_move"] == 2 and state["waiting_for_turn"] is False
 
 
 def test_all_pass_suggestion_pauses_before_suggester_can_accuse(monkeypatch):
@@ -160,11 +161,11 @@ def test_reviewed_human_suggestion_turn_ends_without_another_review_pause(monkey
     post(client, token, "/api/action", {
         "action": "suggest", "suspect_id": 0, "weapon_id": 6, "room_id": 12,
     })
-    for responder in (1, 2, 3):
+    for next_player in (2, 3):
         state = post(client, token, "/api/advance").get_json()
-        assert state["to_move"] == responder and state["waiting_for_turn"] is False
-    assert state["to_move"] == 0
-    assert state["waiting_for_turn"] is True
+        assert state["to_move"] == next_player and state["waiting_for_turn"] is False
+    state = post(client, token, "/api/advance").get_json()
+    assert state["to_move"] == 0 and state["waiting_for_turn"] is True
     state = post(client, token, "/api/next-turn").get_json()
     assert state["waiting_for_turn"] is False
     assert state["legal"]["accuse"] is True and state["legal"]["end_turn"] is True
@@ -192,7 +193,7 @@ def test_completed_turn_focus_preserves_only_visible_reveals(monkeypatch):
     state = post(client, token, "/api/advance").get_json()
     assert state["waiting_for_turn"] is False
     assert state["to_move"] == 1
-    assert state["notebook_focus"]["turn"] == 0
+    assert state["notebook_focus"]["turn"] == 1
     assert state["notebook_focus"]["cards"] == []
 
 
