@@ -592,7 +592,7 @@ test("passes remain understandable for a human responder and after an unanswered
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     response: { kind: "Pass", actor: "Player 2 · suggestion P3",
       cards: 3 },
-    finalPass: { title: "Latest pass", passes: "Passed: P2", cards: 3 },
+    finalPass: { title: "Build an accusation", passes: "Passed: P2", cards: 3 },
     review: "Passed: P2", nextTurn: "",
   });
 });

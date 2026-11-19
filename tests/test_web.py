@@ -73,6 +73,7 @@ def test_local_page_sets_csrf_token_and_serves_assets(client):
     assert b'class="game-dashboard"' in response.data
     assert b'data-card-view="all"' in response.data
     assert b'id="card-suggest-button"' in response.data
+    assert b'id="card-accuse-menu-button"' in response.data
     assert b'id="card-accuse-button"' in response.data
     assert b'id="activity-meta"' in response.data
     assert b'id="history-tab"' in response.data
