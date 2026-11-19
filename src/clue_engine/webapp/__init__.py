@@ -648,6 +648,10 @@ def _serialize_state(
         "paused": game.paused,
         "waiting_for_turn": game.waiting_for_turn,
         "num_players": snapshot.num_players,
+        "eliminated": sorted({
+            event.actor for event in snapshot.events
+            if event.kind is EventKind.ACCUSE and event.actor != snapshot.winner
+        }),
         "hand_sizes": view.hand_sizes,
         "human_player": snapshot.human_player,
         "selected_player": selected_player,
