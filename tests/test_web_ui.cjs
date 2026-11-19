@@ -370,6 +370,21 @@ test("active pawn gets an accessible turn label without extra circle overlays", 
   assert.equal(result.radius, "0.42");
 });
 
+test("eliminated board pawns are dimmed and marked accessibly", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    const group = document.createElement("g");
+    const pawn = { id: 0, name: "Miss Scarlet", seat: 0, location: { kind: "hallway", x: 1, y: 2 } };
+    appendPawn(group, pawn, { human_player: 0, eliminated: [0] }, 1.5, 2.5, false, .42);
+    const marker = group.children[0];
+    return { label: marker["aria-label"], classes: marker.children.map((child) => child.class) };
+  })()`);
+  assert.match(result.label, /eliminated/);
+  assert.ok(result.classes.some((name) => name?.includes("board-pawn-eliminated")));
+  assert.ok(result.classes.includes("board-pawn-eliminated-mark"));
+});
+
 test("board passage pairs have matching letters and no markers when passages are disabled", () => {
   const ui = frontend();
   const result = ui.evaluate(`(() => {
@@ -1785,6 +1800,19 @@ test("clause draft selection updates cells without rebuilding the notebook", () 
   assert.equal(find(7, 2)["aria-pressed"], "true");
   assert.ok(!oldCell.parentElement.classList.contains("clause-draft-selected"));
   assert.equal(notebook.children[0], table);
+});
+
+test("eliminated players are labeled in notebook headers", () => {
+  const ui = frontend({ notebook: true });
+  ui.renderNotebook({
+    notebook_mode: "automatic", num_players: 2, hand_sizes: [9, 9], eliminated: [1],
+    notebook_clauses: [], matrix: [],
+  });
+  const headers = ui.element("notebook").children[0].children[0].children[0].children;
+  assert.equal(headers[1].textContent, "P1 (9)");
+  assert.equal(headers[2].textContent, "P2 (9) · Eliminated");
+  assert.ok(headers[2].classList.contains("notebook-player-eliminated"));
+  assert.match(headers[2].title, /eliminated/);
 });
 
 test("manual notebook updates cells immediately and saves rapid edits in order", async () => {

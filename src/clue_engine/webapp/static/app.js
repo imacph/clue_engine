@@ -1377,15 +1377,23 @@ function buildBoardBase(layout, map = $("board-map"), dynamicId = "board-dynamic
 
 function appendPawn(group, pawn, state, x, y, active, radius) {
   const style = pawnStyles[pawn.id];
+  const eliminated = pawn.seat !== null && state.eliminated?.includes(pawn.seat);
   const description = `${pawn.name}, ${pawnController(pawn, state)}, ${boardLocation(pawn.location)}`
-    + (active ? (state.waiting_for_turn ? ", turn under review" : ", current turn") : "");
+    + (active ? (state.waiting_for_turn ? ", turn under review" : ", current turn") : "")
+    + (eliminated ? ", eliminated" : "");
   const marker = svgElement("g", { role: "img", "aria-label": description });
   marker.dataset.pawnId = String(pawn.id);
   marker.append(svgElement("title", {}, description));
   marker.append(svgElement("circle", {
     cx: x, cy: y, r: radius, fill: style.color,
-    class: `board-pawn${active ? " board-pawn-active" : ""}${pawn.seat === null ? " board-pawn-unassigned" : ""}`,
+    class: `board-pawn${active ? " board-pawn-active" : ""}${pawn.seat === null ? " board-pawn-unassigned" : ""}${eliminated ? " board-pawn-eliminated" : ""}`,
   }));
+  if (eliminated) {
+    marker.append(svgElement("path", {
+      d: `M${x - radius * .55} ${y - radius * .55}L${x + radius * .55} ${y + radius * .55}M${x + radius * .55} ${y - radius * .55}L${x - radius * .55} ${y + radius * .55}`,
+      class: "board-pawn-eliminated-mark", "aria-hidden": "true",
+    }));
+  }
   marker.append(svgElement("text", {
     x, y: y + .09, fill: style.ink, class: "board-pawn-text", "aria-hidden": "true",
   }, pawn.seat === null ? style.label : `P${pawn.seat + 1}`));
@@ -1446,7 +1454,7 @@ function renderBoard(state) {
   lastBoardMoment = { replay: Boolean(state.is_replay), position: moment };
   const turnFocus = state.notebook_focus?.turn ?? null;
   const key = JSON.stringify([board, state.legal, state.to_move, state.human_player, state.is_over,
-    state.limit_reached, state.waiting_for_turn, turnFocus]);
+    state.limit_reached, state.waiting_for_turn, turnFocus, state.eliminated]);
   if (key === lastBoardState) return;
   lastBoardState = key;
   const activeElement = document.activeElement;
@@ -1573,6 +1581,8 @@ function renderBoard(state) {
   for (const pawn of board.suspects) {
     const item = document.createElement("span");
     item.className = "board-legend-item";
+    const eliminated = pawn.seat !== null && state.eliminated?.includes(pawn.seat);
+    if (eliminated) item.classList.add("board-player-eliminated");
     const chip = document.createElement("span");
     chip.className = `pawn-chip${pawn.seat === null ? " pawn-chip-unassigned" : ""}`;
     chip.style.backgroundColor = pawnStyles[pawn.id].color;
@@ -1584,6 +1594,12 @@ function renderBoard(state) {
     label.append(name, document.createTextNode(
       ` · ${pawnController(pawn, state)} · ${boardLocation(pawn.location)}`
     ));
+    if (eliminated) {
+      const status = document.createElement("span");
+      status.className = "board-player-status";
+      status.textContent = " · Eliminated";
+      label.append(status);
+    }
     item.append(chip, label);
     legend.append(item);
   }
@@ -2360,12 +2376,12 @@ function renderNotebook(state) {
   const matrix = notebookDisplayMatrix(state);
   updateClauseEntryControls(state);
   const fingerprint = JSON.stringify([
-    state.notebook_mode, state.num_players, state.hand_sizes, matrix, state.notebook_clauses,
+    state.notebook_mode, state.num_players, state.hand_sizes, state.eliminated, matrix, state.notebook_clauses,
     state.notebook_focus, responses, selectedClause, clauseDraft,
   ]);
   if (fingerprint === lastNotebookFingerprint) return;
   const structure = JSON.stringify([
-    state.notebook_mode, state.num_players, state.hand_sizes,
+    state.notebook_mode, state.num_players, state.hand_sizes, state.eliminated,
     matrix.map(({ marks, ...card }) => card), state.notebook_clauses,
     state.notebook_focus, responses, Boolean(clauseDraft),
   ]);
@@ -2424,11 +2440,14 @@ function renderNotebook(state) {
     const th = document.createElement("th");
     th.scope = "col";
     th.dataset.notebookSeat = String(seat);
-    th.textContent = `P${seat + 1} (${state.hand_sizes[seat]})`;
+    const eliminated = state.eliminated?.includes(seat);
+    th.classList.toggle("notebook-player-eliminated", eliminated);
+    th.textContent = `P${seat + 1} (${state.hand_sizes[seat]})${eliminated ? " · Eliminated" : ""}`;
     const columnRoles = notebookColumnRoles(seat, focus, responses);
     for (const [className] of columnRoles) th.classList.add(className);
     const roles = columnRoles.map(([, label]) => label);
     th.title = `Player ${seat + 1}: ${state.hand_sizes[seat]} cards`
+      + (eliminated ? "; eliminated" : "")
       + (roles.length ? `; ${roles.join(", ")}` : "");
     th.setAttribute("aria-label", th.title);
     heading.append(th);

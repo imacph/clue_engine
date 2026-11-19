@@ -106,12 +106,14 @@ def test_notebook_focus_tracks_accusations_and_game_completion(client, monkeypat
     monkeypatch.setattr("clue_engine.webapp.create_game", scripted)
     token = csrf_token(client)
     initial = post(client, token, "/api/game", {"players": 4, "seat": 0, "progress": "step"})
+    assert initial.get_json()["eliminated"] == []
     assert initial.get_json()["notebook_focus"] == {
         "turn": 0, "actor": 0, "kind": None, "cards": [], "shown": None,
     }
     wrong = post(client, token, "/api/action", {
         "action": "accuse", "suspect_id": 1, "weapon_id": 6, "room_id": 12, "confirmed": True,
     }).get_json()
+    assert wrong["eliminated"] == [0]
     assert wrong["notebook_focus"] == {
         "turn": 1, "actor": 1, "kind": "accuse", "cards": [1, 6, 12], "shown": None,
     }
