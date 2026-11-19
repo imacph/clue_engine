@@ -51,6 +51,7 @@ let hideOwnNegativeMarkers = true;
 let cardMarkerVisibility = { positive: true, negative: false, unknown: false, clause: false };
 let roomMarkerVisibility = { positive: true, negative: false, unknown: false, clause: false };
 let cardView = "hand";
+let accusationComposerActive = false;
 let lastActivityKey = null;
 let lastRenderedState = null;
 let lastNotebookFingerprint = null;
@@ -1172,6 +1173,7 @@ function renderState(state) {
     ? `${state.activity.kind}:${state.activity.actor}:${state.activity.suggestion_actor ?? ""}`
       + `:${state.activity.card_id ?? ""}:${state.activity.recipient ?? ""}`
     : null;
+  if (activityKey !== lastActivityKey) accusationComposerActive = false;
   if (state.activity?.kind === "reveal" && activityKey !== lastActivityKey) {
     clearSelectedCards();
   }
@@ -1874,6 +1876,13 @@ function selectedCombination() {
   };
 }
 
+function openAccusationComposer() {
+  if (!currentState?.legal.accuse) return;
+  accusationComposerActive = true;
+  renderHand(currentState);
+  renderCardInteraction(currentState);
+}
+
 function clearSelectedCards() {
   selectedCardIds.suspect = null;
   selectedCardIds.weapon = null;
@@ -2023,7 +2032,9 @@ function renderCardInteraction(state) {
     const revealIsActive = activity?.kind === "reveal"
       && state.events.find((event) => event.kind === "show" || event.kind === "end_turn")?.kind === "show";
     const passIsActive = activity?.kind === "pass";
-    const responseIsActive = revealIsActive || passIsActive;
+    const allPlayersPassed = passIsActive && legal.accuse;
+    const responseIsActive = (revealIsActive || passIsActive)
+      && !accusationComposerActive && !allPlayersPassed;
     if (responseIsActive) {
       $("card-interaction-title").textContent = revealIsActive ? "Latest reveal" : "Latest pass";
       renderActivityMeta(activity);
@@ -2033,8 +2044,12 @@ function renderCardInteraction(state) {
       $("card-interaction-title").textContent = legal.suggest
         ? "Build a suggestion"
         : "Build an accusation";
-      if (activity?.kind === "refute") {
+      if (activity?.kind === "refute" || activity?.kind === "reveal" || passIsActive) {
         renderActivityMeta(activity);
+        if ((activity?.kind === "reveal" && !accusationComposerActive) || passIsActive) {
+          renderMiniCards(focusCards, passIsActive ? activity.cards : [activity.card_id],
+            notes, activity.card_id, animateReveal);
+        }
       }
     }
     for (const type of ["suspect", "weapon", "room"]) {
@@ -2059,7 +2074,8 @@ function renderCardInteraction(state) {
     const hasCombination = Object.values(selectedCardIds).every((id) => id !== null);
     const matchesRoom = legal.suggest_room === null || selectedCardIds.room === legal.suggest_room;
     $("card-suggest-button").hidden = !legal.suggest || (responseIsActive && !hasCombination);
-    $("card-accuse-button").hidden = !legal.accuse || (responseIsActive && !hasCombination);
+    $("card-accuse-menu-button").hidden = !responseIsActive || !legal.accuse;
+    $("card-accuse-button").hidden = !legal.accuse || responseIsActive;
     $("card-suggest-button").disabled = !hasCombination || !matchesRoom;
     $("card-accuse-button").disabled = !hasCombination;
     $("use-room-button").hidden = !legal.suggest || legal.suggest_room === null || matchesRoom;
@@ -2079,6 +2095,7 @@ function renderCardInteraction(state) {
   }
 
   $("card-suggest-button").hidden = true;
+  $("card-accuse-menu-button").hidden = true;
   $("card-accuse-button").hidden = true;
   $("card-suggest-button").disabled = true;
   $("card-accuse-button").disabled = true;
@@ -2947,6 +2964,7 @@ function renderActions(state) {
   $("pass-button").disabled = !legal.pass;
   $("card-action-buttons").hidden = [
     "card-suggest-button",
+    "card-accuse-menu-button",
     "card-accuse-button",
     "pass-button",
     "use-room-button",
@@ -2968,7 +2986,10 @@ async function submitAction(action) {
     });
     if (version !== requestVersion || !currentState) return;
     acceptState(state);
-    if (["reveal", "end_turn", "pass", "accuse"].includes(action.action)) clearSelectedCards();
+    if (["suggest", "reveal", "end_turn", "pass", "accuse"].includes(action.action)) {
+      clearSelectedCards();
+      accusationComposerActive = false;
+    }
     renderState(state);
     if (focusBoardAfterRoll && state.legal.moves.length
       && (document.activeElement === $("board-roll-button") || document.activeElement === document.body)) {
@@ -4000,6 +4021,10 @@ $("notebook").addEventListener("keydown", (event) => {
 });
 $("card-suggest-button").addEventListener("click", () => {
   submitAction({ action: "suggest", ...selectedCombination() });
+});
+$("card-accuse-menu-button").addEventListener("click", () => {
+  if (submitting || advancing || !currentState?.legal.accuse) return;
+  openAccusationComposer();
 });
 $("card-accuse-button").addEventListener("click", async () => {
   if (submitting || advancing || !currentState?.legal.accuse) return;

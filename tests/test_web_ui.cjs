@@ -592,7 +592,7 @@ test("passes remain understandable for a human responder and after an unanswered
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     response: { kind: "Pass", actor: "Player 2 · suggestion P3",
       cards: 3 },
-    finalPass: { title: "Latest pass", passes: "Passed: P2", cards: 3 },
+    finalPass: { title: "Build an accusation", passes: "Passed: P2", cards: 3 },
     review: "Passed: P2", nextTurn: "",
   });
 });
@@ -3031,7 +3031,7 @@ test("a previous-turn reveal does not hide the card-only suggestion builder", ()
   );
 });
 
-test("a reveal made in the current turn stays visible", () => {
+test("the reveal screen offers an accusation menu before showing the composer", () => {
   const ui = frontend();
   ui.render(state({
     events: [{ kind: "show" }, { kind: "refute" }, { kind: "suggest" }, { kind: "end_turn" }],
@@ -3042,10 +3042,36 @@ test("a reveal made in the current turn stays visible", () => {
   }));
   assert.equal(ui.element("card-interaction-title").textContent, "Latest reveal");
   assert.equal(ui.element("focus-cards").children[0].textContent, "Dagger");
+  assert.equal(ui.element("card-accuse-menu-button").hidden, false);
   assert.equal(ui.element("card-accuse-button").hidden, true);
-  ui.select(0, 7, 12);
+  ui.evaluate("currentState = state; openAccusationComposer()");
+  assert.equal(ui.element("card-interaction-title").textContent, "Build an accusation");
+  assert.equal(ui.element("focus-cards").children.length, 0);
+  assert.equal(ui.element("card-accuse-menu-button").hidden, true);
   assert.equal(ui.element("card-accuse-button").hidden, false);
+  assert.equal(ui.element("card-accuse-button").disabled, true);
+  ui.select(0, 7, 12);
   assert.equal(ui.element("card-accuse-button").disabled, false);
+});
+
+test("all players passing opens the accusation composer immediately", () => {
+  const ui = frontend();
+  ui.render(state({
+    num_players: 4,
+    events: [
+      { kind: "pass", actor: 3 }, { kind: "pass", actor: 2 },
+      { kind: "pass", actor: 1 }, { kind: "suggest", actor: 0 },
+    ],
+    activity: { kind: "pass", actor: 3, suggestion_actor: 0, cards: [0, 7, 12] },
+    legal: {
+      reveals: [], pass: false, roll: false, passage: false, moves: [],
+      suggest: false, accuse: true, suggest_room: null,
+    },
+  }));
+  assert.equal(ui.element("card-interaction-title").textContent, "Build an accusation");
+  assert.equal(ui.element("card-accuse-menu-button").hidden, true);
+  assert.equal(ui.element("card-accuse-button").hidden, false);
+  assert.equal(ui.element("card-accuse-button").disabled, true);
 });
 
 test("the previous reveal remains visible while waiting for the next turn", () => {
