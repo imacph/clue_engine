@@ -64,6 +64,7 @@ from ..replay import Replay, decode_replay, encode_replay, replay_from_batch_tra
 from ..session import (
     DebugInfo,
     GameSession,
+    SessionSnapshot,
     completed_turns,
     create_board_game,
     create_game,
@@ -115,6 +116,15 @@ class WebBatch:
     distributions: Distributions = field(default_factory=Distributions)
     observations: list[GameResult] = field(default_factory=list)
     trace_directory: tempfile.TemporaryDirectory[str] | None = None
+
+
+def _suggestion_review_due(before: SessionSnapshot, after: SessionSnapshot) -> bool:
+    return (
+        before.to_move is not None
+        and before.to_move != before.turn_player
+        and after.to_move is not None
+        and after.to_move == after.turn_player
+    )
 
 
 def _seat_outcomes(
@@ -581,16 +591,19 @@ def _serialize_state(
     review_completed_turn = (
         game.waiting_for_turn and replay_snapshot is None and not game.abandoned
         and not snapshot.is_over and not snapshot.limit_reached
+        and bool(activity_events) and activity_events[-1].kind is EventKind.END_TURN
     )
     if review_completed_turn:
-        if not activity_events or activity_events[-1].kind is not EventKind.END_TURN:
-            raise ValueError("Turn confirmation requires a completed turn.")
         focus_turn = activity_events[-1].actor
         focus_actor = focus_turn
         focus_events = activity_events[:-1]
     else:
         focus_turn = snapshot.turn_player
-        focus_actor = snapshot.to_move
+        focus_actor = (
+            snapshot.turn_player
+            if game.waiting_for_turn and not snapshot.is_over and not snapshot.limit_reached
+            else snapshot.to_move
+        )
         focus_events = activity_events
     if review_completed_turn and focus_events and focus_events[-1].kind is EventKind.END_TURN:
         focus_event, focus_show = None, None
@@ -1525,12 +1538,16 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                 return jsonify(error="This game has ended."), 409
             if game.waiting_for_turn:
                 return jsonify(error="Select Next turn before taking an action."), 409
+            before = game.game.snapshot()
             try:
                 game.game.submit(action)
             except IllegalActionError as exc:
                 return jsonify(error=str(exc)), 409
             except ValueError as exc:
                 return jsonify(error=str(exc)), 409
+            after = game.game.snapshot()
+            if game.confirm_turns and _suggestion_review_due(before, after):
+                game.waiting_for_turn = True
             try:
                 return jsonify(_serialize_state(game, request.args))
             except ValueError as exc:
@@ -1570,14 +1587,13 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             except ValueError as exc:
                 return jsonify(error=str(exc)), 409
             after = game.game.snapshot()
-            if (
-                game.confirm_turns and not after.is_over and not after.limit_reached
-                and any(
+            if game.confirm_turns and not after.is_over and not after.limit_reached:
+                completed_turn = any(
                     event.kind is EventKind.END_TURN
                     for event in after.events[len(snapshot.events):]
                 )
-            ):
-                game.waiting_for_turn = True
+                if completed_turn or _suggestion_review_due(snapshot, after):
+                    game.waiting_for_turn = True
             try:
                 return jsonify(_serialize_state(game, request.args))
             except ValueError as exc:

@@ -47,7 +47,7 @@ def card_engine(players=4):
 
 
 @pytest.mark.parametrize("progress", ["auto", "turn", "step"])
-def test_play_waits_after_bot_turn_but_not_between_responders(monkeypatch, progress):
+def test_play_waits_for_suggestion_review_before_bot_turn_end(monkeypatch, progress):
     def create_scripted_game(num_players, seed, policy_name):
         return card_engine(), (
             ScriptedPolicy(),
@@ -68,7 +68,15 @@ def test_play_waits_after_bot_turn_but_not_between_responders(monkeypatch, progr
     state = post(client, token, "/api/advance", step).get_json()
     assert state["to_move"] == 2 and state["waiting_for_turn"] is False
     state = post(client, token, "/api/advance", step).get_json()
-    assert state["to_move"] == 1 and state["waiting_for_turn"] is False
+    assert state["to_move"] == 1 and state["waiting_for_turn"] is True
+    assert state["notebook_focus"]["turn"] == 1
+    assert state["notebook_focus"]["actor"] == 1
+    assert state["notebook_focus"]["cards"] == [0, 8, 13]
+    assert state["activity"] == {
+        "kind": "refute", "actor": 2, "suggestion_actor": 1, "cards": [0, 8, 13],
+    }
+    state = post(client, token, "/api/next-turn").get_json()
+    assert state["waiting_for_turn"] is False
     state = post(client, token, "/api/advance", step).get_json()
     assert state["to_move"] == 2 and state["waiting_for_turn"] is True
     assert state["notebook_focus"]["turn"] == 1
@@ -164,8 +172,13 @@ def test_completed_turn_focus_preserves_only_visible_reveals(monkeypatch):
     post(client, token, "/api/game", {
         "mode": "spectate", "players": 4, "progress": "turn",
     })
-    for _ in range(3):
-        state = post(client, token, "/api/advance").get_json()
+    post(client, token, "/api/advance")
+    response_review = post(client, token, "/api/advance").get_json()
+    assert response_review["waiting_for_turn"]
+    assert response_review["notebook_focus"]["cards"] == [0, 8, 13]
+    assert response_review["notebook_focus"]["shown"] == {"card": 8, "holder": 1}
+    post(client, token, "/api/next-turn")
+    state = post(client, token, "/api/advance").get_json()
     assert state["waiting_for_turn"]
     assert state["notebook_focus"]["turn"] == 0
     assert state["notebook_focus"]["cards"] == [0, 8, 13]
