@@ -2046,7 +2046,7 @@ function renderCardInteraction(state) {
         : "Build an accusation";
       if (activity?.kind === "refute" || activity?.kind === "reveal" || passIsActive) {
         renderActivityMeta(activity);
-        if (activity?.kind === "reveal" || passIsActive) {
+        if ((activity?.kind === "reveal" && !accusationComposerActive) || passIsActive) {
           renderMiniCards(focusCards, passIsActive ? activity.cards : [activity.card_id],
             notes, activity.card_id, animateReveal);
         }

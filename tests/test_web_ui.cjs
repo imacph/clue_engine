@@ -3044,10 +3044,9 @@ test("the reveal screen offers an accusation menu before showing the composer", 
   assert.equal(ui.element("focus-cards").children[0].textContent, "Dagger");
   assert.equal(ui.element("card-accuse-menu-button").hidden, false);
   assert.equal(ui.element("card-accuse-button").hidden, true);
-  ui.evaluate("state.events.unshift({ kind: 'end_turn', actor: 0 }); currentState = state");
   ui.evaluate("currentState = state; openAccusationComposer()");
   assert.equal(ui.element("card-interaction-title").textContent, "Build an accusation");
-  assert.equal(ui.element("focus-cards").children[0].textContent, "Dagger");
+  assert.equal(ui.element("focus-cards").children.length, 0);
   assert.equal(ui.element("card-accuse-menu-button").hidden, true);
   assert.equal(ui.element("card-accuse-button").hidden, false);
   assert.equal(ui.element("card-accuse-button").disabled, true);
