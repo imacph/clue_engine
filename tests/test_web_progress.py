@@ -173,7 +173,7 @@ def test_reviewed_human_suggestion_turn_ends_without_another_review_pause(monkey
     assert state["to_move"] == 1 and state["waiting_for_turn"] is False
 
 
-def test_completed_turn_focus_preserves_only_visible_reveals(monkeypatch):
+def test_suggestion_review_keeps_reveal_highlight_until_turn_ends(monkeypatch):
     monkeypatch.setattr("clue_engine.webapp.create_game", lambda *args: (
         card_engine(), (
             ScriptedPolicy(Suggest(Combination(0, 8, 13)), EndTurn()),
