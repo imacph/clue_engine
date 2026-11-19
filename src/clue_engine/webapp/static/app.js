@@ -2059,7 +2059,7 @@ function renderCardInteraction(state) {
     const hasCombination = Object.values(selectedCardIds).every((id) => id !== null);
     const matchesRoom = legal.suggest_room === null || selectedCardIds.room === legal.suggest_room;
     $("card-suggest-button").hidden = !legal.suggest || (responseIsActive && !hasCombination);
-    $("card-accuse-button").hidden = !legal.accuse || (responseIsActive && !hasCombination);
+    $("card-accuse-button").hidden = !legal.accuse;
     $("card-suggest-button").disabled = !hasCombination || !matchesRoom;
     $("card-accuse-button").disabled = !hasCombination;
     $("use-room-button").hidden = !legal.suggest || legal.suggest_room === null || matchesRoom;

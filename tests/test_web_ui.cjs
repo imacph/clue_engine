@@ -3031,7 +3031,7 @@ test("a previous-turn reveal does not hide the card-only suggestion builder", ()
   );
 });
 
-test("a reveal made in the current turn stays visible", () => {
+test("accusation remains available after a suggestion reveal", () => {
   const ui = frontend();
   ui.render(state({
     events: [{ kind: "show" }, { kind: "refute" }, { kind: "suggest" }, { kind: "end_turn" }],
@@ -3042,7 +3042,8 @@ test("a reveal made in the current turn stays visible", () => {
   }));
   assert.equal(ui.element("card-interaction-title").textContent, "Latest reveal");
   assert.equal(ui.element("focus-cards").children[0].textContent, "Dagger");
-  assert.equal(ui.element("card-accuse-button").hidden, true);
+  assert.equal(ui.element("card-accuse-button").hidden, false);
+  assert.equal(ui.element("card-accuse-button").disabled, true);
   ui.select(0, 7, 12);
   assert.equal(ui.element("card-accuse-button").hidden, false);
   assert.equal(ui.element("card-accuse-button").disabled, false);
