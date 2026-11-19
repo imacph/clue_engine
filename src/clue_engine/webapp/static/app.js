@@ -2044,9 +2044,9 @@ function renderCardInteraction(state) {
       $("card-interaction-title").textContent = legal.suggest
         ? "Build a suggestion"
         : "Build an accusation";
-      if (activity?.kind === "refute" || revealIsActive || passIsActive) {
+      if (activity?.kind === "refute" || activity?.kind === "reveal" || passIsActive) {
         renderActivityMeta(activity);
-        if (revealIsActive || passIsActive) {
+        if (activity?.kind === "reveal" || passIsActive) {
           renderMiniCards(focusCards, passIsActive ? activity.cards : [activity.card_id],
             notes, activity.card_id, animateReveal);
         }
