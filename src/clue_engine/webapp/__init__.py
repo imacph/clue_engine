@@ -652,6 +652,10 @@ def _serialize_state(
         "human_player": snapshot.human_player,
         "selected_player": selected_player,
         "to_move": snapshot.to_move,
+        "eliminated_players": sorted(
+            event.actor for index, event in enumerate(snapshot.events)
+            if is_incorrect_accusation(snapshot.events, index)
+        ),
         "is_over": snapshot.is_over or game.abandoned,
         "winner": snapshot.winner,
         "steps": snapshot.steps,

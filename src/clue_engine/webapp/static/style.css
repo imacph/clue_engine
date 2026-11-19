@@ -506,6 +506,7 @@ button.playing-card:focus-visible { outline: 2px solid var(--focus); outline-off
 .notebook-table th.notebook-turn { box-shadow: inset 0 3px var(--blue); }
 .notebook-table th.notebook-actor { box-shadow: inset 0 -3px var(--notebook-actor-accent); }
 .notebook-table th.notebook-turn.notebook-actor { box-shadow: inset 0 3px var(--blue), inset 0 -3px var(--notebook-actor-accent); }
+.notebook-table th.notebook-player-eliminated { color: var(--danger-ink); }
 .notebook-table tr.notebook-card-focus > td.mark-held, .notebook-table td.notebook-turn.mark-held, .notebook-table td.notebook-actor.mark-held, .notebook-table td.notebook-pass.mark-held, .notebook-table td.notebook-refute.mark-held { color: var(--notebook-focus-held); }
 .notebook-table tr.notebook-card-focus > td.mark-not-held, .notebook-table td.notebook-turn.mark-not-held, .notebook-table td.notebook-actor.mark-not-held, .notebook-table td.notebook-pass.mark-not-held, .notebook-table td.notebook-refute.mark-not-held { color: var(--notebook-focus-negative); }
 .notebook-table tr.notebook-card-focus > td.mark-unknown, .notebook-table td.notebook-turn.mark-unknown, .notebook-table td.notebook-actor.mark-unknown, .notebook-table td.notebook-pass.mark-unknown, .notebook-table td.notebook-refute.mark-unknown { color: var(--notebook-focus-unknown); }
@@ -862,7 +863,9 @@ body.game-active .insights-column { grid-column: 2; grid-row: 2; }
 .board-pawn { stroke: #fff; stroke-width: .07; }
 .board-pawn-active { stroke: #ffca49; stroke-width: .16; }
 .board-pawn-unassigned { stroke-dasharray: .13 .09; }
+.board-pawn-eliminated { filter: grayscale(1); opacity: .58; }
 .board-pawn-text { font-size: .25px; font-weight: 850; pointer-events: none; text-anchor: middle; }
+.board-pawn-eliminated-mark { fill: #fff; font-size: .25px; font-weight: 900; paint-order: stroke; stroke: #222; stroke-width: .07px; text-anchor: middle; }
 .board-map-key { color: var(--muted); font-size: .72rem; line-height: 1.3; margin: 7px 0 0; }
 .board-legend { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 11px; }
 .board-legend-item { align-items: center; color: var(--muted); display: inline-flex; font-size: .72rem; gap: 5px; line-height: 1.25; }
