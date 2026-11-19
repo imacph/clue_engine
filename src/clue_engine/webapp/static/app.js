@@ -1202,7 +1202,7 @@ function renderState(state) {
   $("pause-button").hidden = replayMode;
   const turnButton = $("turn-button");
   turnButton.hidden = replayMode || (!state.waiting_for_turn && !state.legal.end_turn);
-  turnButton.textContent = state.waiting_for_turn ? "Next turn" : "End turn";
+  turnButton.textContent = state.waiting_for_turn && !state.legal.end_turn ? "Next turn" : "End turn";
   $("next-button").hidden = replayMode || !(state.paused && canAdvanceBot(state));
   $("viewer-select").value = String(state.selected_player);
   $("viewer-field").hidden = state.mode !== "spectate";
@@ -1291,6 +1291,9 @@ function directionalMoves(state, dx, dy) {
 function boardInstruction(state) {
   const board = state.board;
   if (state.is_over || state.limit_reached) return displayPlayerText(state.status);
+  if (state.waiting_for_turn && state.legal.end_turn) {
+    return "Review the suggestion, then accuse or end your turn.";
+  }
   if (state.waiting_for_turn) return "Review the completed turn, then select Next turn.";
   if (state.to_move !== board.turn_player) {
     return state.to_move === state.human_player
@@ -3059,8 +3062,8 @@ async function nextTurn() {
 }
 
 function useTurnButton() {
-  if (currentState?.waiting_for_turn) nextTurn();
-  else if (currentState?.legal.end_turn) submitAction({ action: "end_turn" });
+  if (currentState?.legal.end_turn) submitAction({ action: "end_turn" });
+  else if (currentState?.waiting_for_turn) nextTurn();
 }
 
 function newGame() {

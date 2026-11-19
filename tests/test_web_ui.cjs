@@ -2924,8 +2924,10 @@ test("one turn button changes action and stays hidden when unavailable", () => {
   const button = ui.element("turn-button");
   assert.equal(button.hidden, false);
   assert.equal(button.textContent, "End turn");
-  ui.render(state({ waiting_for_turn: true, legal: { ...legal, end_turn: false } }));
+  ui.render(state({ waiting_for_turn: true, legal }));
   assert.equal(button.hidden, false);
+  assert.equal(button.textContent, "End turn");
+  ui.render(state({ waiting_for_turn: true, legal: { ...legal, end_turn: false } }));
   assert.equal(button.textContent, "Next turn");
   ui.render(state({ legal: { ...legal, end_turn: false } }));
   assert.equal(button.hidden, true);
@@ -2939,13 +2941,15 @@ test("turn button submits the appropriate action for each state", () => {
     submitAction = (action) => calls.push(action.action);
     currentState = { waiting_for_turn: false, legal: { end_turn: true } };
     useTurnButton();
+    currentState = { waiting_for_turn: true, legal: { end_turn: true } };
+    useTurnButton();
     currentState = { waiting_for_turn: true, legal: { end_turn: false } };
     useTurnButton();
     currentState = { waiting_for_turn: false, legal: { end_turn: false } };
     useTurnButton();
     return calls;
   })()`);
-  assert.deepEqual(Array.from(calls), ["end_turn", "next"]);
+  assert.deepEqual(Array.from(calls), ["end_turn", "end_turn", "next"]);
 });
 
 test("a previous-turn reveal does not hide a new room suggestion", () => {
