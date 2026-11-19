@@ -151,7 +151,8 @@ def test_all_pass_suggestion_pauses_before_suggester_can_accuse(monkeypatch):
     assert post(client, token, "/api/advance").get_json()["is_over"] is True
 
 
-def test_reviewed_human_suggestion_turn_ends_without_another_review_pause(monkeypatch):
+@pytest.mark.parametrize("final_action", ["end_turn", "accuse"])
+def test_reviewed_human_suggestion_allows_action_without_next_turn(monkeypatch, final_action):
     monkeypatch.setattr("clue_engine.webapp.create_game", lambda *args: (
         card_engine(),
         (ScriptedPolicy(), ScriptedPolicy(Pass()), ScriptedPolicy(Pass()), ScriptedPolicy(Pass())),
@@ -166,11 +167,16 @@ def test_reviewed_human_suggestion_turn_ends_without_another_review_pause(monkey
         assert state["to_move"] == next_player and state["waiting_for_turn"] is False
     state = post(client, token, "/api/advance").get_json()
     assert state["to_move"] == 0 and state["waiting_for_turn"] is True
-    state = post(client, token, "/api/next-turn").get_json()
-    assert state["waiting_for_turn"] is False
     assert state["legal"]["accuse"] is True and state["legal"]["end_turn"] is True
-    state = post(client, token, "/api/action", {"action": "end_turn"}).get_json()
-    assert state["to_move"] == 1 and state["waiting_for_turn"] is False
+    if final_action == "end_turn":
+        state = post(client, token, "/api/action", {"action": final_action}).get_json()
+        assert state["to_move"] == 1 and state["waiting_for_turn"] is False
+    else:
+        state = post(client, token, "/api/action", {
+            "action": final_action, "suspect_id": 0, "weapon_id": 6,
+            "room_id": 12, "confirmed": True,
+        }).get_json()
+        assert state["is_over"] and state["winner"] == 0
 
 
 def test_suggestion_review_keeps_reveal_highlight_until_turn_ends(monkeypatch):

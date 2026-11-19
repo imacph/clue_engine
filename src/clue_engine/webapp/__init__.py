@@ -559,11 +559,15 @@ def _serialize_state(
         if knowledge is not None else
         "Automatic clause deductions are disabled in manual notebook mode."
     )
-
     legal = snapshot.legal_actions
+    review_action_allowed = (
+        game.waiting_for_turn and not snapshot.is_over and not snapshot.limit_reached
+        and game.reviewed_turn == snapshot.turn_player
+        and snapshot.to_move == snapshot.turn_player == snapshot.human_player
+    )
     can_act = (
         game.mode == "play" and snapshot.to_move == snapshot.human_player
-        and not game.waiting_for_turn and not game.abandoned
+        and (not game.waiting_for_turn or review_action_allowed) and not game.abandoned
     )
     reveals = [
         {"id": action.card_id, "name": next(
@@ -646,7 +650,11 @@ def _serialize_state(
     elif snapshot.limit_reached:
         status = f"Game stopped at the {snapshot.max_steps}-action limit."
     elif game.waiting_for_turn:
-        status = f"Player {snapshot.turn_player} is next. Select Next turn to continue."
+        status = (
+            "Review the suggestion, then accuse or end your turn."
+            if review_action_allowed else
+            f"Player {snapshot.turn_player} is next. Select Next turn to continue."
+        )
     else:
         status = f"Player {snapshot.to_move} to act."
 
@@ -1537,9 +1545,14 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
         with game.lock:
             if game.abandoned:
                 return jsonify(error="This game has ended."), 409
-            if game.waiting_for_turn:
-                return jsonify(error="Select Next turn before taking an action."), 409
             before = game.game.snapshot()
+            review_action_allowed = (
+                game.waiting_for_turn and isinstance(action, (Accuse, EndTurn))
+                and game.reviewed_turn == before.turn_player
+                and before.to_move == before.turn_player == before.human_player
+            )
+            if game.waiting_for_turn and not review_action_allowed:
+                return jsonify(error="Select Next turn before taking an action."), 409
             try:
                 game.game.submit(action)
             except IllegalActionError as exc:
@@ -1547,11 +1560,13 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             except ValueError as exc:
                 return jsonify(error=str(exc)), 409
             after = game.game.snapshot()
+            if review_action_allowed:
+                game.waiting_for_turn = False
             suggestion_review = game.confirm_turns and _suggestion_review_due(before, after)
             if suggestion_review:
                 game.waiting_for_turn = True
                 game.reviewed_turn = after.turn_player
-            elif before.turn_player != after.turn_player:
+            elif before.turn_player != after.turn_player or after.is_over:
                 game.reviewed_turn = None
             try:
                 return jsonify(_serialize_state(game, request.args))
