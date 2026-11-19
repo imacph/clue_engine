@@ -370,6 +370,42 @@ test("active pawn gets an accessible turn label without extra circle overlays", 
   assert.equal(result.radius, "0.42");
 });
 
+test("eliminated pawn has a visible and accessible status", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    document.createElementNS = (_, name) => document.createElement(name);
+    const group = document.createElement("g");
+    const pawn = { id: 0, name: "Miss Scarlet", seat: 0, location: { kind: "hallway", x: 1, y: 2 } };
+    appendPawn(group, pawn, { human_player: 0, eliminated_players: [0] }, 1.5, 2.5, false, .42);
+    const marker = group.children[0];
+    return {
+      label: marker["aria-label"],
+      classes: marker.children.map((child) => child.class),
+      badge: marker.children.at(-1).textContent,
+    };
+  })()`);
+  assert.match(result.label, /eliminated/);
+  assert.ok(result.classes.includes("board-pawn board-pawn-eliminated"));
+  assert.equal(result.badge, "×");
+});
+
+test("player filters identify eliminated seats without changing their values", () => {
+  const ui = frontend();
+  const result = ui.evaluate(`(() => {
+    $("viewer-select").append(option(0, "Player 1"), option(1, "Player 2"));
+    $("clause-actor").append(option("all", "All players"), option(0, "Player 1"), option(1, "Player 2"));
+    updateEliminatedPlayerIndicators({ eliminated_players: [1] });
+    return {
+      viewer: $("viewer-select").children.map((item) => [item.value, item.textContent]),
+      clause: $("clause-actor").children.map((item) => [item.value, item.textContent]),
+    };
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    viewer: [[0, "Player 1"], [1, "Player 2 (eliminated)"]],
+    clause: [["all", "All players"], [0, "Player 1"], [1, "Player 2 (eliminated)"]],
+  });
+});
+
 test("board passage pairs have matching letters and no markers when passages are disabled", () => {
   const ui = frontend();
   const result = ui.evaluate(`(() => {
@@ -2808,6 +2844,20 @@ test("notebook highlights turn, actor, cards and visible reveal without disturbi
 test("notebook actor highlighting uses inset decoration instead of changing borders", () => {
   assert.match(stylesheet, /\.notebook-table th\.notebook-actor\s*\{\s*box-shadow:/);
   assert.match(stylesheet, /\.notebook-table th\.notebook-turn\.notebook-actor\s*\{\s*box-shadow:/);
+});
+
+test("notebook headers mark eliminated players", () => {
+  const ui = frontend({ notebook: true });
+  const state = {
+    notebook_mode: "automatic", num_players: 2, hand_sizes: [5, 4], eliminated_players: [1],
+    matrix: [], notebook_clauses: [], notebook_focus: { cards: [] },
+  };
+  ui.renderNotebook(state);
+  const headers = ui.element("notebook").children[0].children[0].children[0].children;
+  assert.equal(headers[1].textContent, "P1 (5)");
+  assert.equal(headers[2].textContent, "P2 OUT (4)");
+  assert.ok(headers[2].classList.contains("notebook-player-eliminated"));
+  assert.match(headers[2]["aria-label"], /eliminated/);
 });
 
 test("notebook highlights every completed response and clears it at the right boundary", () => {
