@@ -75,36 +75,25 @@ def test_play_waits_for_suggestion_review_before_bot_turn_end(monkeypatch, progr
     assert state["activity"] == {
         "kind": "refute", "actor": 2, "suggestion_actor": 1, "cards": [0, 8, 13],
     }
-    state = post(client, token, "/api/next-turn").get_json()
-    assert state["waiting_for_turn"] is False
-    state = post(client, token, "/api/advance", step).get_json()
-    assert state["to_move"] == 2 and state["waiting_for_turn"] is True
-    assert state["notebook_focus"]["turn"] == 1
-    assert state["notebook_focus"]["actor"] == 1
-    assert state["notebook_focus"]["cards"] == [0, 8, 13]
-    assert state["notebook_focus"]["shown"] is None
-    assert state["activity"] == {
-        "kind": "refute", "actor": 2, "suggestion_actor": 1, "cards": [0, 8, 13],
-    }
-    assert all(event["kind"] != "show" for event in state["events"])
-    assert client.get("/api/state").get_json()["waiting_for_turn"] is True
     edit = client.put(
         "/api/notebook",
         json={"card_id": 8, "holder": 1, "mark": "+"},
         headers={"X-CSRF-Token": token},
     )
     assert edit.status_code == 200 and edit.get_json()["waiting_for_turn"] is True
+    assert client.get("/api/state").get_json()["waiting_for_turn"] is True
     assert post(client, token, "/api/advance", step).status_code == 409
     assert post(client, token, "/api/action", {"action": "end_turn"}).status_code == 409
     assert client.post("/api/next-turn", json={}).status_code == 403
     assert post(client, token, "/api/next-turn?clause_actor=invalid").status_code == 400
     assert client.get("/api/state").get_json()["waiting_for_turn"] is True
-    resumed = post(client, token, "/api/next-turn")
-    assert resumed.status_code == 200
-    assert resumed.get_json()["waiting_for_turn"] is False
-    assert resumed.get_json()["notebook_focus"]["turn"] == 2
-    assert resumed.get_json()["notebook_focus"]["cards"] == []
-    assert resumed.get_json()["steps"] == state["steps"]
+    resumed = post(client, token, "/api/next-turn").get_json()
+    assert resumed["waiting_for_turn"] is False
+    state = post(client, token, "/api/advance", step).get_json()
+    assert state["to_move"] == 2 and state["waiting_for_turn"] is False
+    assert state["notebook_focus"]["turn"] == 1
+    assert state["notebook_focus"]["cards"] == []
+    assert state["steps"] == resumed["steps"] + 1
     assert post(client, token, "/api/next-turn").status_code == 409
 
 
@@ -161,6 +150,28 @@ def test_all_pass_suggestion_pauses_before_suggester_can_accuse(monkeypatch):
     assert post(client, token, "/api/advance").get_json()["is_over"] is True
 
 
+def test_reviewed_human_suggestion_turn_ends_without_another_review_pause(monkeypatch):
+    monkeypatch.setattr("clue_engine.webapp.create_game", lambda *args: (
+        card_engine(),
+        (ScriptedPolicy(), ScriptedPolicy(Pass()), ScriptedPolicy(Pass()), ScriptedPolicy(Pass())),
+    ))
+    client, token = client_and_token()
+    post(client, token, "/api/game", {"players": 4, "seat": 0})
+    post(client, token, "/api/action", {
+        "action": "suggest", "suspect_id": 0, "weapon_id": 6, "room_id": 12,
+    })
+    for responder in (1, 2, 3):
+        state = post(client, token, "/api/advance").get_json()
+        assert state["to_move"] == responder and state["waiting_for_turn"] is False
+    assert state["to_move"] == 0
+    assert state["waiting_for_turn"] is True
+    state = post(client, token, "/api/next-turn").get_json()
+    assert state["waiting_for_turn"] is False
+    assert state["legal"]["accuse"] is True and state["legal"]["end_turn"] is True
+    state = post(client, token, "/api/action", {"action": "end_turn"}).get_json()
+    assert state["to_move"] == 1 and state["waiting_for_turn"] is False
+
+
 def test_completed_turn_focus_preserves_only_visible_reveals(monkeypatch):
     monkeypatch.setattr("clue_engine.webapp.create_game", lambda *args: (
         card_engine(), (
@@ -179,16 +190,10 @@ def test_completed_turn_focus_preserves_only_visible_reveals(monkeypatch):
     assert response_review["notebook_focus"]["shown"] == {"card": 8, "holder": 1}
     post(client, token, "/api/next-turn")
     state = post(client, token, "/api/advance").get_json()
-    assert state["waiting_for_turn"]
+    assert state["waiting_for_turn"] is False
+    assert state["to_move"] == 1
     assert state["notebook_focus"]["turn"] == 0
-    assert state["notebook_focus"]["cards"] == [0, 8, 13]
-    assert state["notebook_focus"]["shown"] == {"card": 8, "holder": 1}
-    other = client.get("/api/state?player=2").get_json()["notebook_focus"]
-    assert other["cards"] == [0, 8, 13]
-    assert other["shown"] is None
-    resumed = post(client, token, "/api/next-turn?player=2").get_json()["notebook_focus"]
-    assert resumed["turn"] == 1
-    assert resumed["cards"] == []
+    assert state["notebook_focus"]["cards"] == []
 
 
 def test_bot_turn_waits_before_human_can_act(monkeypatch):

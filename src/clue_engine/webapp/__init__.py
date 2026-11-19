@@ -85,6 +85,7 @@ class WebGame:
     confirm_turns: bool
     selected_player: int
     waiting_for_turn: bool = False
+    reviewed_turn: int | None = None
     notebook_mode: str = "automatic"
     notebook_marks: dict[tuple[int, int], str] = field(default_factory=dict)
     notebook_clauses: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -1546,8 +1547,12 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
             except ValueError as exc:
                 return jsonify(error=str(exc)), 409
             after = game.game.snapshot()
-            if game.confirm_turns and _suggestion_review_due(before, after):
+            suggestion_review = game.confirm_turns and _suggestion_review_due(before, after)
+            if suggestion_review:
                 game.waiting_for_turn = True
+                game.reviewed_turn = after.turn_player
+            elif before.turn_player != after.turn_player:
+                game.reviewed_turn = None
             try:
                 return jsonify(_serialize_state(game, request.args))
             except ValueError as exc:
@@ -1592,7 +1597,12 @@ def create_app(*, desktop_preferences: DesktopPreferences | None = None) -> Flas
                     event.kind is EventKind.END_TURN
                     for event in after.events[len(snapshot.events):]
                 )
-                if completed_turn or _suggestion_review_due(snapshot, after):
+                suggestion_review = _suggestion_review_due(snapshot, after)
+                if suggestion_review:
+                    game.reviewed_turn = after.turn_player
+                if completed_turn and game.reviewed_turn == snapshot.turn_player:
+                    game.reviewed_turn = None
+                elif completed_turn or suggestion_review:
                     game.waiting_for_turn = True
             try:
                 return jsonify(_serialize_state(game, request.args))
